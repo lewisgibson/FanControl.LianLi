@@ -22,7 +22,7 @@ jobs:
                 shell: bash
         steps:
             - name: Checkout
-              uses: actions/checkout@v6.0.3
+              uses: actions/checkout@v7.0.0
 
             - name: Setup .NET
               uses: actions/setup-dotnet@v5.3.0
@@ -39,7 +39,7 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
-              uses: actions/checkout@v6.0.3
+              uses: actions/checkout@v7.0.0
 
             - name: Setup Node.js
               uses: actions/setup-node@v6.4.0
@@ -53,7 +53,7 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
-              uses: actions/checkout@v6.0.3
+              uses: actions/checkout@v7.0.0
 
             - name: Install actionlint
               run: |
@@ -69,7 +69,7 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
-              uses: actions/checkout@v6.0.3
+              uses: actions/checkout@v7.0.0
 
             - name: Install shellcheck
               run: |
