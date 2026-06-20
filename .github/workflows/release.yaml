@@ -233,7 +233,7 @@ jobs:
             - name: Publish Versioned Release
               # Tag matches the semver baked into the DLL above, so the release page and
               # the binary report the same version.
-              uses: softprops/action-gh-release@v3.0.0
+              uses: softprops/action-gh-release@v3.0.1
               with:
                   tag_name: v${{ steps.vars.outputs.version }}
                   name: v${{ steps.vars.outputs.version }}
