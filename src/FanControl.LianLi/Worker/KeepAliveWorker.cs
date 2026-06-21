@@ -68,8 +68,7 @@ internal sealed class KeepAliveWorker : IDisposable {
 
         try {
             TickCore();
-        }
-        finally {
+        } finally {
             Monitor.Exit(_tickGate);
         }
     }
