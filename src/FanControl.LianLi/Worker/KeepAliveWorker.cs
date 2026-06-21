@@ -46,32 +46,31 @@ internal sealed class KeepAliveWorker : IDisposable {
     }
 
     /// <summary>
-    /// Apply pending targets and poll RPM for every controller. Safe to call
-    /// from the host update hook and the background thread; calls are serialized.
+    /// Apply pending targets and poll RPM for every controller. Blocks until the tick
+    /// completes; used by the background keepalive loop.
     /// </summary>
     public void Tick() {
         lock (_tickGate) {
-            for (int i = 0; i < _controllers.Count; i++) {
-                FanController controller = _controllers[i];
+            TickCore();
+        }
+    }
 
-                try {
-                    controller.ApplyPending();
-                }
-#pragma warning disable CA1031 // resilience: a failed transfer on one device must not stall the others
-                catch (Exception ex) {
-                    _log.Write(string.Format(CultureInfo.InvariantCulture, "apply err C{0}: {1}", i, ex.Message));
-                }
-#pragma warning restore CA1031
+    /// <summary>
+    /// Non-blocking variant of <see cref="Tick"/>: skips the tick if the background
+    /// thread currently holds <c>_tickGate</c>. Used by the host <c>Update()</c> hook so
+    /// a blocked background tick (e.g. a slow HID read after hibernate) does not stall
+    /// the FanControl UI thread.
+    /// </summary>
+    public void TryTick() {
+        if (!Monitor.TryEnter(_tickGate)) {
+            return;
+        }
 
-                try {
-                    controller.PollRpm();
-                }
-#pragma warning disable CA1031 // resilience: see above
-                catch (Exception ex) {
-                    _log.Write(string.Format(CultureInfo.InvariantCulture, "poll err C{0}: {1}", i, ex.Message));
-                }
-#pragma warning restore CA1031
-            }
+        try {
+            TickCore();
+        }
+        finally {
+            Monitor.Exit(_tickGate);
         }
     }
 
@@ -89,19 +88,42 @@ internal sealed class KeepAliveWorker : IDisposable {
 
         bool threadExited = !_started || _thread.Join(JoinTimeoutMs);
 
-        // Dispose controllers under the tick gate so a tick that outran the join
-        // timeout cannot touch a transport while it is being torn down.
-        lock (_tickGate) {
-            for (int i = 0; i < _controllers.Count; i++) {
-                _controllers[i].Dispose();
-            }
-        }
-
-        // Only dispose the signal once the loop thread can no longer wait on it. If
-        // the join timed out the thread may still reference it, so leave it to the
-        // finalizer rather than risk an ObjectDisposedException on the worker thread.
+        // Only dispose controllers (and the stop signal) once the loop thread has
+        // confirmed to have exited. If the join timed out the thread may still hold
+        // _tickGate or reference the signal, so leave those to the finalizer rather
+        // than risk a use-after-dispose on the worker thread.
         if (threadExited) {
+            lock (_tickGate) {
+                for (int i = 0; i < _controllers.Count; i++) {
+                    _controllers[i].Dispose();
+                }
+            }
+
             _stopSignal.Dispose();
+        }
+    }
+
+    private void TickCore() {
+        for (int i = 0; i < _controllers.Count; i++) {
+            FanController controller = _controllers[i];
+
+            try {
+                controller.ApplyPending();
+            }
+#pragma warning disable CA1031 // resilience: a failed transfer on one device must not stall the others
+            catch (Exception ex) {
+                _log.Write(string.Format(CultureInfo.InvariantCulture, "apply err C{0}: {1}", i, ex.Message));
+            }
+#pragma warning restore CA1031
+
+            try {
+                controller.PollRpm();
+            }
+#pragma warning disable CA1031 // resilience: see above
+            catch (Exception ex) {
+                _log.Write(string.Format(CultureInfo.InvariantCulture, "poll err C{0}: {1}", i, ex.Message));
+            }
+#pragma warning restore CA1031
         }
     }
 

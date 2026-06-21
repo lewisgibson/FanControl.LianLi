@@ -26,4 +26,10 @@ internal interface IFanProtocol {
 
     /// <summary>Decode the big-endian RPM for a channel from an input report.</summary>
     float DecodeRpm(byte[] inputReport, int channel);
+
+    /// <summary>
+    /// Encode the feature report that primes the device to return a valid RPM input report,
+    /// or <see langword="null"/> if the device does not require a primer before each read.
+    /// </summary>
+    byte[]? EncodeRpmRequest();
 }

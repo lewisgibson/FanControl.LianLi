@@ -132,4 +132,29 @@ public class ProtocolEncodingTests {
     [InlineData(4)]
     public void EncodeSetSpeed_ThrowsForChannelOutOfRange(int channel)
         => Assert.Throws<ArgumentOutOfRangeException>(() => new SlProtocol().EncodeSetSpeed(channel, 50));
+
+    // ---- EncodeRpmRequest: SlInfinity requires a 65-byte primer; others return null ----
+
+    [Fact]
+    public void EncodeRpmRequest_SlInfinity_Returns65ByteBufferWithPrimer() {
+        byte[]? request = new SlInfinityProtocol().EncodeRpmRequest();
+        Assert.NotNull(request);
+        Assert.Equal(65, request!.Length);
+        Assert.Equal(0xE0, request[0]);
+        Assert.Equal(0x50, request[1]);
+        Assert.Equal(0x00, request[2]);
+        for (int i = 3; i < 65; i++) {
+            Assert.Equal(0, request[i]);
+        }
+    }
+
+    [Theory]
+    [InlineData(typeof(SlProtocol))]
+    [InlineData(typeof(AlProtocol))]
+    [InlineData(typeof(SlV2Protocol))]
+    [InlineData(typeof(AlV2Protocol))]
+    public void EncodeRpmRequest_OtherFamilies_ReturnsNull(Type protocolType) {
+        var protocol = (IFanProtocol)Activator.CreateInstance(protocolType)!;
+        Assert.Null(protocol.EncodeRpmRequest());
+    }
 }

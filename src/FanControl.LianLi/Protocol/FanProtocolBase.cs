@@ -60,6 +60,9 @@ internal abstract class FanProtocolBase : IFanProtocol {
     }
 
     /// <inheritdoc />
+    public virtual byte[]? EncodeRpmRequest() => null;
+
+    /// <inheritdoc />
     public float DecodeRpm(byte[] inputReport, int channel) {
         ValidateChannel(channel);
         int offset = RpmReportOffset + (channel * 2);

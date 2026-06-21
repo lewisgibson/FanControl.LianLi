@@ -114,4 +114,29 @@ public class FanControllerTests {
         controller.Dispose();
         Assert.True(transport.IsDisposed);
     }
+
+    [Fact]
+    public void PollRpm_SlInfinity_SendsPrimerFeatureReportBeforeRead() {
+        var transport = new FakeHidTransport();
+        var controller = new FanController(0, transport, new SlInfinityProtocol(), new FakeClock(), new FakeLogger());
+        transport.Clear();
+
+        controller.PollRpm();
+
+        // The primer must appear as a feature report before the (implicit) input read.
+        Assert.NotEmpty(transport.Features);
+        Assert.Equal(65, transport.Features[0].Length);
+        Assert.Equal(0xE0, transport.Features[0][0]);
+        Assert.Equal(0x50, transport.Features[0][1]);
+    }
+
+    [Fact]
+    public void PollRpm_Sl_SendsNoPrimerFeatureReport() {
+        var (controller, transport, _) = NewSlController();
+        transport.Clear();
+
+        controller.PollRpm();
+
+        Assert.Empty(transport.Features);
+    }
 }

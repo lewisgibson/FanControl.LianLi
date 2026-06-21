@@ -182,7 +182,7 @@ public sealed class LianLiPlugin : IPlugin2, IDisposable {
     /// <summary>Host update tick: pump pending writes and RPM polling for every controller.</summary>
     public void Update() {
         lock (_sync) {
-            _worker?.Tick();
+            _worker?.TryTick();
         }
     }
 

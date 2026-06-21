@@ -126,11 +126,19 @@ internal sealed class FanController : IDisposable {
 
     /// <summary>Read every channel's RPM into the cache.</summary>
     public void PollRpm() {
+        PrimeRpmReport();
         byte[] buffer = _transport.GetInputReport(RpmReportId, RpmReportLength);
         lock (_lock) {
             for (int ch = 0; ch < Channels; ch++) {
                 _rpm[ch] = _protocol.DecodeRpm(buffer, ch);
             }
+        }
+    }
+
+    private void PrimeRpmReport() {
+        byte[]? request = _protocol.EncodeRpmRequest();
+        if (request != null) {
+            _transport.SetFeature(request);
         }
     }
 
