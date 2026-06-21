@@ -60,12 +60,14 @@ The assembly exposes exactly one `public` type: the `IPlugin2` implementation th
 
 ## No Swallowed Exceptions
 
-Every exception must be handled or propagate. An empty `catch {}`, or a `catch` that swallows without logging, is a bug. There are exactly **two** sanctioned swallow points, and both must log:
+Every exception must be handled or propagate. An empty `catch {}`, or a `catch` that swallows without logging, is a bug. There are two **core** sanctioned swallow points, and both must log:
 
 1. **The file logger.** Logging must never throw back into the host. If the log write itself fails, the logger swallows that failure (after a best-effort attempt) - it cannot recurse into itself, and a logging fault must not crash FanControl.
 2. **The per-controller worker resilience catch.** A fault on one controller must not take down the others. The worker loop catches around a single controller's iteration, logs the fault with full context, and continues so the remaining controllers keep running.
 
-Anywhere else, let exceptions propagate or wrap them with context and rethrow. Never add a third swallow point.
+Beyond those, the **Plugin composition root** carries a bounded set of host-seam resilience guards, each of which must also log: device enumeration and per-device open/setup (a discovery or open fault degrades to fewer/zero controllers instead of crashing the host - operational-awareness requires that a host-seam fault never takes FanControl down), and the opt-in lighting path (a bad lighting config or rejected lighting write disables lighting for that device and never affects fan control). These are the same "do not crash the host / isolate the fault" intent as the two core points, applied at the composition seam; each carries an inline `CA1031` justification and logs the failure.
+
+Anywhere outside those sanctioned points, let exceptions propagate or wrap them with context and rethrow. Do not introduce a new swallow category, and never swallow without logging.
 
 ## netstandard2.0 Constraint
 

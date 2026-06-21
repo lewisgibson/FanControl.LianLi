@@ -9,7 +9,7 @@ The code is organized into these layers, each depending only on the ones below i
 - **Plugin** - the FanControl integration surface. Implements the host's `IPlugin2` contract, registers sensors and controls, and translates host callbacks into device commands. This is the only layer the host sees.
 - **Worker** - the keepalive control loop that periodically re-asserts manual mode and pushes the current duty so the controller does not fall back to its firmware curve. It owns and drives the `Devices` beneath it.
 - **Devices** - per-family device models that bind a `Protocol` encoder strategy to a concrete controller (PIDs, channel count, register map). This is where the family differences (SL vs SLI vs SL v2 and so on) are resolved. It also owns the injected clock (`IClock`) and the pure `ChannelWriteDecision` that drives the keepalive staleness check.
-- **Hid** - the USB HID transport. Owns device enumeration, open/close, and the raw report read/write. Hidden behind the `IHidTransport` seam (below).
+- **Hid** - the USB HID transport. Owns device enumeration, open/close, and the raw report read/write. Hidden behind the `IHidTransport` seam (below). Enumeration also collapses the several HID interfaces one physical controller can expose into a single logical device (see "Device identity and binding stability" below).
 - **Protocol** - pure functions that encode commands and decode telemetry to and from HID report byte buffers. No I/O, no state, no clock. See `docs/protocol.md` for the full byte-level contract.
 - **Logging** - a thin logging abstraction so the layers above can record diagnostics without binding to the host's logger type directly.
 
@@ -28,6 +28,15 @@ The keepalive worker takes its clock as a dependency rather than calling the sys
 ## IPlugin2 tick vs background-thread keepalive split
 
 The host calls `IPlugin2` on its own cadence to read sensors and apply control values; that callback is the tick path and it must return quickly. The keepalive - re-asserting manual mode and re-pushing duty so the firmware does not reclaim the fans - runs on a separate background thread driven by the clock-injected worker, not on the host tick. Splitting the two keeps the host callback cheap and bounded while still guaranteeing the controller stays under our control between ticks. The tick path and the keepalive path share the device state but never block on each other.
+
+## Device identity and binding stability
+
+FanControl persists a user's fan-curve bindings against each sensor's `Id`, so those ids must mean the same physical channel every time the plugin loads. Two enumeration facts work against that, and the Hid/Plugin layers handle both before any sensor is registered:
+
+- **Duplicate HID interfaces.** A composite controller can surface more than one matching HID interface (top-level collection) under the same vendor/product id, which would otherwise register a duplicate Ch1-4 sensor set per interface. `HidDeviceDeduplicator` (in `Hid`) collapses interfaces that share a non-empty USB serial number down to one logical controller, keeping the interface that accepts the largest output report (the fan-control collection). The grouping is deliberately conservative: a device that reports no serial is never collapsed, so two distinct serial-less controllers are never mistaken for one - the safe failure direction. The helper is pure, so the grouping is unit-tested without hardware.
+- **Unstable enumeration order.** The OS does not guarantee a stable order across reboot/sleep/hibernate for two identical controllers, and the sensor id is keyed on the controller's index. The plugin therefore orders the located controllers by their OS device path (ordinal) before indexing, so the same physical port keeps the same index - and the same sensor id - run to run. A single-controller setup is unaffected; this only matters when two or more identical controllers are present.
+
+Enumeration itself runs behind a host-seam resilience guard: the first access to the HID device manager can fail in some host/desktop contexts, so a failure there is logged and degrades to zero controllers rather than propagating into FanControl and crashing it - the same resilience the per-device open path already applies, one level up.
 
 ## Minimal public surface
 

@@ -24,6 +24,18 @@ public class LianLiPluginTests {
     private static HidDeviceInfo Sli(int index)
         => new HidDeviceInfo(0x0CF2, 0xA102, "fake/" + index, null);
 
+    private static HidDeviceInfo SliAtPath(string devicePath)
+        => new HidDeviceInfo(0x0CF2, 0xA102, devicePath, null);
+
+    private static HidDeviceInfo SliInterface(string devicePath, string serial, int maxOutput)
+        => new HidDeviceInfo(0x0CF2, 0xA102, devicePath, null, serial, maxOutput);
+
+    private static string FirstOpenedPath(FakeEnumerator enumerator) {
+        using LianLiPlugin plugin = NewPlugin(enumerator);
+        plugin.Initialize();
+        return enumerator.OpenedPaths[0];
+    }
+
     [Fact]
     public void Name_MatchesBuildVariant()
         => Assert.Equal(ExpectedName, NewPlugin(new FakeEnumerator()).Name);
@@ -71,6 +83,62 @@ public class LianLiPluginTests {
         Assert.All(enumerator.Opened, transport => Assert.True(transport.IsDisposed));
 
         plugin.Dispose();
+    }
+
+    [Fact]
+    public void InitializeThenLoad_CollapsesDuplicateInterfacesOfOnePhysicalController() {
+        // One controller surfacing two matching HID interfaces (shared serial) must register a
+        // single Ch1-4 set, not two.
+        var enumerator = new FakeEnumerator(
+            SliInterface("controller/mi_00", "SERIAL-1", 0),
+            SliInterface("controller/mi_01", "SERIAL-1", 65));
+        using LianLiPlugin plugin = NewPlugin(enumerator);
+
+        plugin.Initialize();
+        var container = new FakeSensorsContainer();
+        plugin.Load(container);
+
+        Assert.Equal(4, container.ControlSensors.Count);
+        Assert.Equal(4, container.FanSensors.Count);
+    }
+
+    [Fact]
+    public void InitializeThenLoad_KeepsPhysicallyDistinctControllersSeparate() {
+        // Two distinct controllers (different serials) each register a full Ch1-4 set.
+        var enumerator = new FakeEnumerator(
+            SliInterface("controllerA", "SERIAL-A", 65),
+            SliInterface("controllerB", "SERIAL-B", 65));
+        using LianLiPlugin plugin = NewPlugin(enumerator);
+
+        plugin.Initialize();
+        var container = new FakeSensorsContainer();
+        plugin.Load(container);
+
+        Assert.Equal(8, container.ControlSensors.Count);
+        Assert.Equal(8, container.FanSensors.Count);
+    }
+
+    [Fact]
+    public void Initialize_OrdersControllersByDevicePath_IndependentOfEnumerationOrder() {
+        // The lexicographically-first device path always becomes controller index 0, so a saved
+        // binding keeps pointing at the same physical channel regardless of OS enumeration order.
+        Assert.Equal("aaa", FirstOpenedPath(new FakeEnumerator(SliAtPath("aaa"), SliAtPath("zzz"))));
+        Assert.Equal("aaa", FirstOpenedPath(new FakeEnumerator(SliAtPath("zzz"), SliAtPath("aaa"))));
+    }
+
+    [Fact]
+    public void Initialize_WhenEnumerationThrows_IsLoggedAndRegistersNothing() {
+        var logger = new FakeLogger();
+        var enumerator = new FakeEnumerator(Sli(0)) { FailLocate = true };
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), logger);
+
+        plugin.Initialize(); // enumeration throws; it must be caught, logged, and degrade to no controllers
+        var container = new FakeSensorsContainer();
+        plugin.Load(container);
+
+        Assert.Empty(container.ControlSensors);
+        Assert.Empty(container.FanSensors);
+        Assert.Contains(logger.Messages, m => m.Contains("enumeration failed"));
     }
 
     [Fact]

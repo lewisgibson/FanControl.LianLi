@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.Linq;
+using FanControl.LianLi.Logging;
 using HidSharp;
 
 namespace FanControl.LianLi.Hid;
@@ -17,6 +19,12 @@ namespace FanControl.LianLi.Hid;
 // IHidDeviceEnumerator fake.
 [ExcludeFromCodeCoverage]
 internal sealed class HidSharpEnumerator : IHidDeviceEnumerator {
+    private readonly ILog _log;
+
+    public HidSharpEnumerator(ILog log) {
+        _log = log ?? throw new ArgumentNullException(nameof(log));
+    }
+
     public IReadOnlyList<HidDeviceInfo> Locate(
         IReadOnlyList<int> vendorIds,
         IReadOnlyList<int> productIds) {
@@ -27,11 +35,36 @@ internal sealed class HidSharpEnumerator : IHidDeviceEnumerator {
                     device.VendorID,
                     device.ProductID,
                     device.DevicePath,
-                    device));
+                    device,
+                    TryGetSerialNumber(device),
+                    TryGetMaxOutputReportLength(device)));
             }
         }
 
         return located;
+    }
+
+    // Reading the serial number / report descriptor is an I/O operation that a device can refuse;
+    // a refused probe is not a fault to surface but a missing-metadata case the de-duplicator
+    // already handles safely (no serial -> the device is never collapsed; zero length -> it loses a
+    // tie-break only). Catch the specific IOException so the device is still located either way, and
+    // log a trace so a refused probe is never silent.
+    private string? TryGetSerialNumber(HidDevice device) {
+        try {
+            return device.GetSerialNumber();
+        } catch (IOException ex) {
+            _log.Write("  serial-number probe refused for " + device.DevicePath + ": " + ex.Message);
+            return null;
+        }
+    }
+
+    private int TryGetMaxOutputReportLength(HidDevice device) {
+        try {
+            return device.GetMaxOutputReportLength();
+        } catch (IOException ex) {
+            _log.Write("  output-report-length probe refused for " + device.DevicePath + ": " + ex.Message);
+            return 0;
+        }
     }
 
     public IHidTransport Open(HidDeviceInfo info) {

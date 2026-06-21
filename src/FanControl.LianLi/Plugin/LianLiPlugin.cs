@@ -42,11 +42,14 @@ public sealed class LianLiPlugin : IPlugin2, IDisposable {
     /// logs through both it and a local file as a fallback.
     /// </summary>
     public LianLiPlugin(IPluginLogger logger)
-        : this(
-            new HidSharpEnumerator(),
-            new DeviceCatalog(),
-            new SystemClock(),
-            new CompositeLog(new PluginLoggerLog(logger), new FileLogger())) {
+        : this(new CompositeLog(new PluginLoggerLog(logger), new FileLogger())) {
+    }
+
+    // Wire the real HID enumerator with the same log the rest of the plugin uses, so an
+    // enumeration probe that fails leaves a trace. A separate ctor because the enumerator and the
+    // log are siblings the public ctor cannot reference from a single chained call.
+    private LianLiPlugin(ILog log)
+        : this(new HidSharpEnumerator(log), new DeviceCatalog(), new SystemClock(), log) {
     }
 
     /// <summary>Composition/test constructor that accepts fakes for every dependency.</summary>
@@ -113,11 +116,38 @@ public sealed class LianLiPlugin : IPlugin2, IDisposable {
         IReadOnlyList<LConnectControllerConfig> lightingConfigs = ReadLConnectLighting();
 #endif
 
-        IReadOnlyList<HidDeviceInfo> located = _enumerator.Locate(_catalog.VendorIds, _catalog.ProductIds);
+        IReadOnlyList<HidDeviceInfo> located;
+        try {
+            located = _enumerator.Locate(_catalog.VendorIds, _catalog.ProductIds);
+        }
+#pragma warning disable CA1031 // host seam: a HidSharp enumeration failure must not crash FanControl
+        catch (Exception ex) {
+            // The first enumeration spins up HidSharp's device-manager window (RegisterClass /
+            // WM_DEVICECHANGE), which can fail in some host/desktop contexts. Degrade to zero
+            // controllers and log it rather than let the exception propagate into the host - the
+            // same host-seam resilience the per-device open catch below applies, one level up.
+            _log.Write("Initialize: device enumeration failed, no controllers: " + ex.Message);
+            located = Array.Empty<HidDeviceInfo>();
+        }
+#pragma warning restore CA1031
+
+        int interfaceCount = located.Count;
+
+        // Collapse the several HID interfaces one physical controller can expose into a single
+        // logical device, so one controller does not register a duplicate set of channel sensors.
+        located = HidDeviceDeduplicator.Deduplicate(located);
+
+        // Order controllers by a stable per-device token (the OS device path) instead of the OS
+        // enumeration order, which can shift across reboot/sleep/hibernate. Sensor ids are keyed on
+        // the resulting index, so a stable order keeps a user's saved fan-curve bindings pointing at
+        // the same physical channel run to run.
+        located = SortByDevicePath(located);
+
         _log.Write(string.Format(
             CultureInfo.InvariantCulture,
-            "Initialize: {0} build, scan located {1} Lian Li controller(s)",
+            "Initialize: {0} build, scan located {1} HID interface(s), {2} controller(s)",
             buildVariant,
+            interfaceCount,
             located.Count));
 
         foreach (HidDeviceInfo info in located) {
@@ -291,6 +321,14 @@ public sealed class LianLiPlugin : IPlugin2, IDisposable {
 #pragma warning restore CA1031
     }
 #endif
+
+    // Order located devices by their OS device path (ordinal) so the same physical port keeps the
+    // same controller index - and therefore the same sensor ids - across restarts.
+    private static List<HidDeviceInfo> SortByDevicePath(IReadOnlyList<HidDeviceInfo> devices) {
+        var sorted = new List<HidDeviceInfo>(devices);
+        sorted.Sort((a, b) => string.CompareOrdinal(a.DevicePath, b.DevicePath));
+        return sorted;
+    }
 
     // Caller must hold _sync.
     private void TearDownLocked() {
