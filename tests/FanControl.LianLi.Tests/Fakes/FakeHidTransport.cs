@@ -44,6 +44,14 @@ internal sealed class FakeHidTransport : IHidTransport {
     /// <summary>Buffer returned (copied) from <see cref="GetInputReport"/>.</summary>
     public byte[] InputReport { get; set; } = new byte[65];
 
+    /// <summary>
+    /// When non-empty, successive <see cref="GetInputReport"/> calls dequeue from here instead of
+    /// returning <see cref="InputReport"/>, letting a test feed a settling sequence (e.g. an idle
+    /// buffer on the first read, then a good reading). Once drained, <see cref="InputReport"/> is
+    /// used again.
+    /// </summary>
+    public Queue<byte[]> InputReportSequence { get; } = new Queue<byte[]>();
+
     /// <summary>When set, <see cref="GetInputReport"/> throws, simulating a device fault.</summary>
     public bool FailReads { get; set; }
 
@@ -89,8 +97,9 @@ internal sealed class FakeHidTransport : IHidTransport {
         byte[] buffer;
         lock (_lock) {
             ReadCount++;
+            byte[] source = InputReportSequence.Count > 0 ? InputReportSequence.Dequeue() : InputReport;
             buffer = new byte[length];
-            Array.Copy(InputReport, buffer, Math.Min(InputReport.Length, length));
+            Array.Copy(source, buffer, Math.Min(source.Length, length));
         }
 
         // Block outside the lock so a test holding a tick mid-read does not deadlock the fake's own

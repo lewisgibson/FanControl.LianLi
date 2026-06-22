@@ -77,6 +77,11 @@ internal abstract class FanProtocolBase : IFanProtocol {
         return (float)((inputReport[offset] << 8) | inputReport[offset + 1]); // big-endian
     }
 
+    /// <inheritdoc />
+    // Most Uni families stream their input report and need no primer; the request-response
+    // SL-Infinity overrides this to return its prime report.
+    public virtual byte[]? EncodeRpmPrimer() => null;
+
     private void ValidateChannel(int channel) {
         if (channel < 0 || channel >= ChannelCount) {
             throw new ArgumentOutOfRangeException(

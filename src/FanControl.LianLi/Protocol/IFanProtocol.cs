@@ -26,4 +26,11 @@ internal interface IFanProtocol {
 
     /// <summary>Decode the big-endian RPM for a channel from an input report.</summary>
     float DecodeRpm(byte[] inputReport, int channel);
+
+    /// <summary>
+    /// The feature report that must be sent before reading the input report, or <c>null</c> for a
+    /// family that streams its input report without prompting. The SL-Infinity is request-response:
+    /// until primed it returns a stale idle buffer, so its RPM read must be preceded by this report.
+    /// </summary>
+    byte[]? EncodeRpmPrimer();
 }

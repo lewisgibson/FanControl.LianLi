@@ -12,5 +12,14 @@ internal sealed class FakeClock : IClock {
 
     public DateTime UtcNow { get; private set; }
 
+    /// <summary>Total time the code under test asked to <see cref="Sleep"/>, for asserting retry waits.</summary>
+    public TimeSpan TotalSlept { get; private set; }
+
     public void Advance(TimeSpan delta) => UtcNow += delta;
+
+    // A test never waits in real time: a requested sleep just moves the virtual clock forward.
+    public void Sleep(TimeSpan duration) {
+        TotalSlept += duration;
+        UtcNow += duration;
+    }
 }
