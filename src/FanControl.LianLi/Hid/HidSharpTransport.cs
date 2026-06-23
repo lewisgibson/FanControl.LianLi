@@ -3,7 +3,6 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Threading;
 using HidSharp;
 using Microsoft.Win32.SafeHandles;
 
@@ -25,27 +24,27 @@ internal sealed class HidSharpTransport : IHidTransport {
     // tens of milliseconds; this is a generous ceiling, not the expected latency.
     private const int InterruptReadTimeoutMilliseconds = 500;
 
-    // Cap a stream write for the same reason. Without this the write inherits HidSharp's
-    // multi-second default, so a 0x0416 controller that is mid-reenumeration after a
-    // sleep/wake stalls each keepalive write for seconds before failing - and because the
-    // worker services controllers sequentially on one thread, that backs up every other
-    // controller's tick and presents as a frozen UI. A local USB write completes in
-    // milliseconds, so this ceiling only ever bites a device that is not actually ready.
+    // Cap a stream write for the same reason: without it a write inherits HidSharp's multi-second
+    // default, so a controller that is mid-re-enumeration after a sleep/wake stalls each keepalive
+    // write for seconds before failing - and because the worker services controllers sequentially on
+    // one thread, that backs up every other controller and presents as a frozen UI. A local USB
+    // write completes in milliseconds, so this ceiling only ever bites a device that is not ready.
     private const int StreamWriteTimeoutMilliseconds = 500;
 
     // HidD_GetInputReport / HidD_SetFeature are synchronous control transfers with no timeout
     // parameter, so on a stale handle (the device re-enumerated across sleep/wake) they block
     // forever - freezing the keepalive thread, which is the hibernate hang. The stream timeouts
     // above cannot reach this path; it runs on the raw input handle, not the HidStream. So these
-    // transfers run on a throwaway thread with a bounded wait instead.
+    // transfers run under a bounded wait, and on timeout the pending I/O is cancelled so the handle
+    // is released cleanly rather than pinned (a pinned handle blocks the next Open() after wake).
     private const int ControlTransferTimeoutMilliseconds = 500;
 
     private readonly HidStream _stream;
     private readonly SafeFileHandle _inputHandle;
 
-    // Once one control transfer hangs, the handle is dead and every later transfer on it hangs too.
-    // Latch that so subsequent calls fail fast rather than spawn a new stuck thread every tick; the
-    // controller recovers when the plugin reopens the device on its next Initialize.
+    // Once one control transfer times out the handle is stale and every later transfer on it will
+    // hang too. Latch that so subsequent calls fail fast instead of spawning a fresh watchdog every
+    // tick; the controller recovers when the plugin reopens the device on its next Initialize.
     private volatile bool _controlTransferFaulted;
 
     public HidSharpTransport(HidStream stream, string devicePath) {
@@ -59,9 +58,9 @@ internal sealed class HidSharpTransport : IHidTransport {
         // read from freezing FanControl.
         _stream.ReadTimeout = InterruptReadTimeoutMilliseconds;
 
-        // Bound writes too: a 0x0416 controller re-enumerating after sleep/wake otherwise
-        // stalls each keepalive write for HidSharp's multi-second default before failing,
-        // which the worker isolates per controller but only after the full stall.
+        // Bound writes too: a controller re-enumerating after sleep/wake otherwise stalls each
+        // keepalive write for HidSharp's multi-second default before failing, which the worker
+        // isolates per controller but only after the full stall.
         _stream.WriteTimeout = StreamWriteTimeoutMilliseconds;
 
         // The Lian Li controllers do NOT stream interrupt-IN reports, so HidStream.Read
@@ -122,11 +121,12 @@ internal sealed class HidSharpTransport : IHidTransport {
         return buffer;
     }
 
-    // Run a synchronous HID control transfer with a bounded wait. The native call has no timeout,
-    // so on a stale handle it blocks forever; running it on a throwaway thread lets the caller
-    // (the keepalive worker) give up after ControlTransferTimeoutMilliseconds and surface a
-    // timeout it isolates, instead of hanging. The abandoned thread stays blocked on the dead
-    // handle until Dispose closes it; the fault latch keeps that to a single leaked thread.
+    // Run a synchronous HID control transfer under a bounded wait. The native call has no timeout,
+    // so on a stale handle it blocks forever; BoundedHidCall runs it on a throwaway thread and, on
+    // timeout, cancels the pending I/O via CancelIoEx so the abandoned thread unwinds and the handle
+    // is released (rather than pinned, which would block the next Open() after wake). A timeout
+    // latches the fault so later transfers fail fast; the worker isolates the throw and the
+    // controller recovers when the plugin reopens the device on its next Initialize.
     private void RunControlTransfer(Func<bool> nativeCall, string operation) {
         if (_controlTransferFaulted) {
             throw new IOException(string.Format(
@@ -137,47 +137,25 @@ internal sealed class HidSharpTransport : IHidTransport {
 
         bool succeeded = false;
         int lastError = 0;
-        Exception? failure = null;
-        var done = new ManualResetEventSlim(false);
 
-        var transfer = new Thread(() => {
-            try {
+        bool completed = BoundedHidCall.TryRun(
+            () => {
                 succeeded = nativeCall();
                 if (!succeeded) {
                     // GetLastError is thread-local, so capture it here, on the P/Invoke thread.
                     lastError = Marshal.GetLastWin32Error();
                 }
-            }
-#pragma warning disable CA1031 // marshalled back to the caller thread below; not swallowed
-            catch (Exception ex) {
-                failure = ex;
-            }
-#pragma warning restore CA1031
-            finally {
-                done.Set();
-            }
-        }) {
-            IsBackground = true,
-            Name = "LianLiHidControlTransfer",
-        };
-        transfer.Start();
+            },
+            ControlTransferTimeoutMilliseconds,
+            () => NativeMethods.CancelIoEx(_inputHandle, IntPtr.Zero));
 
-        if (!done.Wait(ControlTransferTimeoutMilliseconds)) {
-            // The handle is stale and will not recover; latch so later calls fail fast. Do NOT
-            // dispose 'done' here - the abandoned thread still sets it; leave it to the GC.
+        if (!completed) {
             _controlTransferFaulted = true;
             throw new IOException(string.Format(
                 CultureInfo.InvariantCulture,
                 "{0} timed out after {1} ms; device unresponsive (re-enumerating?).",
                 operation,
                 ControlTransferTimeoutMilliseconds));
-        }
-
-        done.Dispose();
-
-        if (failure != null) {
-            throw new IOException(string.Format(
-                CultureInfo.InvariantCulture, "{0} failed: {1}", operation, failure.Message), failure);
         }
 
         if (!succeeded) {
@@ -222,6 +200,14 @@ internal sealed class HidSharpTransport : IHidTransport {
             uint creationDisposition,
             uint flagsAndAttributes,
             IntPtr templateFile);
+
+        // Cancel pending I/O on the handle (overlapped = NULL cancels all the process queued on it).
+        // Used to unblock a control transfer abandoned on timeout so its thread unwinds and the
+        // handle is released, instead of the transfer pinning a stale handle across a sleep/wake.
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        [return: MarshalAs(UnmanagedType.U1)]
+        public static extern bool CancelIoEx(SafeFileHandle handle, IntPtr overlapped);
 
         // GET_REPORT(Input) control transfer. buffer[0] must be the report id on entry.
         [DllImport("hid.dll", SetLastError = true)]
