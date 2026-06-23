@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Text;
 using FanControl.LianLi.Devices;
 using FanControl.LianLi.Hid;
@@ -54,6 +55,8 @@ public sealed class LianLiPluginLightingTests : IDisposable
         using LianLiPlugin plugin = NewPlugin(enumerator);
 
         plugin.Initialize();
+        // Stop the keepalive worker so its RPM-primer poll cannot race the transfer-log assertions.
+        plugin.Close();
 
         IReadOnlyList<LightingTransfer> expected = SlInfinityLightingEncoder.Encode(
             new[] { new LightingPortState(0, 26, 0, 0, 0, new[] { new RgbColor(255, 0, 0) }) },
@@ -79,13 +82,14 @@ public sealed class LianLiPluginLightingTests : IDisposable
 
         plugin.Initialize();
 
-        FakeHidTransport transport = Assert.Single(enumerator.Opened);
-        Assert.Empty(transport.Features); // no lighting feature reports were sent
-
         // The controller is still registered: fan control is unaffected by the lighting skip.
         var container = new FakeSensorsContainer();
         plugin.Load(container);
         Assert.Equal(4, container.ControlSensors.Count);
+
+        plugin.Close(); // stop the worker before asserting feature reports (its RPM primer is not lighting)
+        FakeHidTransport transport = Assert.Single(enumerator.Opened);
+        Assert.Empty(LightingFeatures(transport)); // no lighting feature reports were sent
     }
 
     [Fact]
@@ -96,9 +100,10 @@ public sealed class LianLiPluginLightingTests : IDisposable
         using LianLiPlugin plugin = NewPlugin(enumerator);
 
         plugin.Initialize();
+        plugin.Close(); // stop the worker before asserting feature reports (its RPM primer is not lighting)
 
         FakeHidTransport transport = Assert.Single(enumerator.Opened);
-        Assert.Empty(transport.Features);
+        Assert.Empty(LightingFeatures(transport));
     }
 
     [Fact]
@@ -147,6 +152,11 @@ public sealed class LianLiPluginLightingTests : IDisposable
         Assert.Empty(container.ControlSensors);
         Assert.Empty(container.FanSensors);
     }
+
+    // The RPM poll sends a primer feature report ([0xE0, 0x50, ...]) on the worker thread; exclude
+    // it so a test asserting about LIGHTING feature reports is not polluted by the unrelated primer.
+    private static List<byte[]> LightingFeatures(FakeHidTransport transport)
+        => transport.Features.Where(f => !(f.Length >= 2 && f[0] == 0xE0 && f[1] == 0x50)).ToList();
 
     private LianLiPlugin NewPlugin(FakeEnumerator enumerator)
         => new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeLogger(), _configDir);

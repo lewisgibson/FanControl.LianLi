@@ -128,33 +128,28 @@ public class ProtocolEncodingTests {
         Assert.Equal(expectedOffset, protocol.RpmReportOffset);
     }
 
-    [Fact]
-    public void ChannelCount_IsFour()
-        => Assert.Equal(4, new SlProtocol().ChannelCount);
-
-    // ---- EncodeRpmPrimer: SL-Infinity is request-response, the rest stream ----
-
-    [Fact]
-    public void EncodeRpmPrimer_SlInfinity_Is65ByteE05000() {
-        byte[]? primer = new SlInfinityProtocol().EncodeRpmPrimer();
-
-        Assert.NotNull(primer);
-        Assert.Equal(65, primer!.Length); // HidD_SetFeature rejects a shorter buffer (error 87)
-        Assert.Equal(0xE0, primer[0]);
-        Assert.Equal(0x50, primer[1]);
-        Assert.Equal(0x00, primer[2]);
-        Assert.All(primer[3..], b => Assert.Equal(0, b)); // remainder is zero padding
-    }
-
     [Theory]
     [InlineData(typeof(SlProtocol))]
     [InlineData(typeof(AlProtocol))]
+    [InlineData(typeof(SlInfinityProtocol))]
     [InlineData(typeof(SlV2Protocol))]
     [InlineData(typeof(AlV2Protocol))]
-    public void EncodeRpmPrimer_StreamingFamilies_ReturnNull(Type protocolType) {
+    public void EncodeRpmPrimer_IsSevenByteE05000_ForEveryUniFamily(Type protocolType) {
         var protocol = (IFanProtocol)Activator.CreateInstance(protocolType)!;
-        Assert.Null(protocol.EncodeRpmPrimer());
+
+        byte[] primer = protocol.EncodeRpmPrimer();
+
+        // L-Connect's "prepare input report" feature report, sent before every RPM read; 7 bytes is
+        // the feature report length HidD_SetFeature accepts (3 is rejected) - verified on hardware.
+        Assert.Equal(7, primer.Length);
+        Assert.Equal(0xE0, primer[0]);
+        Assert.Equal(0x50, primer[1]);
+        Assert.All(primer[2..], b => Assert.Equal(0, b));
     }
+
+    [Fact]
+    public void ChannelCount_IsFour()
+        => Assert.Equal(4, new SlProtocol().ChannelCount);
 
     [Theory]
     [InlineData(-1)]

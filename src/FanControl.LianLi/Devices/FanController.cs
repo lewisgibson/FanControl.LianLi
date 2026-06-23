@@ -19,25 +19,11 @@ internal sealed class FanController : IFanDevice {
     private const byte RpmReportId = 224;
     private const int RpmReportLength = 65;
 
-    // After a wake/resume the SL-Infinity returns a fixed idle-state buffer for a short window
-    // before real tachometer data arrives. A single detection read landing in that window decodes
-    // garbage (some channels above MaxPlausibleRpm, others below it) and would register the wrong
-    // channels. Detection re-reads until the whole report is plausible (the device has settled),
-    // capped so a device that never settles still falls back to showing all four channels. On a
-    // normal boot the first read is already settled, so the retry costs nothing there.
-    private const int DetectionMaxAttempts = 15;
-    private static readonly TimeSpan DetectionRetryDelay = TimeSpan.FromMilliseconds(200);
-
     private readonly int _index;
     private readonly IHidTransport _transport;
     private readonly IFanProtocol _protocol;
     private readonly IClock _clock;
     private readonly ILog _log;
-
-    // Maps external channel index (0..ChannelCount-1) to physical channel (0..3).
-    // Set at construction by a one-shot RPM read that finds which channels have fans.
-    // Falls back to [0,1,2,3] if detection fails or all channels read zero (fans off at boot).
-    private readonly int[] _physicalChannels;
 
     private readonly object _lock = new object();
     private readonly int[] _target = { -1, -1, -1, -1 };         // commanded duty %, -1 = unassigned
@@ -74,30 +60,24 @@ internal sealed class FanController : IFanDevice {
         for (int ch = 0; ch < Channels; ch++) {
             _transport.Write(_protocol.EncodeManualMode(ch));
         }
-
-        // Detect which channels have fans connected. If all channels read zero (fans not yet
-        // spinning at boot, or detection fails) fall back to exposing all four channels so the
-        // controller is not hidden entirely.
-        _physicalChannels = DetectPhysicalChannels();
     }
 
     /// <summary>The controller family, for logging/diagnostics.</summary>
     public DeviceFamily Family => _protocol.Family;
 
-    /// <summary>The number of channels with detected fans (1–4); four if detection found none or failed.</summary>
-    public int ChannelCount => _physicalChannels.Length;
+    /// <summary>The Uni controllers expose four fan channels.</summary>
+    public int ChannelCount => Channels;
 
     /// <summary>
-    /// The sensor identity for a channel. The id is keyed on the physical channel number so it
-    /// is stable across restarts and is unaffected by how many other channels are populated.
+    /// The sensor identity for a Uni channel. These id/name strings are the contract with the
+    /// user's saved fan-curve bindings - keep them byte-stable; a change re-keys every control.
     /// </summary>
     public ChannelDescriptor Describe(int channel) {
-        int phys = _physicalChannels[channel];
         return new ChannelDescriptor(
-            $"LianLi/{_index}/ch{phys}/ctl",
-            $"Lian Li Uni #{_index + 1} Ch {phys + 1}",
-            $"LianLi/{_index}/ch{phys}/fan",
-            $"Lian Li Uni #{_index + 1} Ch {phys + 1} RPM");
+            $"LianLi/{_index}/ch{channel}/ctl",
+            $"Lian Li Uni #{_index + 1} Ch {channel + 1}",
+            $"LianLi/{_index}/ch{channel}/fan",
+            $"Lian Li Uni #{_index + 1} Ch {channel + 1} RPM");
     }
 
     // ---------- FanControl-thread surface (no I/O) ----------
@@ -105,21 +85,21 @@ internal sealed class FanController : IFanDevice {
     /// <summary>Set the commanded duty for a channel. The worker pushes it to hardware.</summary>
     public void SetTarget(int channel, int duty) {
         lock (_lock) {
-            _target[_physicalChannels[channel]] = duty;
+            _target[channel] = duty;
         }
     }
 
     /// <summary>Release a channel so the keepalive stops asserting it (used by Reset).</summary>
     public void ReleaseChannel(int channel) {
         lock (_lock) {
-            _target[_physicalChannels[channel]] = -1;
+            _target[channel] = -1;
         }
     }
 
     /// <summary>Read the last measured RPM for a channel.</summary>
     public float GetRpm(int channel) {
         lock (_lock) {
-            return _rpm[_physicalChannels[channel]];
+            return _rpm[channel];
         }
     }
 
@@ -127,15 +107,14 @@ internal sealed class FanController : IFanDevice {
 
     /// <summary>Push any changed-or-stale channel targets to the hardware.</summary>
     public void ApplyPending() {
-        for (int ch = 0; ch < _physicalChannels.Length; ch++) {
-            int phys = _physicalChannels[ch];
+        for (int ch = 0; ch < Channels; ch++) {
             int target;
             int lastWritten;
             DateTime lastWrite;
             lock (_lock) {
-                target = _target[phys];
-                lastWritten = _lastWritten[phys];
-                lastWrite = _lastWriteUtc[phys];
+                target = _target[ch];
+                lastWritten = _lastWritten[ch];
+                lastWrite = _lastWriteUtc[ch];
             }
 
             if (!ChannelWriteDecision.ShouldWrite(
@@ -144,19 +123,19 @@ internal sealed class FanController : IFanDevice {
             }
 
             bool changed = target != lastWritten;
-            WriteSpeed(phys, target);
+            WriteSpeed(ch, target);
 
             DateTime writtenAt = _clock.UtcNow;
             lock (_lock) {
-                _lastWritten[phys] = target;
-                _lastWriteUtc[phys] = writtenAt;
+                _lastWritten[ch] = target;
+                _lastWriteUtc[ch] = writtenAt;
             }
 
             _log.Write(string.Format(
                 CultureInfo.InvariantCulture,
                 "Set C{0}:{1} = {2}% ({3})",
                 _index,
-                phys,
+                ch,
                 target,
                 changed ? "change" : "refresh"));
         }
@@ -200,106 +179,19 @@ internal sealed class FanController : IFanDevice {
         _transport.Dispose();
     }
 
+    // Prime the device, then pull the RPM input report. The Uni controllers are request-response:
+    // HidD_GetInputReport returns a stale idle buffer until the primer feature report asks the device
+    // to refresh it, which is why L-Connect sends it before every read (see EncodeRpmPrimer).
+    private byte[] ReadRpmReport() {
+        _transport.SetFeature(_protocol.EncodeRpmPrimer());
+        return _transport.GetInputReport(RpmReportId, RpmReportLength);
+    }
+
     private void WriteSpeed(int channel, int duty) {
         // Re-assert manual (software) mode BEFORE the speed write: a channel that
         // slipped back to PWM/RPM-sync mode IGNORES speed writes, so without this
         // the commanded speed never sticks.
         _transport.Write(_protocol.EncodeManualMode(channel));
         _transport.Write(_protocol.EncodeSetSpeed(channel, duty));
-    }
-
-    // Find which physical channels have fans, re-reading until the device returns a settled
-    // (fully plausible) report so a post-wake idle buffer cannot fool the detection. Returns the
-    // detected channel numbers in ascending order, or [0,1,2,3] as a fallback when the device
-    // never settles within the retry budget, no fans are spinning, or the read fails.
-    private int[] DetectPhysicalChannels() {
-        try {
-            for (int attempt = 1; attempt <= DetectionMaxAttempts; attempt++) {
-                byte[] buffer = ReadRpmReport();
-
-                // An implausible channel means the device is still in its idle/garbage state
-                // (post-wake). Wait for it to settle and re-read rather than trust this report.
-                if (!AllChannelsPlausible(buffer)) {
-                    if (attempt < DetectionMaxAttempts) {
-                        _clock.Sleep(DetectionRetryDelay);
-                        continue;
-                    }
-
-                    // Never settled within the budget: keep the controller visible with all
-                    // channels rather than guess from garbage.
-                    _log.Write(string.Format(
-                        CultureInfo.InvariantCulture,
-                        "C{0} channel detection: device did not settle after {1} attempts, showing all channels",
-                        _index,
-                        DetectionMaxAttempts));
-                    return new[] { 0, 1, 2, 3 };
-                }
-
-                var detected = new List<int>();
-                for (int ch = 0; ch < Channels; ch++) {
-                    if (_protocol.DecodeRpm(buffer, ch) > 0f) {
-                        detected.Add(ch);
-                    }
-                }
-
-                if (detected.Count > 0) {
-                    // The count is populated CHANNELS, not fans: daisy-chained fans on one channel
-                    // share a tachometer, so the controller cannot report how many are on a channel.
-                    _log.Write(string.Format(
-                        CultureInfo.InvariantCulture,
-                        "C{0} channel detection: fans detected on {1} channel(s) [{2}] (attempt {3})",
-                        _index,
-                        detected.Count,
-                        string.Join(", ", detected),
-                        attempt));
-                    return detected.ToArray();
-                }
-
-                // Settled but every channel reads zero: fans not yet spinning at boot, or all
-                // unplugged. Show all four so the controller is not hidden entirely.
-                _log.Write(string.Format(
-                    CultureInfo.InvariantCulture,
-                    "C{0} channel detection: no fans spinning, showing all channels",
-                    _index));
-                return new[] { 0, 1, 2, 3 };
-            }
-        }
-#pragma warning disable CA1031 // resilience: detection failure is non-fatal; fall back to all channels
-        catch (Exception ex) {
-            _log.Write(string.Format(
-                CultureInfo.InvariantCulture,
-                "C{0} channel detection failed, showing all channels: {1}",
-                _index,
-                ex.Message));
-        }
-#pragma warning restore CA1031
-
-        return new[] { 0, 1, 2, 3 };
-    }
-
-    // A settled report has every channel in the plausible RPM range. The post-wake idle buffer
-    // fails this: its leading bytes have been observed as 0xE0 0x50, which decode at channel 0 to
-    // 57424 rpm - far above MaxPlausibleRpm - so the range check is also an exact reject of that
-    // signature, without hard-coding the byte pattern.
-    // Prime the device (if its family is request-response) and then pull the RPM input report.
-    // The SL-Infinity returns a stale idle buffer until the primer feature report is sent;
-    // streaming families have no primer and read directly.
-    private byte[] ReadRpmReport() {
-        byte[]? primer = _protocol.EncodeRpmPrimer();
-        if (primer != null) {
-            _transport.SetFeature(primer);
-        }
-
-        return _transport.GetInputReport(RpmReportId, RpmReportLength);
-    }
-
-    private bool AllChannelsPlausible(byte[] buffer) {
-        for (int ch = 0; ch < Channels; ch++) {
-            if (!ChannelReadDecision.IsPlausible(_protocol.DecodeRpm(buffer, ch))) {
-                return false;
-            }
-        }
-
-        return true;
     }
 }

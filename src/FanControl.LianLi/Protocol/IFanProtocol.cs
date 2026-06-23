@@ -28,9 +28,9 @@ internal interface IFanProtocol {
     float DecodeRpm(byte[] inputReport, int channel);
 
     /// <summary>
-    /// The feature report that must be sent before reading the input report, or <c>null</c> for a
-    /// family that streams its input report without prompting. The SL-Infinity is request-response:
-    /// until primed it returns a stale idle buffer, so its RPM read must be preceded by this report.
+    /// The feature report to send immediately before reading the RPM input report. The Uni
+    /// controllers are request-response: <c>HidD_GetInputReport</c> returns a stale idle buffer
+    /// until this report asks the device to refresh it. L-Connect sends it before every RPM read.
     /// </summary>
-    byte[]? EncodeRpmPrimer();
+    byte[] EncodeRpmPrimer();
 }

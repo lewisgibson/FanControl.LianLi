@@ -1,5 +1,4 @@
 using System;
-using System.Threading;
 
 namespace FanControl.LianLi.Devices;
 
@@ -7,7 +6,4 @@ namespace FanControl.LianLi.Devices;
 internal sealed class SystemClock : IClock {
     /// <inheritdoc />
     public DateTime UtcNow => DateTime.UtcNow;
-
-    /// <inheritdoc />
-    public void Sleep(TimeSpan duration) => Thread.Sleep(duration);
 }

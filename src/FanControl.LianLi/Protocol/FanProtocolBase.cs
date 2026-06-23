@@ -18,6 +18,20 @@ internal abstract class FanProtocolBase : IFanProtocol {
     /// <summary>Base for the set-speed channel byte: byte 1 is 32 + channel.</summary>
     protected const byte SpeedChannelBase = 32;
 
+    /// <summary>
+    /// "Prepare an input report" command (0x50). L-Connect sends the feature report
+    /// [ReportId, 0x50, 0x00] before every RPM read for the whole Uni family; the 0x00 sub-arg
+    /// selects the RPM report (0x01 would select firmware version).
+    /// </summary>
+    private const byte PrepareInputReportCommand = 0x50;
+
+    /// <summary>
+    /// Length of the RPM-primer feature report. It must equal the device's feature report byte
+    /// length: HidD_SetFeature rejects a 3-byte buffer with ERROR_INVALID_PARAMETER and accepts 7
+    /// (verified on hardware), which is the feature report size in the SL-Infinity HID descriptor.
+    /// </summary>
+    private const int PrimerLength = 7;
+
     /// <inheritdoc />
     public abstract DeviceFamily Family { get; }
 
@@ -71,16 +85,26 @@ internal abstract class FanProtocolBase : IFanProtocol {
     }
 
     /// <inheritdoc />
+    public byte[] EncodeRpmPrimer() {
+        // The Uni controllers do not stream their input report: HidD_GetInputReport returns a stale
+        // idle buffer until this feature report asks the device to refresh it. L-Connect sends the
+        // identical [0xE0, 0x50, 0x00] feature report before every RPM read for every Uni family
+        // (SL, AL, SLv2, ALv2, SL-Infinity), so the whole family is primed here. Some revisions
+        // return live RPM without it (verified harmless on SL-Infinity v1.4 here); others return
+        // 0/garbage until primed - priming matches the vendor and is safe either way. The trailing
+        // zero bytes pad to the device's feature report length (see PrimerLength).
+        var primer = new byte[PrimerLength];
+        primer[0] = ReportId;
+        primer[1] = PrepareInputReportCommand;
+        return primer;
+    }
+
+    /// <inheritdoc />
     public float DecodeRpm(byte[] inputReport, int channel) {
         ValidateChannel(channel);
         int offset = RpmReportOffset + (channel * 2);
         return (float)((inputReport[offset] << 8) | inputReport[offset + 1]); // big-endian
     }
-
-    /// <inheritdoc />
-    // Most Uni families stream their input report and need no primer; the request-response
-    // SL-Infinity overrides this to return its prime report.
-    public virtual byte[]? EncodeRpmPrimer() => null;
 
     private void ValidateChannel(int channel) {
         if (channel < 0 || channel >= ChannelCount) {
