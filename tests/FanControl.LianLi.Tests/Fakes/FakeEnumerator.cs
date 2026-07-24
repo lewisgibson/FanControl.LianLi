@@ -25,7 +25,8 @@ internal sealed class FakeEnumerator : IHidDeviceEnumerator {
     /// <summary>When set, every transport handed out by <see cref="Open"/> throws on Write.</summary>
     public bool FailWrites { get; set; }
 
-    /// <summary>When set, every transport handed out by <see cref="Open"/> throws on SetFeature only (a lighting-write fault).</summary>
+    /// <summary>When set, every transport handed out by <see cref="Open"/> throws on SetFeature only
+    /// - the feature-report path (fan control and lighting effects).</summary>
     public bool FailFeatures { get; set; }
 
     /// <summary>When set, <see cref="Locate"/> throws, simulating a HidSharp enumeration failure (e.g. RegisterClass failed).</summary>

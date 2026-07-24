@@ -224,20 +224,28 @@ public class LianLiPluginTests {
     }
 
     [Fact]
-    public void Initialize_DisposesTransportWhenControllerSetupThrows() {
-        // The transport opens, but the FanController constructor's manual-mode feature writes throw,
-        // so the controller is never created. The opened HID handle must not leak.
+    public void Initialize_KeepsControllerWhenSetupWritesAreRejected() {
+        // The transport opens but the device rejects every feature write, so the manual-mode assert
+        // and the population probe both fail. The controller must stay registered with all four
+        // channels shown - losing the whole controller over a rejected setup write is the failure
+        // mode this guards - and the worker re-asserts manual mode before each speed write, so
+        // control recovers if the device accepts writes later.
+        var logger = new FakeLogger();
         var enumerator = new FakeEnumerator(Sli(0)) { FailFeatures = true };
-        using LianLiPlugin plugin = NewPlugin(enumerator);
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), logger);
 
         plugin.Initialize();
-
-        Assert.NotEmpty(enumerator.Opened);
-        Assert.All(enumerator.Opened, transport => Assert.True(transport.IsDisposed));
-
         var container = new FakeSensorsContainer();
         plugin.Load(container);
-        Assert.Empty(container.ControlSensors); // the faulted device registered nothing
+
+        Assert.Equal(4, container.ControlSensors.Count);
+        Assert.Equal(4, container.FanSensors.Count);
+
+        // Close BEFORE reading the log: the keepalive worker's background thread keeps logging its
+        // (equally rejected) polls until the plugin stops, and FakeLogger's list is not synchronized.
+        plugin.Close();
+        Assert.Contains(logger.Messages, m => m.Contains("manual-mode assert failed"));
+        Assert.All(enumerator.Opened, transport => Assert.True(transport.IsDisposed)); // no leaked handle
     }
 
     [Fact]

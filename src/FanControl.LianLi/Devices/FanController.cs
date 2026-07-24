@@ -69,21 +69,6 @@ internal sealed class FanController : IFanDevice {
         _startStopEnabled = (bool[])startStopEnabled.Clone();
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _log = log ?? throw new ArgumentNullException(nameof(log));
-
-        // One-time setup I/O (runs during Initialize, not on the periodic UI path).
-#if ENABLE_ARGB
-        // ARGB build only: enable LED ARGB-header sync so the fans' lighting follows
-        // the motherboard's ARGB header. On controllers that do not persist config to
-        // hardware (e.g. SL-Infinity 120 V1) this resets lighting to factory on every
-        // startup - the documented trade-off of the ARGB variant.
-        _transport.SetFeature(_protocol.EncodeArgbSync(true));
-#endif
-
-        // Assert manual (software) mode on every channel so the host owns the speed. L-Connect sends
-        // every fan-control and config command as a feature report, so these go through SetFeature.
-        for (int ch = 0; ch < Channels; ch++) {
-            _transport.SetFeature(_protocol.EncodeManualMode(ch));
-        }
     }
 
     /// <summary>The controller family, for logging/diagnostics.</summary>
@@ -94,6 +79,29 @@ internal sealed class FanController : IFanDevice {
 
     /// <inheritdoc />
     public bool IsChannelPopulated(int channel) => _populated[channel];
+
+    /// <summary>
+    /// One-time setup writes: assert manual (software) mode on every channel so the host owns the
+    /// speed (ARGB build: preceded by the LED ARGB-header sync enable). L-Connect sends every
+    /// fan-control and config command as a feature report, so these go through SetFeature. Called
+    /// once by the plugin composition root after construction - never in the constructor, so a hub
+    /// that rejects a setup write cannot abort construction and cost the user the whole controller.
+    /// The caller guards this call; on a fault the controller stays registered and regains ownership
+    /// on the worker path, which re-asserts manual mode before every speed write.
+    /// </summary>
+    public void AssertManualMode() {
+#if ENABLE_ARGB
+        // ARGB build only: enable LED ARGB-header sync so the fans' lighting follows
+        // the motherboard's ARGB header. On controllers that do not persist config to
+        // hardware (e.g. SL-Infinity 120 V1) this resets lighting to factory on every
+        // startup - the documented trade-off of the ARGB variant.
+        _transport.SetFeature(_protocol.EncodeArgbSync(true));
+#endif
+
+        for (int ch = 0; ch < Channels; ch++) {
+            _transport.SetFeature(_protocol.EncodeManualMode(ch));
+        }
+    }
 
     /// <summary>
     /// Detect which channels have a fan attached and narrow the surfaced set. The Uni controllers

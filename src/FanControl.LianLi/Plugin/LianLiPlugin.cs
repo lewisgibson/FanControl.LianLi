@@ -205,7 +205,9 @@ public sealed class LianLiPlugin : IPlugin2, IDisposable {
     }
 
     // Open a Uni 0x0CF2 controller, apply its saved lighting (Lighting build), and register it. A
-    // device that fails to open or whose setup writes throw is skipped rather than crashing the host.
+    // device that fails to open is skipped rather than crashing the host; once the controller is
+    // registered, its setup writes and population probe are guarded individually so a rejected
+    // write degrades the feature, never the controller.
     private void BuildUniController(HidDeviceInfo info
 #if ENABLE_LIGHTING
         , IReadOnlyList<LConnectControllerConfig> lightingConfigs
@@ -228,6 +230,7 @@ public sealed class LianLiPlugin : IPlugin2, IDisposable {
             var controller = new FanController(_controllers.Count, transport, protocol, startStopEnabled, _clock, _log);
             _controllers.Add(controller);
             transport = null; // ownership passed to the controller, which disposes it
+            AssertManualMode(controller, info);
             DetectPopulation(controller, info);
             _log.Write(string.Format(
                 CultureInfo.InvariantCulture,
@@ -239,8 +242,8 @@ public sealed class LianLiPlugin : IPlugin2, IDisposable {
         }
 #pragma warning disable CA1031 // resilience: a device that fails to open is skipped, not fatal
         catch (Exception ex) {
-            // Open, or the controller's in-constructor setup writes, threw before the controller
-            // took ownership - dispose the transport here rather than leak the HID handle.
+            // Open (or a Lighting-build pre-construction step) threw before the controller took
+            // ownership - dispose the transport here rather than leak the HID handle.
             transport?.Dispose();
             _log.Write(string.Format(
                 CultureInfo.InvariantCulture,
@@ -251,10 +254,30 @@ public sealed class LianLiPlugin : IPlugin2, IDisposable {
 #pragma warning restore CA1031
     }
 
+    // Assert manual (software) mode on the registered Uni controller so the host owns the speed. A
+    // rejected setup write must not lose the controller: the worker re-asserts manual mode before
+    // every speed write, so control recovers on the first accepted write. The fault is isolated here
+    // at the composition seam - the same host-seam resilience intent as the per-device open guard -
+    // and logged.
+    private void AssertManualMode(FanController controller, HidDeviceInfo info) {
+        try {
+            controller.AssertManualMode();
+        }
+#pragma warning disable CA1031 // host seam: a rejected setup write degrades to worker-time re-asserts, never loses the controller
+        catch (Exception ex) {
+            _log.Write(string.Format(
+                CultureInfo.InvariantCulture,
+                "  manual-mode assert failed for {0}: {1}; the worker re-asserts before each write",
+                info.DevicePath,
+                ex.Message));
+        }
+#pragma warning restore CA1031
+    }
+
     // Probe the Uni controller for which channels have a fan, so an empty slot is not surfaced as a
     // dead sensor. A probe read fault must not lose the controller (it stays with all channels
     // shown), so the fault is isolated here at the composition seam - the same host-seam resilience
-    // intent as the per-device open/setup guard - and logged. The controller defaults to
+    // intent as the per-device open guard - and logged. The controller defaults to
     // all-populated until this narrows it.
     private void DetectPopulation(FanController controller, HidDeviceInfo info) {
         try {

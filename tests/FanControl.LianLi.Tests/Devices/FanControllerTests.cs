@@ -23,10 +23,11 @@ public class FanControllerTests {
 
 #if ENABLE_ARGB
     [Fact]
-    public void Constructor_EmitsArgbSyncThenManualModeOnEveryChannel()
+    public void AssertManualMode_EmitsArgbSyncThenManualModeOnEveryChannel()
     {
-        var transport = new FakeHidTransport();
-        _ = new FanController(0, transport, new SlProtocol(), NoStartStop, new FakeClock(), new FakeLogger());
+        var (controller, transport, _) = NewSlController();
+
+        controller.AssertManualMode();
 
         Assert.Equal(5, transport.Features.Count); // ARGB sync + 4 manual mode, all feature reports
         Assert.Equal(new byte[] { 224, 16, 48, 1, 0, 0, 0 }, transport.Features[0]); // SL ARGB register, on
@@ -36,9 +37,10 @@ public class FanControllerTests {
     }
 #else
     [Fact]
-    public void Constructor_AssertsManualModeOnEveryChannel() {
-        var transport = new FakeHidTransport();
-        _ = new FanController(0, transport, new SlProtocol(), NoStartStop, new FakeClock(), new FakeLogger());
+    public void AssertManualMode_EmitsManualModeOnEveryChannel() {
+        var (controller, transport, _) = NewSlController();
+
+        controller.AssertManualMode();
 
         Assert.Equal(4, transport.Features.Count);
         Assert.Equal(new byte[] { 224, 16, 49, 0x10, 0, 0 }, transport.Features[0]); // ch0
@@ -46,6 +48,16 @@ public class FanControllerTests {
         Assert.Empty(transport.Writes); // the fan path uses no output reports
     }
 #endif
+
+    [Fact]
+    public void Constructor_DoesNoIo() {
+        // Setup writes live in AssertManualMode, called - and guarded - by the composition root
+        // after construction: a hub that rejects a setup write must degrade to a logged fault,
+        // never lose the whole controller by aborting construction.
+        var (_, transport, _) = NewSlController();
+        Assert.Empty(transport.Transfers);
+        Assert.Equal(0, transport.ReadCount);
+    }
 
     // The control/RPM sensor identifiers are the contract with a user's saved FanControl config:
     // FanControl binds every fan curve to these exact strings. If a change alters an identifier, the
