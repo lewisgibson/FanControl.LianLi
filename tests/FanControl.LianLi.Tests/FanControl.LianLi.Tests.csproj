@@ -2,6 +2,11 @@
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
+    <!-- Declared explicitly rather than left to the xunit.v3 build targets: on a cold
+         NuGet cache restore evaluates the project before any package targets exist, so
+         without this it never requests the app-host pack the Exe build needs and a
+         clean-machine build fails copying apphost.exe (MSB3030). -->
+    <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
