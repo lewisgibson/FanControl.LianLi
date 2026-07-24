@@ -299,17 +299,19 @@ public sealed class LianLiPlugin : IPlugin2, IDisposable {
     // profile must not stop the controller loading, so it degrades to all-off and logs - the same
     // isolate-the-fault intent as the lighting guard, applied at the composition seam.
     private bool[] ReadStartStop(HidDeviceInfo info, int channelCount) {
-        // Log whether the profile file was located, so "start/stop does nothing" can be told apart
-        // from "profile found but the toggle is off" without guessing at the MD5 filename mapping.
-        string profilePath = System.IO.Path.Combine(
-            StartStopConfigReader.DefaultProfileDirectory, StartStopConfigReader.ProfileFileName(info.DevicePath));
-        _log.Write(string.Format(
-            CultureInfo.InvariantCulture,
-            "  start/stop profile {0}: {1}",
-            System.IO.File.Exists(profilePath) ? "found" : "absent",
-            profilePath));
-
         try {
+            // Log whether the profile file was located, so "start/stop does nothing" can be told apart
+            // from "profile found but the toggle is off" without guessing at the MD5 filename mapping.
+            // Inside the guard: ProfileFileName's MD5 can itself throw (a FIPS-enforced .NET Framework
+            // host rejects MD5.Create), and that must disable start/stop, never drop the controller.
+            string profilePath = System.IO.Path.Combine(
+                StartStopConfigReader.DefaultProfileDirectory, StartStopConfigReader.ProfileFileName(info.DevicePath));
+            _log.Write(string.Format(
+                CultureInfo.InvariantCulture,
+                "  start/stop profile {0}: {1}",
+                System.IO.File.Exists(profilePath) ? "found" : "absent",
+                profilePath));
+
             return StartStopConfigReader.Read(
                 StartStopConfigReader.DefaultProfileDirectory, info.DevicePath, channelCount);
         }
