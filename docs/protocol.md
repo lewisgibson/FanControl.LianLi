@@ -105,6 +105,20 @@ The manual-mode channel selector byte is `0x10 << ch`, so:
 - ch2 -> `0x40`
 - ch3 -> `0x80`
 
+## The 0x0416 coolers: Galahad II Trinity
+
+The Galahad II Trinity (vendor `0x0416`, pid `0x7371` Performance / `0x7373` Regular) does not speak the `0xE0` feature-report protocol above. It uses the 64-byte command packet shared with the Uni Fan TL (report id `0x01`, on the interface whose usage page is `0xFF1B`), written as an output report and answered on interrupt-IN. The commands the plugin uses, verified against L-Connect's `Galahad2TrinityDevice` (decompiled) and confirmed on a real `0x7373` over raw hidraw by a community member in [issue #30](https://github.com/lewisgibson/FanControl.LianLi/issues/30):
+
+- **Handshake `0x81`**: the reply's 4-byte payload is the fan RPM (big-endian, bytes 0-1) then the pump RPM (bytes 2-3).
+- **Set fan `0x8B [sync, duty]`** and **set pump `0x8A [sync, duty]`**: `duty` is the percent 1:1 (L-Connect clamps the top at 100 and nothing else); `sync` is L-Connect's `mbSync` flag. The plugin always sends `sync = 0` and drives the duty itself.
+
+What the hardware confirmation added, and what the plugin does with it:
+
+- The `sync` byte on the **fan** command is inert on the `0x7373`: the fans stay on the commanded duty whatever the motherboard PWM does. On the **pump** it works, handing the pump to the CPU_FAN header's PWM. The plugin never sets it on either channel, so this changes nothing today - it is recorded so nobody later exposes the fan channel as a motherboard-curve mode.
+- The pump's real range on the Regular is about 2200-3200 rpm (L-Connect's own `PumpRPMMinRegular`/`PumpRPMMaxRegular`; the Performance is 2200-4200). The firmware accepts duty down to 0 (L-Connect's `PumpPWMMin`) and floors the speed at its minimum, so the plugin's `PumpDutyFloor = 50` (about 2600 rpm) is deliberately conservative rather than a hardware limit.
+- L-Connect's fan slider floors at 10% (`FanPWMMin`), and the plugin does not: a 0% curve point sends duty 0, which spins the radiator fans down to roughly 250-350 rpm rather than stopping them.
+- Commanded fan and pump duty **persist in the controller across a full power cut**, and there is no autonomous thermal failsafe: with nothing driving it, the cooler holds whatever duty it was last given, however hot the CPU gets. That is why the plugin keeps re-asserting the duty on the keepalive cadence rather than writing once.
+
 ## Recorded upstream bugs we deliberately avoid
 
 These are real defects observed in upstream and forked implementations. They are listed here so the encoders are never "simplified" back into them.
