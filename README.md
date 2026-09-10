@@ -81,6 +81,7 @@ The ARGB build asserts LED ARGB-header sync at startup, handing the fans' lighti
 
 - **The controls do not show up.** Make sure you unblocked the file (step 2) before installing it. Make sure **L-Connect is not running** (see above) - it is the most common conflict; OpenRGB and other tools that open the same controller can clash too.
 - **Lighting resets to factory on every boot.** You are on the ARGB build with a controller that does not persist lighting; use the standard build.
+- **The fans stopped responding after sleep or hibernate.** Windows re-plugs the controller on the way back, and the plugin now reconnects to it by itself within a few seconds (the log shows `reopened ... after N faulted transfer(s)`). If a version older than this still freezes for you, update; if the current version does not recover, open an issue with the plugin log.
 - **Submitting a bug?** Include your controller's Name, VID, and PID from Windows Device Manager. The bug-report template walks you through it.
 
 ## Lighting: keep your L-Connect look without L-Connect
