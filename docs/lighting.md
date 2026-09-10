@@ -6,7 +6,7 @@ This document describes the **Lighting** build variant (`FanControl.LianLi.Light
 
 The Lian Li Uni controllers do **not** persist their LED state to onboard flash. The look you set survives while the PC is powered, but a power-off or cold boot reverts the fans to the factory rainbow. The usual way to restore it is to leave L-Connect installed so it re-applies your profile on boot - but L-Connect drives the same USB controller as this plugin and the two fight, which is why the plugin otherwise asks you to remove it.
 
-The Lighting build resolves that tension: it reads the look you already designed in L-Connect and **re-applies it itself at startup**. You design once in L-Connect, stop L-Connect so it is no longer fighting for the controller, and this plugin keeps the look across every reboot.
+The Lighting build resolves that tension: it reads the look you already designed in L-Connect and **re-applies it itself at startup**, and again whenever it reconnects to a controller that came back from sleep or hibernate. You design once in L-Connect, stop L-Connect so it is no longer fighting for the controller, and this plugin keeps the look across every reboot.
 
 ## How it works
 
@@ -66,6 +66,6 @@ The lighting code is gated behind the `ENABLE_LIGHTING` compile symbol (the stan
 - `Devices/JsonValue` - a tiny dependency-free JSON reader (the plugin ships a single DLL and cannot take a JSON NuGet dependency on netstandard2.0).
 - `Devices/LConnectConfigReader` + `Devices/LConnectControllerConfig` - read L-Connect's config directory and group it per controller.
 - `Devices/LightingReplay` - writes the encoded transfers in order, paced like L-Connect.
-- `Plugin/LianLiPlugin` - reads the config and applies a matching look during `Initialize`, before fan setup.
+- `Plugin/LianLiPlugin` - reads the config and applies a matching look during `Initialize`, before fan setup, and registers the same apply as each controller's reconnect replay so a controller that was re-enumerated (and possibly reset) across sleep or hibernate gets its look back on the next tick.
 
 It respects the same rules as the rest of the plugin (see [`.claude/rules/`](../.claude/rules/) and [`architecture.md`](architecture.md)): the encoder is pure, HidSharp stays confined to `Hid/`, and the feature is invisible in the standard and ARGB builds.

@@ -84,6 +84,10 @@ internal sealed class HidSharpTransport : IHidTransport {
     private readonly HidReopenBackoff _reopenBackoff = new HidReopenBackoff();
     private int _faultedTransfers;
 
+    // Bumped by every successful Reopen so the controller above can tell the device may have reset
+    // and replay its setup. Worker-thread only, like the handles it tracks.
+    private int _generation;
+
     public HidSharpTransport(HidStream stream, string devicePath, ILog log) {
         _stream = stream ?? throw new ArgumentNullException(nameof(stream));
         _log = log ?? throw new ArgumentNullException(nameof(log));
@@ -107,6 +111,8 @@ internal sealed class HidSharpTransport : IHidTransport {
     }
 
     public bool CanWrite => _stream.CanWrite;
+
+    public int Generation => _generation;
 
     public void Write(byte[] report) {
         EnsureOpen("HidStream.Write");
@@ -319,6 +325,7 @@ internal sealed class HidSharpTransport : IHidTransport {
         _inputHandle = inputHandle;
         _faulted = false;
         _reopenBackoff.Reset();
+        _generation++;
         _log.Write(string.Format(
             CultureInfo.InvariantCulture,
             "  reopened {0} after {1} faulted transfer(s)",

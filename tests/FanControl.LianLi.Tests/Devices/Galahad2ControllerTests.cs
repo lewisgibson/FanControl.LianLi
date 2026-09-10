@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using FanControl.LianLi.Devices;
 using FanControl.LianLi.Protocol;
 using FanControl.LianLi.Tests.Fakes;
@@ -31,6 +32,27 @@ public class Galahad2ControllerTests {
     public void Constructor_DoesNoIo() {
         var (_, transport, _) = NewController();
         Assert.Empty(transport.Writes);
+    }
+
+    [Fact]
+    public void ApplyPending_AfterTransportReopened_ReplaysLookThenResendsFanAndPump() {
+        var (controller, transport, _) = NewController();
+        var replayedAt = new List<int>();
+        controller.ReplayOnReconnect(() => replayedAt.Add(transport.Writes.Count));
+        controller.SetTarget(FanChannel, 50);
+        controller.SetTarget(PumpChannel, 70);
+        controller.ApplyPending();
+        transport.Clear();
+
+        // The transport reopened the cooler (a wake): no setup writes of its own, so the saved look
+        // replays first, then both unchanged duties are re-sent - the cooler may have reset.
+        transport.Generation = 1;
+        controller.ApplyPending();
+
+        Assert.Equal(new[] { 0 }, replayedAt);
+        Assert.Equal(2, transport.Writes.Count);
+        Assert.Equal(0x8B, transport.Writes[0][1]); // fan
+        Assert.Equal(0x8A, transport.Writes[1][1]); // pump
     }
 
     [Fact]

@@ -75,7 +75,7 @@ That single DLL is all you need - HidSharp ships with FanControl already. Your L
 
 Pick **standard** unless you specifically want this plugin to drive ARGB sync.
 
-The ARGB build asserts LED ARGB-header sync at startup, handing the fans' lighting to the motherboard's ARGB header. Controllers that store their lighting in their own memory handle this fine. But some controllers do **not** persist lighting to hardware (for example the **UNI FAN SL-Infinity 120 V1**); on those, asserting this at startup makes the lighting **revert to factory defaults every time the plugin starts**. If your lighting keeps resetting, switch to the standard build.
+The ARGB build asserts LED ARGB-header sync at startup, handing the fans' lighting to the motherboard's ARGB header. Controllers that store their lighting in their own memory handle this fine. But some controllers do **not** persist lighting to hardware (for example the **UNI FAN SL-Infinity 120 V1**); on those, asserting this at startup makes the lighting **revert to factory defaults every time the plugin starts** (and whenever it reconnects to the controller after sleep or hibernate). If your lighting keeps resetting, switch to the standard build.
 
 ### Troubleshooting
 
@@ -86,7 +86,7 @@ The ARGB build asserts LED ARGB-header sync at startup, handing the fans' lighti
 
 ## Lighting: keep your L-Connect look without L-Connect
 
-The **Lighting** build (`FanControl.LianLi.Lighting.dll`) lets you design your fan lighting once in Lian Li's L-Connect, then **stop L-Connect and keep the look** - re-applied for you by this plugin every time it starts.
+The **Lighting** build (`FanControl.LianLi.Lighting.dll`) lets you design your fan lighting once in Lian Li's L-Connect, then **stop L-Connect and keep the look** - re-applied for you by this plugin every time it starts, and again after the PC comes back from sleep or hibernate.
 
 This is useful because the Uni controllers do **not** store their lighting in their own memory: the look survives while the PC stays powered, but a full power-off or cold boot resets it to the factory rainbow. Normally you would keep L-Connect running just to re-apply your colours after a reboot - but L-Connect fights this plugin (see [above](#do-not-run-l-connect-at-the-same-time)). The Lighting build removes that trade-off: it reads L-Connect's own saved configuration and re-applies the look itself, so nothing from Lian Li needs to be running.
 

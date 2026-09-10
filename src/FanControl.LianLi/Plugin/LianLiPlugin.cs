@@ -229,6 +229,13 @@ public sealed class LianLiPlugin : IPlugin2, IDisposable {
             bool[] startStopEnabled = ReadStartStop(info, protocol.ChannelCount);
             var controller = new FanController(_controllers.Count, transport, protocol, startStopEnabled, _clock, _log);
             _controllers.Add(controller);
+#if ENABLE_LIGHTING
+            // The look is volatile on the device, so it is replayed whenever the transport reconnects
+            // a re-enumerated (possibly reset) controller - the same guarded apply as at startup,
+            // driven on the worker thread through the controller's reconnect replay.
+            IHidTransport ownedTransport = transport;
+            controller.ReplayOnReconnect(() => ApplyLighting(ownedTransport, info, lightingConfigs));
+#endif
             transport = null; // ownership passed to the controller, which disposes it
             AssertManualMode(controller, info);
             DetectPopulation(controller, info);
@@ -366,6 +373,8 @@ public sealed class LianLiPlugin : IPlugin2, IDisposable {
             IHidTransport ownedTransport = transport;
             transport = null;
             ApplyLighting(ownedTransport, info, lightingConfigs);
+            // And again whenever the transport reconnects a re-enumerated (possibly reset) device.
+            controller.ReplayOnReconnect(() => ApplyLighting(ownedTransport, info, lightingConfigs));
 #else
             transport = null; // ownership passed to the controller, which disposes it
 #endif

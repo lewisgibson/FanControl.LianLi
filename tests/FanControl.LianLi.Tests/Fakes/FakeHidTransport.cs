@@ -57,6 +57,12 @@ internal sealed class FakeHidTransport : IHidTransport {
 
     public bool CanWrite => true;
 
+    /// <summary>
+    /// Settable so a test can simulate the transport having reopened the device after a handle
+    /// fault (a sleep/wake) and assert that the controller replays its setup on the next tick.
+    /// </summary>
+    public int Generation { get; set; }
+
     public void Write(byte[] report) {
         if (FailWrites) {
             throw new IOException("simulated device write failure");
@@ -113,6 +119,16 @@ internal sealed class FakeHidTransport : IHidTransport {
             }
 
             return buffer;
+        }
+    }
+
+    /// <summary>
+    /// A copy of <see cref="Transfers"/> taken under the fake's lock, for a test that reads the log
+    /// while the keepalive worker is still appending to it.
+    /// </summary>
+    public KeyValuePair<bool, byte[]>[] SnapshotTransfers() {
+        lock (_lock) {
+            return Transfers.ToArray();
         }
     }
 

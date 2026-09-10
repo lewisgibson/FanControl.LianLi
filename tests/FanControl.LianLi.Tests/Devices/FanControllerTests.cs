@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 using FanControl.LianLi.Devices;
 using FanControl.LianLi.Protocol;
 using FanControl.LianLi.Tests.Fakes;
@@ -180,6 +182,76 @@ public class FanControllerTests {
         Assert.Equal(2, transport.Features.Count);
         Assert.Equal(SlManualCh0, transport.Features[0]);
         Assert.Equal(SlSpeedCh0Duty50, transport.Features[1]);
+    }
+
+#if ENABLE_ARGB
+    private const int SetupWrites = 5; // ARGB sync + manual mode on four channels
+#else
+    private const int SetupWrites = 4; // manual mode on four channels
+#endif
+
+    [Fact]
+    public void ApplyPending_AfterTransportReopened_ReplaysSetupThenResendsEveryChannel() {
+        var (controller, transport, _) = NewSlController();
+        var replayedAt = new List<int>();
+        controller.ReplayOnReconnect(() => replayedAt.Add(transport.Features.Count));
+        controller.SetTarget(0, 50);
+        controller.ApplyPending();
+        transport.Clear();
+
+        // The transport reopened the device (a wake): the saved-look replay runs first, then the
+        // setup writes, then the unchanged-and-fresh duty is re-sent anyway - the device may have reset.
+        transport.Generation = 1;
+        controller.ApplyPending();
+
+        Assert.Equal(new[] { 0 }, replayedAt);
+        Assert.Equal(SlManualCh0, transport.Features[SetupWrites - 4]);
+        Assert.Equal(new byte[] { 224, 16, 49, 0x80, 0, 0 }, transport.Features[SetupWrites - 1]);
+        Assert.Equal(SlManualCh0, transport.Features[SetupWrites]);
+        Assert.Equal(SlSpeedCh0Duty50, transport.Features[SetupWrites + 1]);
+        Assert.Equal(SetupWrites + 2, transport.Features.Count);
+    }
+
+    [Fact]
+    public void ApplyPending_SameTransportGeneration_DoesNotReplaySetup() {
+        var (controller, transport, _) = NewSlController();
+        int replays = 0;
+        controller.ReplayOnReconnect(() => replays++);
+        controller.SetTarget(0, 50);
+        controller.ApplyPending();
+        transport.Clear();
+
+        controller.ApplyPending();
+
+        Assert.Equal(0, replays);
+        Assert.Empty(transport.Features);
+    }
+
+    [Fact]
+    public void ApplyPending_ReplayFaults_RetriesOnTheNextTick() {
+        var (controller, transport, _) = NewSlController();
+        int replays = 0;
+        controller.ReplayOnReconnect(() => replays++);
+        controller.SetTarget(0, 50);
+        controller.ApplyPending();
+        transport.Clear();
+
+        // The device is back but still refuses writes: the fault surfaces to the worker and the
+        // generation stays unrecorded, so the whole replay runs again once writes succeed.
+        transport.Generation = 1;
+        transport.FailFeatures = true;
+        Assert.Throws<IOException>(() => controller.ApplyPending());
+        transport.FailFeatures = false;
+        controller.ApplyPending();
+
+        Assert.Equal(2, replays);
+        Assert.Equal(SetupWrites + 2, transport.Features.Count);
+    }
+
+    [Fact]
+    public void ReplayOnReconnect_RejectsNull() {
+        var (controller, _, _) = NewSlController();
+        Assert.Throws<ArgumentNullException>(() => controller.ReplayOnReconnect(null!));
     }
 
     [Fact]

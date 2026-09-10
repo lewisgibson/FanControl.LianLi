@@ -45,4 +45,14 @@ internal interface IFanDevice : IDisposable {
 
     /// <summary>Read every channel's RPM into the cache, ignoring implausible readings.</summary>
     void PollRpm();
+
+    /// <summary>
+    /// Register work to replay whenever the transport reports it reopened the device (its
+    /// <c>Generation</c> moved on after a handle fault). A re-enumerated device may have been
+    /// power-cycled and lost its volatile state, so the Lighting build registers its saved-look
+    /// replay here; the device's own setup writes are replayed regardless. Runs on the worker
+    /// thread, in the same order Initialize used, before the next duty write. Holds at most one
+    /// replay; the standard build registers none.
+    /// </summary>
+    void ReplayOnReconnect(Action replay);
 }

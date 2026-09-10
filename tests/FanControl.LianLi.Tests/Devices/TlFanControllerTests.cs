@@ -52,6 +52,28 @@ public class TlFanControllerTests {
     }
 
     [Fact]
+    public void ApplyPending_AfterTransportReopened_RetakesSoftwareControlThenResendsEveryFan() {
+        var (controller, transport, _) = NewController((0, 0, 1000), (0, 1, 1100));
+        var replayedAt = new List<int>();
+        controller.ReplayOnReconnect(() => replayedAt.Add(transport.Writes.Count));
+        controller.SetTarget(0, 50);
+        controller.SetTarget(1, 60);
+        controller.ApplyPending();
+        transport.Clear();
+
+        // The transport reopened the hub (a wake): motherboard sync is switched off per fan again,
+        // then the saved look replays, then both unchanged duties are re-sent - the hub may have reset.
+        transport.Generation = 1;
+        controller.ApplyPending();
+
+        Assert.Equal(0xB1, transport.Writes[0][1]);
+        Assert.Equal(0x00, transport.Writes[0][6] & 0x80);
+        Assert.Equal(0xB1, transport.Writes[1][1]);
+        Assert.Equal(new[] { 2 }, replayedAt);
+        Assert.Equal(4, transport.Writes.Count); // two sync-off, two set-speed
+    }
+
+    [Fact]
     public void ApplyPending_WritesSetSpeedForTheFan() {
         var (controller, transport, _) = NewController((0, 0, 1000));
         transport.Clear();

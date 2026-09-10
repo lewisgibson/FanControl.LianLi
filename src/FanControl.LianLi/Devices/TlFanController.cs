@@ -38,6 +38,14 @@ internal sealed class TlFanController : IFanDevice {
     private readonly float[] _rpm;            // last measured RPM
     private readonly bool[] _rpmImplausible;  // last read rejected as garbage
 
+    // The transport generation this hub last took software control under. A newer one means the
+    // transport reopened the device after a handle fault, and a re-enumerated hub may have been
+    // power-cycled and reverted to motherboard sync with its saved look lost, so both are replayed
+    // and every duty re-sent before the next write. Worker-thread only; the replay is registered
+    // before the worker starts.
+    private int _setUpGeneration;
+    private Action? _reconnectReplay;
+
     public TlFanController(int index, IHidTransport transport, IClock clock, ILog log) {
         _index = index;
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
@@ -73,9 +81,8 @@ internal sealed class TlFanController : IFanDevice {
 
         // Take software control of each fan once. L-Connect sets motherboard-RPM-sync separately
         // from the speed writes, so this is asserted here rather than before every speed write.
-        for (int ch = 0; ch < count; ch++) {
-            _transport.Write(TlFanProtocol.EncodeMotherboardSync(_ports[ch], _fans[ch], sync: false));
-        }
+        TakeSoftwareControl();
+        _setUpGeneration = _transport.Generation;
     }
 
     /// <summary>How many fans the hub reported at construction.</summary>
@@ -99,6 +106,11 @@ internal sealed class TlFanController : IFanDevice {
             $"Lian Li Uni TL #{_index + 1} Port {port + 1} Fan {fan + 1}",
             $"LianLi/{_index}/p{port}f{fan}/fan",
             $"Lian Li Uni TL #{_index + 1} Port {port + 1} Fan {fan + 1} RPM");
+    }
+
+    /// <inheritdoc />
+    public void ReplayOnReconnect(Action replay) {
+        _reconnectReplay = replay ?? throw new ArgumentNullException(nameof(replay));
     }
 
     // ---------- FanControl-thread surface (no I/O) ----------
@@ -128,6 +140,8 @@ internal sealed class TlFanController : IFanDevice {
 
     /// <summary>Push any changed-or-stale channel targets to the hardware.</summary>
     public void ApplyPending() {
+        ReplaySetupIfReconnected();
+
         for (int ch = 0; ch < _ports.Length; ch++) {
             int target;
             int lastWritten;
@@ -187,6 +201,38 @@ internal sealed class TlFanController : IFanDevice {
 
     public void Dispose() {
         _transport.Dispose();
+    }
+
+    private void TakeSoftwareControl() {
+        for (int ch = 0; ch < _ports.Length; ch++) {
+            _transport.Write(TlFanProtocol.EncodeMotherboardSync(_ports[ch], _fans[ch], sync: false));
+        }
+    }
+
+    // A reopened transport means the hub was re-enumerated and may have come back reset. Redo what
+    // construction and Initialize did for it, in the same order - software control, then the saved
+    // look - and forget every last-written duty so the loop that follows re-sends each fan now. A
+    // throw leaves the generation unrecorded, so the replay is retried on the next tick.
+    private void ReplaySetupIfReconnected() {
+        int generation = _transport.Generation;
+        if (generation == _setUpGeneration) {
+            return;
+        }
+
+        TakeSoftwareControl();
+        _reconnectReplay?.Invoke();
+        lock (_lock) {
+            for (int ch = 0; ch < _ports.Length; ch++) {
+                _lastWritten[ch] = -2;
+            }
+        }
+
+        _setUpGeneration = generation;
+        _log.Write(string.Format(
+            CultureInfo.InvariantCulture,
+            "T{0} reconnected: setup replayed (transport generation {1})",
+            _index,
+            generation));
     }
 
     private static int Address(int port, int fanIndex) => ((port & 0x0F) << 4) | (fanIndex & 0x0F);

@@ -11,6 +11,15 @@ internal interface IHidTransport : IDisposable {
     /// <summary>True when the underlying stream accepts writes.</summary>
     bool CanWrite { get; }
 
+    /// <summary>
+    /// How many times the transport has reopened the device after a handle fault (a USB
+    /// re-enumeration across sleep/wake or hibernate); <c>0</c> for a handle that has never
+    /// faulted. A re-enumerated device may have reset, so a controller compares this against the
+    /// value it last set the device up under and replays its setup writes (and any saved lighting)
+    /// when it has moved on. Read on the worker thread only.
+    /// </summary>
+    int Generation { get; }
+
     /// <summary>Write a raw output report. No-ops if the stream is not writable.</summary>
     void Write(byte[] report);
 

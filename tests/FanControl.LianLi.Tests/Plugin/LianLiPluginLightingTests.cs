@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using System.IO.Compression;
 using System.Text;
 using FanControl.LianLi.Devices;
@@ -69,6 +70,58 @@ public sealed class LianLiPluginLightingTests : IDisposable
             Assert.Equal(expected[i].IsFeature, transport.Transfers[i].Key);
             Assert.Equal(expected[i].Report, transport.Transfers[i].Value);
         }
+    }
+
+    [Fact]
+    public void Reconnect_ReappliesSavedLook_OnTheNextTick()
+    {
+        WriteSavedLook();
+        var enumerator = new FakeEnumerator(Device(0xA102, DevicePath));
+        using LianLiPlugin plugin = NewPlugin(enumerator);
+        plugin.Initialize();
+        FakeHidTransport transport = Assert.Single(enumerator.Opened);
+        transport.Clear();
+
+        // The transport reports it reopened the device (a wake). Either the host tick or the
+        // background keepalive tick picks it up; poll the host tick with a bounded wait rather
+        // than a fixed sleep.
+        transport.Generation = 1;
+        IReadOnlyList<LightingTransfer> expected = SlInfinityLightingEncoder.Encode(
+            new[] { new LightingPortState(0, 26, 0, 0, 0, new[] { new RgbColor(255, 0, 0) }) },
+            new[] { 4, 4, 4, 4 });
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline && IndexOfSequence(transport, expected) < 0)
+        {
+            plugin.Update();
+            Thread.Sleep(20);
+        }
+
+        plugin.Close();
+
+        // The look appears again, contiguous, somewhere after the reconnect (an RPM primer from a
+        // tick already in flight may precede it).
+        Assert.True(IndexOfSequence(transport, expected) >= 0, "saved look was not replayed after the reconnect");
+    }
+
+    private static int IndexOfSequence(FakeHidTransport transport, IReadOnlyList<LightingTransfer> expected)
+    {
+        KeyValuePair<bool, byte[]>[] transfers = transport.SnapshotTransfers();
+        for (int start = 0; start + expected.Count <= transfers.Length; start++)
+        {
+            bool match = true;
+            for (int i = 0; i < expected.Count && match; i++)
+            {
+                match = transfers[start + i].Key == expected[i].IsFeature
+                    && expected[i].Report.AsSpan().SequenceEqual(transfers[start + i].Value);
+            }
+
+            if (match)
+            {
+                return start;
+            }
+        }
+
+        return -1;
     }
 
     [Fact]
