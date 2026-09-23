@@ -187,7 +187,9 @@ public class WindowsNativeApiTests {
         var buffer = new char[length];
         Assert.Equal(0, ConfigurationManager.GetDeviceIdList("USB", buffer, length, filterPresentUsb));
         string[] ids = new string(buffer).Split(new[] { '\0' }, StringSplitOptions.RemoveEmptyEntries);
-        Assert.NotEmpty(ids);
+        if (ids.Length == 0) {
+            Assert.Skip("this machine has no present USB device to read the hardware key of (a CI runner, say)");
+        }
 
         int opened = 0;
         foreach (string id in ids.Take(10)) {

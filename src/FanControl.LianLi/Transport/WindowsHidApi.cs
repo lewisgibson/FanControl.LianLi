@@ -68,10 +68,12 @@ internal sealed class WindowsHidApi : IHidApi, IHidOverlappedApi {
     public bool GetPreparsedData(SafeHandle handle, out IntPtr preparsed, out int error)
         => Report(NativeMethods.HidD_GetPreparsedData(handle, out preparsed), out error);
 
+    // HIDP_STATUS_SUCCESS is not zero, so it is reported as 0, like every other call's success.
     public bool GetCapabilities(IntPtr preparsed, out HidCapabilities capabilities, out int status) {
-        status = NativeMethods.HidP_GetCaps(preparsed, out NativeMethods.HidpCaps caps);
+        int returned = NativeMethods.HidP_GetCaps(preparsed, out NativeMethods.HidpCaps caps);
         capabilities = new HidCapabilities(caps.UsagePage, caps.InputReportByteLength, caps.OutputReportByteLength, caps.FeatureReportByteLength);
-        return status == HidpStatusSuccess;
+        status = returned == HidpStatusSuccess ? 0 : returned;
+        return returned == HidpStatusSuccess;
     }
 
     // Frees memory hid.dll allocated in this process; it reaches no device and cannot fail in any way
