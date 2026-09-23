@@ -12,11 +12,6 @@
          the two variants (and survive a version-to-version upgrade, a same-name swap). -->
     <AssemblyName>FanControl.LianLi</AssemblyName>
     <RootNamespace>FanControl.LianLi</RootNamespace>
-    <!-- A library build does not copy NuGet dependencies to the output. The plugin
-         is loaded by FanControl from a folder, so HidSharp.dll must sit beside it;
-         copy lock-file assemblies so the build output is the full deployable set.
-         FanControl.Plugins stays out of the output via its Private=false reference. -->
-    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <!-- The FanControl host ships as BOTH a .NET Framework 4.8 build and a modern
          .NET (8/10) build. A single netstandard2.0 DLL is the only TFM that loads
          into both CLRs. Never retarget to net48 or net*-windows. See docs/tfm.md. -->
@@ -29,10 +24,6 @@
       <HintPath>dlls\FanControl.Plugins.dll</HintPath>
       <Private>false</Private>
     </Reference>
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="HidSharp" />
   </ItemGroup>
 
   <ItemGroup>

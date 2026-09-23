@@ -49,4 +49,14 @@ public sealed class CommandPacketTests {
         Assert.Equal(3, CommandPacket.PayloadLengthOf(packet));
         Assert.Equal(new byte[] { 0x90, 0x05, 0xDC }, CommandPacket.Payload(packet, 3));
     }
+
+    [Fact]
+    public void RejectsMissingOrTruncatedPackets() {
+        Assert.Throws<ArgumentNullException>(() => CommandPacket.Build(0x01, null!));
+        Assert.Throws<ArgumentNullException>(() => CommandPacket.Payload(null!, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => CommandPacket.Payload(new byte[8], -1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => CommandPacket.Payload(new byte[8], 3));
+        Assert.Throws<ArgumentNullException>(() => CommandPacket.PayloadLengthOf(null!));
+        Assert.Throws<ArgumentOutOfRangeException>(() => CommandPacket.PayloadLengthOf(new byte[2]));
+    }
 }

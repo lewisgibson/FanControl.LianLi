@@ -56,5 +56,6 @@ jobs:
               # neither) is already baked into the test DLL - no need to repeat the
               # property here (it would be a no-op against the already-built test DLL).
               # This is the step that runs each variant's gated tests, the lighting ones
-              # included.
-              run: dotnet test -c Release --no-build
+              # included. CollectCoverage holds each variant to full line and branch coverage of the code
+              # compiled into it; the threshold lives in the test project.
+              run: dotnet test -c Release --no-build -p:CollectCoverage=true

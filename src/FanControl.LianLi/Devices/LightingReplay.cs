@@ -2,15 +2,15 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
-using FanControl.LianLi.Hid;
+using FanControl.LianLi.Transport;
 using FanControl.LianLi.Protocol;
 
 namespace FanControl.LianLi.Devices;
 
 /// <summary>
 /// Writes an encoded lighting sequence to a controller in order, routing feature reports to
-/// <see cref="IHidTransport.SetFeature"/> and colour output reports to
-/// <see cref="IHidTransport.Write"/>. The bytes come from <see cref="SlInfinityLightingEncoder"/>;
+/// <see cref="IDeviceTransport.SetFeature"/> and colour output reports to
+/// <see cref="IDeviceTransport.Write"/>. The bytes come from <see cref="SlInfinityLightingEncoder"/>;
 /// this is faithful playback with no byte math of its own.
 /// </summary>
 internal static class LightingReplay
@@ -25,7 +25,7 @@ internal static class LightingReplay
     /// Write every transfer in <paramref name="transfers"/> to <paramref name="transport"/>,
     /// in order, paced like L-Connect.
     /// </summary>
-    public static void Apply(IHidTransport transport, IReadOnlyList<LightingTransfer> transfers)
+    public static void Apply(IDeviceTransport transport, IReadOnlyList<LightingTransfer> transfers)
     {
         if (transport is null)
         {

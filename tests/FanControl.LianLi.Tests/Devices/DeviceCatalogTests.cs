@@ -1,3 +1,4 @@
+using System;
 using FanControl.LianLi.Devices;
 using FanControl.LianLi.Protocol;
 using Xunit;
@@ -16,28 +17,27 @@ public class DeviceCatalogTests {
     [InlineData(0xA104, "AlV2")]
     [InlineData(0xA105, "SlV2")]
     [InlineData(0xA106, "Sl")] // Uni SL (Redragon OEM variant)
-    public void TryGetProtocol_MapsKnownPidsToFamily(int pid, string expectedFamily) {
-        var catalog = new DeviceCatalog();
-        Assert.True(catalog.TryGetProtocol(pid, out IFanProtocol? protocol));
-        Assert.NotNull(protocol);
-        Assert.Equal(expectedFamily, protocol!.Family.ToString());
-    }
+    public void ProtocolFor_MapsKnownPidsToFamily(int pid, string expectedFamily)
+        => Assert.Equal(expectedFamily, new DeviceCatalog().ProtocolFor(pid).Family.ToString());
 
     [Theory]
     [InlineData(0x1234)] // arbitrary unknown
     [InlineData(0xA200)] // Strimer L Connect - not a fan controller
     [InlineData(0x8050)] // Universal Screen LED - not a fan controller
     [InlineData(0x7373)] // Galahad II Trinity - different VID, not a fan controller
-    public void TryGetProtocol_RejectsUnknownAndOutOfScopePids(int pid) {
+    public void ProtocolFor_RejectsUnknownAndOutOfScopePids(int pid)
+        => Assert.Throws<ArgumentException>(() => new DeviceCatalog().ProtocolFor(pid));
+
+    [Fact]
+    public void VendorIds_ContainBothFamiliesAndTheWirelessAlternate() {
         var catalog = new DeviceCatalog();
-        Assert.False(catalog.TryGetProtocol(pid, out IFanProtocol? protocol));
-        Assert.Null(protocol);
+        Assert.Equal(new[] { 0x0CF2, 0x0416, 0x1A86 }, catalog.VendorIds);
     }
 
     [Fact]
-    public void VendorIds_ContainBothFamilies() {
+    public void WirelessProductIds_ContainBothDonglesOfBothVendorPairs() {
         var catalog = new DeviceCatalog();
-        Assert.Equal(new[] { 0x0CF2, 0x0416 }, catalog.VendorIds);
+        Assert.Equal(new[] { 0x8040, 0x8041, 0xE304, 0xE305 }, catalog.WirelessProductIds);
     }
 
     [Fact]
@@ -74,6 +74,11 @@ public class DeviceCatalogTests {
     [InlineData(0x0416, 0x7395, "Galahad2")] // Galahad II Vision LCD (alternate pid)
     [InlineData(0x0416, 0x7398, "Galahad2")] // HydroShift LCD
     [InlineData(0x0416, 0x739A, "Galahad2")] // HydroShift LCD (alternate pid)
+    [InlineData(0x0416, 0x8040, "WirelessTransmitter")] // L-Wireless transmitter dongle
+    [InlineData(0x0416, 0x8041, "WirelessReceiver")]    // L-Wireless receiver dongle
+    [InlineData(0x1A86, 0xE304, "WirelessTransmitter")] // alternate vendor pair
+    [InlineData(0x1A86, 0xE305, "WirelessReceiver")]
+    [InlineData(0x1A86, 0x8040, "Unknown")]  // right pid, wrong vendor for the dongle
     [InlineData(0x0CF2, 0x9999, "Unknown")]  // unknown Uni-vendor pid
     [InlineData(0x0416, 0x9999, "Unknown")]  // unknown 0x0416 pid
     [InlineData(0x1234, 0xA102, "Unknown")]  // right pid, wrong vendor

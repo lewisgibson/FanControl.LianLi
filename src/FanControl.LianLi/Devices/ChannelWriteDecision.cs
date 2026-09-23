@@ -34,7 +34,7 @@ internal static class ChannelWriteDecision {
         }
 
         bool changed = target != lastWritten;
-        bool stale = (now - lastWriteUtc) >= refreshInterval;
+        bool stale = ClockSpan.Since(now, lastWriteUtc) >= refreshInterval;
         return changed || stale;
     }
 }

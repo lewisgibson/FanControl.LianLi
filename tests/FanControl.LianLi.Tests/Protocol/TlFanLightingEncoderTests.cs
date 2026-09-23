@@ -68,5 +68,13 @@ public sealed class TlFanLightingEncoderTests
     {
         Assert.Empty(TlFanLightingEncoder.Encode(new List<TlFanLightingState>()));
     }
+
+    [Fact]
+    public void Encode_NullFans_Throws()
+        => Assert.Throws<System.ArgumentNullException>(() => TlFanLightingEncoder.Encode(null!));
+
+    [Fact]
+    public void State_RejectsMissingColours()
+        => Assert.Throws<System.ArgumentNullException>(() => new TlFanLightingState(0, 0, 0, 0, 0, 0, null!));
 }
 #endif

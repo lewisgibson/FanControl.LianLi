@@ -45,6 +45,9 @@ internal sealed class JsonValue {
         return null;
     }
 
+    /// <summary>Whether this value is an array.</summary>
+    public bool IsArray => _value is List<JsonValue>;
+
     /// <summary>The array elements, or an empty list when this value is not an array.</summary>
     public IReadOnlyList<JsonValue> Elements =>
         _value as List<JsonValue> ?? (IReadOnlyList<JsonValue>)Array.Empty<JsonValue>();
@@ -53,11 +56,18 @@ internal sealed class JsonValue {
     public IEnumerable<string> MemberNames =>
         _value is Dictionary<string, JsonValue> map ? map.Keys : (IEnumerable<string>)Array.Empty<string>();
 
+    /// <summary>The object member values, or an empty collection when this value is not an object.</summary>
+    public IEnumerable<JsonValue> MemberValues =>
+        _value is Dictionary<string, JsonValue> map ? map.Values : (IEnumerable<JsonValue>)Array.Empty<JsonValue>();
+
     /// <summary>This value as a string, or null when it is not a JSON string.</summary>
     public string? AsString() => _value as string;
 
     /// <summary>This value as an int (number truncated toward zero), or null when it is not a JSON number.</summary>
     public int? AsInt() => _value is double number ? (int)number : (int?)null;
+
+    /// <summary>This value as a double, or null when it is not a JSON number.</summary>
+    public double? AsDouble() => _value is double number ? number : (double?)null;
 
     /// <summary>This value as a bool, or null when it is not a JSON boolean.</summary>
     public bool? AsBool() => _value is bool flag ? flag : (bool?)null;

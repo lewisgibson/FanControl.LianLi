@@ -11,11 +11,23 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
 
+  <!-- Coverage, measured when a run passes -p:CollectCoverage=true (the gate in build.ps1 and CI
+       does). Only the plugin assembly counts, and every line of it compiled into the variant under
+       test must run: the only code exempt is [ExcludeFromCodeCoverage], which is kept to the P/Invoke
+       seams that need real Windows devices. Lines, branches and methods are all held to it. -->
+  <PropertyGroup>
+    <Include>[FanControl.LianLi]*</Include>
+    <CoverletOutputFormat>cobertura</CoverletOutputFormat>
+    <CoverletOutput>$(MSBuildThisFileDirectory)../../coverage/</CoverletOutput>
+    <Threshold>100</Threshold>
+    <ThresholdType>line,branch,method</ThresholdType>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.runner.visualstudio" />
-    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+    <PackageReference Include="coverlet.msbuild" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,5 +1,6 @@
+using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Linq;
 using FanControl.LianLi.Protocol;
 
@@ -8,9 +9,10 @@ namespace FanControl.LianLi.Devices;
 /// <summary>
 /// Recognises the Lian Li devices this plugin drives and classifies a located one into a
 /// <see cref="DeviceKind"/> so the plugin knows what to build. The Uni 0x0CF2 controllers
-/// map to a pure <see cref="IFanProtocol"/> via <see cref="TryGetProtocol"/>; the 0x0416
+/// map to a pure <see cref="IFanProtocol"/> via <see cref="ProtocolFor"/>; the 0x0416
 /// command-packet controllers (Uni Fan TL, Galahad II Trinity) have no <c>IFanProtocol</c>
-/// and are identified by <see cref="Classify"/> instead. The Strimer Plus (0xA200) is a
+/// and are identified by <see cref="Classify"/> instead, as are the L-Wireless dongles in
+/// <see cref="WirelessProductIds"/>. The Strimer Plus (0xA200) is a
 /// lighting-only device listed in <see cref="LightingProductIds"/>. Unknown ids classify as
 /// <see cref="DeviceKind.Unknown"/> and produce no controller and no writes.
 /// </summary>
@@ -59,7 +61,7 @@ internal sealed class DeviceCatalog {
             { 0xA106, sl },         // Uni SL (Redragon OEM variant) - L-Connect drives it as an SL fan
         };
 
-        VendorIds = new[] { UniVendorId, CommandPacketVendorId };
+        VendorIds = new[] { UniVendorId, CommandPacketVendorId, WirelessProtocol.AlternateVendorId };
         ProductIds = _byProductId.Keys.ToArray();
 
         // The 0x0416 fan/pump controllers. They share the transport and enumeration with the Uni
@@ -68,9 +70,18 @@ internal sealed class DeviceCatalog {
 
         // Lighting-only products (no fan protocol) the Lighting build still locates to drive RGB.
         LightingProductIds = new[] { 0xA200 }; // Strimer Plus
+
+        // The L-Wireless dongles: a transmitter and a receiver, each its own USB (WinUSB) device,
+        // built together into one wireless controller.
+        WirelessProductIds = new[] {
+            WirelessProtocol.TransmitterProductId,
+            WirelessProtocol.ReceiverProductId,
+            WirelessProtocol.AlternateTransmitterProductId,
+            WirelessProtocol.AlternateReceiverProductId,
+        };
     }
 
-    /// <summary>The USB vendor ids the plugin scans: the Uni family (0x0CF2) and the 0x0416 family.</summary>
+    /// <summary>The USB vendor ids the plugin scans: the Uni family (0x0CF2), the 0x0416 family, and the wireless dongles' alternate vendor.</summary>
     public IReadOnlyList<int> VendorIds { get; }
 
     /// <summary>Every Uni fan product id backed by an <see cref="IFanProtocol"/>.</summary>
@@ -84,6 +95,9 @@ internal sealed class DeviceCatalog {
     /// Lighting build drives. They are located and applied, never registered as fan controllers.
     /// </summary>
     public IReadOnlyList<int> LightingProductIds { get; }
+
+    /// <summary>The L-Wireless dongle product ids (transmitter and receiver, both vendor pairs), located but built as a pair.</summary>
+    public IReadOnlyList<int> WirelessProductIds { get; }
 
     /// <summary>
     /// Classify a located device by its vendor and product id so the plugin knows what to build.
@@ -109,14 +123,28 @@ internal sealed class DeviceCatalog {
             }
         }
 
+        if (WirelessProtocol.IsTransmitter(vendorId, productId)) {
+            return DeviceKind.WirelessTransmitter;
+        }
+
+        if (WirelessProtocol.IsReceiver(vendorId, productId)) {
+            return DeviceKind.WirelessReceiver;
+        }
+
         return DeviceKind.Unknown;
     }
 
     /// <summary>
-    /// Look up the protocol for a Uni product id. Returns false (and a null
-    /// protocol) for any id without an <see cref="IFanProtocol"/> (including the 0x0416 family).
+    /// The protocol for a Uni product id - one <see cref="Classify"/> reports as
+    /// <see cref="DeviceKind.UniFan"/>. Throws <see cref="ArgumentException"/> for any other id,
+    /// including the 0x0416 family, which has no <see cref="IFanProtocol"/>.
     /// </summary>
-    public bool TryGetProtocol(int productId, [MaybeNullWhen(false)] out IFanProtocol protocol) {
-        return _byProductId.TryGetValue(productId, out protocol);
+    public IFanProtocol ProtocolFor(int productId) {
+        if (!_byProductId.TryGetValue(productId, out IFanProtocol? protocol)) {
+            throw new ArgumentException(string.Format(
+                CultureInfo.InvariantCulture, "Product id 0x{0:x4} is not a Uni fan controller.", productId), nameof(productId));
+        }
+
+        return protocol;
     }
 }

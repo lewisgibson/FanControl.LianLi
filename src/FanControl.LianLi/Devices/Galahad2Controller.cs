@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using FanControl.LianLi.Hid;
 using FanControl.LianLi.Logging;
 using FanControl.LianLi.Protocol;
+using FanControl.LianLi.Transport;
 
 namespace FanControl.LianLi.Devices;
 
@@ -24,7 +24,7 @@ internal sealed class Galahad2Controller : IFanDevice {
     private const int HandshakeReplyLength = 64;
 
     private readonly int _index;
-    private readonly IHidTransport _transport;
+    private readonly IDeviceTransport _transport;
     private readonly IClock _clock;
     private readonly ILog _log;
 
@@ -43,7 +43,7 @@ internal sealed class Galahad2Controller : IFanDevice {
     private int _setUpGeneration;
     private Action? _reconnectReplay;
 
-    public Galahad2Controller(int index, IHidTransport transport, IClock clock, ILog log) {
+    public Galahad2Controller(int index, IDeviceTransport transport, IClock clock, ILog log) {
         _index = index;
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));

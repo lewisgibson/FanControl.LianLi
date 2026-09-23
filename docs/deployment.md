@@ -6,7 +6,7 @@ How the built plugin actually reaches a running FanControl, and the non-obvious 
 
 The deployable artifact is a single file: `FanControl.LianLi.dll` (standard), `FanControl.LianLi.Argb.dll` (the ARGB variant - see [protocol.md](protocol.md)), or `FanControl.LianLi.Lighting.dll` (the Lighting variant - see [lighting.md](lighting.md)). A user installs one of the three, never more than one. You do NOT ship anything else:
 
-- `HidSharp.dll` - FanControl already ships HidSharp in its own install folder (it uses HidSharp for its built-in HID controllers). HidSharp is not strong-named, so the plugin binds by simple name to whatever 2.6.x the host has loaded. Shipping a second copy is pointless (the host's already-loaded one wins) and just clutters the Plugins folder.
+- No USB library. The plugin reaches the controllers through Windows' own `hid.dll`, `winusb.dll`, `cfgmgr32.dll` and `kernel32.dll`, and does not use - or ship, or bind to - the `HidSharp.dll` FanControl carries for its own HID sensors. That copy is shared by everything in the FanControl process and its device scan holds a process-wide lock with no deadline, so a controller wedged inside a plugin's scan could freeze FanControl's own HID sources; see [architecture.md](architecture.md).
 - `FanControl.Plugins.dll` - the host contract assembly, always provided by the host. Never ship it.
 
 The **Lighting** variant needs no companion file either: it reads L-Connect's own saved configuration directly from `C:\ProgramData\Lian-Li\L-Connect 3` (read-only) and re-applies the look. With no L-Connect configuration present it behaves exactly like the standard build. See [lighting.md](lighting.md).

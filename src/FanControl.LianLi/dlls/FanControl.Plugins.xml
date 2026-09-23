@@ -18,7 +18,7 @@
         </member>
         <member name="M:FanControl.Plugins.IPlugin.Initialize">
             <summary>
-            Called whenever the program starts or a refresh (Close + Initialize) is executed.
+            Called whenever the program starts or a refresh (Close -> Initialize -> Load) is executed.
             </summary>
         </member>
         <member name="M:FanControl.Plugins.IPlugin.Load(FanControl.Plugins.IPluginSensorsContainer)">
@@ -46,6 +46,29 @@
             Use it to update any sensor or any ressource managed by the plugin.
             </summary>
         </member>
+        <member name="T:FanControl.Plugins.IPlugin3">
+            <summary>
+            Version of the plugin interface that adds a refresh event. This event should be invoked whenever the plugin
+            wants FanControl to do a full refresh (Close -> Initialize -> Load). This can be useful if the plugin detects a change,
+            has an underlying driver crash/update, or any other situation that requires a full refresh of the plugin.
+            </summary>
+        </member>
+        <member name="E:FanControl.Plugins.IPlugin3.RefreshRequested">
+            <summary>
+            Request FanControl to do a full refresh of the plugin (Close -> Initialize -> Load)
+            </summary>
+        </member>
+        <member name="T:FanControl.Plugins.IPluginApplicationControl">
+            <summary>
+            Application control component to be injected in the constructor of a <see cref="T:FanControl.Plugins.IPlugin"/>.
+            </summary>
+        </member>
+        <member name="M:FanControl.Plugins.IPluginApplicationControl.ShowMainWindow">
+            <summary>
+            Spawn the main window of Fan Control if it doesn't exists yet,
+            and activate it (restore)
+            </summary>
+        </member>
         <member name="T:FanControl.Plugins.IPluginControlSensor">
             <summary>
             Represents a control sensor in the application.
@@ -60,6 +83,11 @@
         <member name="M:FanControl.Plugins.IPluginControlSensor.Reset">
             <summary>
             Reset the control to its default state. Called once when the corresponding control is disabled.
+            </summary>
+        </member>
+        <member name="P:FanControl.Plugins.IPluginControlSensor2.PairedFanSensorId">
+            <summary>
+            (Optional) The corresponding sensor that provides the speed value for this control.
             </summary>
         </member>
         <member name="T:FanControl.Plugins.IPluginDialog">

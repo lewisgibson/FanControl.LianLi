@@ -33,7 +33,7 @@ L-Connect's config lives under `C:\ProgramData\Lian-Li\L-Connect 3`; the plugin 
 
 ## Fail-safe behaviour
 
-Lighting is driven only when it can be done exactly. `LConnectConfigReader`, the per-family lighting encoders, and the plugin together guarantee:
+Lighting is driven only when it can be done exactly. `LConnectConfigurationReader`, the per-family lighting encoders, and the plugin together guarantee:
 
 - **No L-Connect configuration** (the directory is absent, e.g. L-Connect was never installed) -> no lighting is driven; the build behaves exactly like the standard build. This is the opt-out path and the default.
 - **A located controller with no matching saved look** -> that controller is left untouched.
@@ -60,12 +60,18 @@ The plugin logs what it did at startup (`Lighting: read N L-Connect controller l
 
 The lighting code is gated behind the `ENABLE_LIGHTING` compile symbol (the standard and ARGB builds contain none of it) and lives in:
 
-- `Hid/IHidTransport.SetFeature` + `Hid/HidSharpTransport` - the feature-report write capability (HID `SetFeature` / `HidD_SetFeature`). This seam method is the one piece that is not gated (a harmless unused capability in the other builds).
+- `Transport/IDeviceTransport.SetFeature` and `Transport/HidTransport` - the feature-report write capability (HID `SetFeature` / `HidD_SetFeature`). This seam method is the one piece that is not gated (a harmless unused capability in the other builds).
 - `Protocol/RgbColor`, `Protocol/LightingPortState`, `Protocol/LightingTransfer` - the value types the encoder consumes and produces.
 - `Protocol/SlInfinityLightingEncoder` - the pure encoder: saved per-port look in, exact HID transfers out. Byte-tested.
 - `Devices/JsonValue` - a tiny dependency-free JSON reader (the plugin ships a single DLL and cannot take a JSON NuGet dependency on netstandard2.0).
-- `Devices/LConnectConfigReader` + `Devices/LConnectControllerConfig` - read L-Connect's config directory and group it per controller.
+- `Devices/LConnectConfigurationReader` + `Devices/LConnectControllerConfiguration` - read L-Connect's config directory and group it per controller.
 - `Devices/LightingReplay` - writes the encoded transfers in order, paced like L-Connect.
 - `Plugin/LianLiPlugin` - reads the config and applies a matching look during `Initialize`, before fan setup, and registers the same apply as each controller's reconnect replay so a controller that was re-enumerated (and possibly reset) across sleep or hibernate gets its look back on the next tick.
 
-It respects the same rules as the rest of the plugin (see [`.claude/rules/`](../.claude/rules/) and [`architecture.md`](architecture.md)): the encoder is pure, HidSharp stays confined to `Hid/`, and the feature is invisible in the standard and ARGB builds.
+## The wireless devices
+
+The wireless range works the same way in spirit and differently in every detail. L-Connect does not send a wireless device an effect by name: it renders the effect to frames on the PC, compresses them, and streams the bytes over the radio. That rendering is tens of thousands of lines and a native compressor, and reimplementing it is neither possible nor necessary, because L-Connect saves the finished result to disk - so the Lighting build reads the saved effect and streams it back exactly as L-Connect would, including asking the devices to commit it to flash and keeping the once-a-second clock pulse that holds an effect in step across several devices.
+
+The consequence is the same as for the wired controllers, only more so: the plugin replays a look, it cannot compose one. Change it in L-Connect, then close L-Connect again. The wire formats are in [`wireless.md`](wireless.md).
+
+It respects the same rules as the rest of the plugin (see [`.claude/rules/`](../.claude/rules/) and [`architecture.md`](architecture.md)): the encoder is pure, native USB calls stay confined to `Transport/`'s adapters, and the feature is invisible in the standard and ARGB builds.

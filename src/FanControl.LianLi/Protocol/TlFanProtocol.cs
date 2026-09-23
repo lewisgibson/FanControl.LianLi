@@ -22,6 +22,9 @@ internal static class TlFanProtocol {
     private const int PwmMax = 100;
     private const byte PwmIdle = 1;
 
+    // A 64-byte command packet less its 6-byte header.
+    private const int MaxPayloadLength = 58;
+
     /// <summary>
     /// Encode a set-speed command for one fan. <paramref name="dutyPercent"/> 0 idles the fan
     /// (wire value 1); 1-100 is clamped to the firmware's 12-100 window.
@@ -44,16 +47,30 @@ internal static class TlFanProtocol {
     }
 
     /// <summary>
+    /// Whether a received packet answers a handshake: its command byte echoes 0xA1, the one check
+    /// <c>TLFanDevice.GetHandshakeInfo</c> makes before it trusts a reply. The hub answers every
+    /// command, so the other replies queue ahead of it.
+    /// </summary>
+    public static bool IsHandshakeReply(byte[] reply) => CommandPacket.CommandOf(reply) == HandshakeCommand;
+
+    /// <summary>
     /// Decode a handshake reply into the detected fans and their RPM. The payload is a run of
     /// 3-byte records: byte 0 packs detected/port/fan-index, bytes 1-2 are the big-endian RPM.
-    /// Undetected records are skipped.
+    /// Undetected records are skipped, a second record for an address replaces the first, and a
+    /// packet that is not a handshake reply holds no fans.
     /// </summary>
     public static IReadOnlyList<TlFanReading> DecodeHandshake(byte[] reply) {
         if (reply is null) {
             throw new ArgumentNullException(nameof(reply));
         }
 
-        int payloadLength = CommandPacket.PayloadLengthOf(reply);
+        if (!IsHandshakeReply(reply)) {
+            return Array.Empty<TlFanReading>();
+        }
+
+        // LEDPacket.Data reads at most the 58 bytes a 64-byte frame holds after its header, whatever
+        // byte 5 claims.
+        int payloadLength = Math.Min(CommandPacket.PayloadLengthOf(reply), MaxPayloadLength);
         int recordCount = payloadLength / 3;
         byte[] payload = CommandPacket.Payload(reply, recordCount * 3);
 
@@ -69,7 +86,13 @@ internal static class TlFanProtocol {
             int port = (header >> 4) & 0x03;
             int fanIndex = header & 0x0F;
             int rpm = (payload[offset + 1] << 8) | payload[offset + 2];
-            readings.Add(new TlFanReading(port, fanIndex, rpm));
+            // TLFanHandshakeInfo.Parse stores each record at its address, so a later one replaces it.
+            int earlier = readings.FindIndex(r => r.Port == port && r.FanIndex == fanIndex);
+            if (earlier >= 0) {
+                readings[earlier] = new TlFanReading(port, fanIndex, rpm);
+            } else {
+                readings.Add(new TlFanReading(port, fanIndex, rpm));
+            }
         }
 
         return readings;

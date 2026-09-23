@@ -19,7 +19,7 @@ public sealed class LightingReplayTests
             new LightingTransfer(isFeature: true, new byte[] { 0xE0, 0x10, 0x01, 0x00, 0x00, 0x00, 0x00 }),  // effect
             new LightingTransfer(isFeature: true, new byte[] { 0xE0, 0x60, 0x00, 0x01, 0x00, 0x00, 0x00 }),  // SetFrame
         };
-        var transport = new FakeHidTransport();
+        var transport = new FakeDeviceTransport();
 
         LightingReplay.Apply(transport, transfers);
 
@@ -35,6 +35,13 @@ public sealed class LightingReplayTests
         Assert.Equal(new byte[] { 0xE0, 0x30, 0xFF, 0x00, 0x00 }, transport.Writes[0]);
         Assert.Equal(3, transport.Features.Count);
         Assert.Equal(new byte[] { 0xE0, 0x10, 0x60, 0x01, 0x04, 0x00, 0x00 }, transport.Features[0]);
+    }
+
+    [Fact]
+    public void Apply_NullArguments_Throw()
+    {
+        Assert.Throws<System.ArgumentNullException>(() => LightingReplay.Apply(null!, new List<LightingTransfer>()));
+        Assert.Throws<System.ArgumentNullException>(() => LightingReplay.Apply(new FakeDeviceTransport(), null!));
     }
 }
 #endif

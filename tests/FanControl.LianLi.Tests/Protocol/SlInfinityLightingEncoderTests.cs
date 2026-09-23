@@ -200,5 +200,32 @@ public sealed class SlInfinityLightingEncoderTests
         Assert.Equal(feature, transfer.IsFeature);
         Assert.Equal(report, transfer.Report);
     }
+
+    [Fact]
+    public void Encode_NullPorts_Throws()
+        => Assert.Throws<System.ArgumentNullException>(() => SlInfinityLightingEncoder.Encode(null!, null));
+
+    [Theory]
+    [InlineData(new[] { 4, 5, 4, 4 })]  // a group above the four fans a port can carry
+    [InlineData(new[] { 4, -1, 4, 4 })] // a negative count
+    [InlineData(new[] { 4, 4, 4 })]     // the wrong number of groups
+    public void Encode_ImplausibleSavedQuantity_FallsBackToFourPerGroup(int[] quantity)
+    {
+        IReadOnlyList<LightingTransfer> transfers = SlInfinityLightingEncoder.Encode(
+            new[] { Port(port: 0, mode: 26, speed: 0, direction: 0, brightness: 0, Rgb(1, 0, 0)) },
+            quantity);
+
+        for (int group = 0; group < 4; group++)
+        {
+            AssertTransfer(transfers[group], feature: true, Feature(0xE0, 16, 96, (byte)(group + 1), 4, 0));
+        }
+    }
+
+    [Fact]
+    public void PortStateAndTransfer_RejectMissingData()
+    {
+        Assert.Throws<System.ArgumentNullException>(() => new LightingPortState(0, 0, 0, 0, 0, null!));
+        Assert.Throws<System.ArgumentNullException>(() => new LightingTransfer(true, null!));
+    }
 }
 #endif

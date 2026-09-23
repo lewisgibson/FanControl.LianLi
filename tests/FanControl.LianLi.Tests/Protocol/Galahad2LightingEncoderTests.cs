@@ -72,5 +72,22 @@ public sealed class Galahad2LightingEncoderTests
         Assert.Equal(4, transfers[0].Report[18]);
         Assert.Equal(0, transfers[0].Report[21]);
     }
+
+    [Fact]
+    public void Encode_NullLook_Throws()
+    {
+        var fan = new Galahad2FanLightingState(0, 0, 0, 0, 0, false, new List<RgbColor>());
+        var pump = new Galahad2PumpLightingState(0, 0, 0, 0, 0, new List<RgbColor>());
+
+        Assert.Throws<System.ArgumentNullException>(() => Galahad2LightingEncoder.Encode(null!, pump));
+        Assert.Throws<System.ArgumentNullException>(() => Galahad2LightingEncoder.Encode(fan, null!));
+    }
+
+    [Fact]
+    public void States_RejectMissingColours()
+    {
+        Assert.Throws<System.ArgumentNullException>(() => new Galahad2FanLightingState(0, 0, 0, 0, 0, false, null!));
+        Assert.Throws<System.ArgumentNullException>(() => new Galahad2PumpLightingState(0, 0, 0, 0, 0, null!));
+    }
 }
 #endif

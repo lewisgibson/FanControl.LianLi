@@ -16,8 +16,8 @@ public class FanControllerTests {
 
     private static readonly bool[] NoStartStop = { false, false, false, false };
 
-    private static (FanController controller, FakeHidTransport transport, FakeClock clock) NewSlController() {
-        var transport = new FakeHidTransport();
+    private static (FanController controller, FakeDeviceTransport transport, FakeClock clock) NewSlController() {
+        var transport = new FakeDeviceTransport();
         var clock = new FakeClock();
         var controller = new FanController(0, transport, new SlProtocol(), NoStartStop, clock, new FakeLogger());
         return (controller, transport, clock);
@@ -78,7 +78,7 @@ public class FanControllerTests {
     public void Describe_SensorIdentifiers_AreStable(
         int index, int channel, string controlId, string controlName, string rpmId, string rpmName) {
         var controller = new FanController(
-            index, new FakeHidTransport(), new SlProtocol(), NoStartStop, new FakeClock(), new FakeLogger());
+            index, new FakeDeviceTransport(), new SlProtocol(), NoStartStop, new FakeClock(), new FakeLogger());
 
         ChannelDescriptor descriptor = controller.Describe(channel);
 
@@ -96,7 +96,7 @@ public class FanControllerTests {
         // channel's sensor id stable so a saved binding survives. Pinned so a change to the physical
         // channel set fails a test before it ships.
         var controller = new FanController(
-            0, new FakeHidTransport(), new SlProtocol(), NoStartStop, new FakeClock(), new FakeLogger());
+            0, new FakeDeviceTransport(), new SlProtocol(), NoStartStop, new FakeClock(), new FakeLogger());
 
         Assert.Equal(4, controller.ChannelCount);
     }
@@ -116,7 +116,7 @@ public class FanControllerTests {
     public void DetectPopulation_HidesChannelsThatReadNoRpm() {
         // ch0 and ch2 spin (a plausible non-zero RPM on every probe); ch1 and ch3 read 0 - an empty
         // slot. Detection must mark only the spinning channels populated.
-        var transport = new FakeHidTransport();
+        var transport = new FakeDeviceTransport();
         var buffer = new byte[65];
         buffer[1] = 0x05; buffer[2] = 0xDC; // ch0 (SL rpm offset 1) -> 1500
         buffer[5] = 0x05; buffer[6] = 0xDC; // ch2 (offset 5)        -> 1500
@@ -272,7 +272,7 @@ public class FanControllerTests {
     public void ApplyPending_HonorsPerChannelStartStopAtZeroDuty() {
         // SL-Infinity is a floored family: a 0% request is the stop value 1 on a channel with
         // start/stop enabled, and the 10 spin floor on a channel with it disabled.
-        var transport = new FakeHidTransport();
+        var transport = new FakeDeviceTransport();
         var startStop = new[] { true, false, false, false };
         var controller = new FanController(0, transport, new SlV2Protocol(), startStop, new FakeClock(), new FakeLogger());
         transport.Clear();
@@ -288,9 +288,11 @@ public class FanControllerTests {
 
     [Fact]
     public void Constructor_RejectsWrongLengthStartStopArray() {
-        var transport = new FakeHidTransport();
+        var transport = new FakeDeviceTransport();
         Assert.Throws<ArgumentException>(() =>
             new FanController(0, transport, new SlProtocol(), new[] { true, false }, new FakeClock(), new FakeLogger()));
+        Assert.Throws<ArgumentNullException>(() =>
+            new FanController(0, transport, new SlProtocol(), null!, new FakeClock(), new FakeLogger()));
     }
 
     [Fact]
@@ -361,7 +363,7 @@ public class FanControllerTests {
 
     [Fact]
     public void PollRpm_LogsImplausibleOnsetOnce_ThenRecovery() {
-        var transport = new FakeHidTransport();
+        var transport = new FakeDeviceTransport();
         var logger = new FakeLogger();
         var controller = new FanController(0, transport, new SlProtocol(), NoStartStop, new FakeClock(), logger);
 
@@ -388,5 +390,43 @@ public class FanControllerTests {
         var (controller, transport, _) = NewSlController();
         controller.Dispose();
         Assert.True(transport.IsDisposed);
+    }
+
+    [Fact]
+    public void Constructor_RejectsMissingDependencies() {
+        var transport = new FakeDeviceTransport();
+        var protocol = new SlProtocol();
+        var flags = new bool[4];
+
+        Assert.Throws<ArgumentNullException>(() => new FanController(0, null!, protocol, flags, new FakeClock(), new FakeLogger()));
+        Assert.Throws<ArgumentNullException>(() => new FanController(0, transport, null!, flags, new FakeClock(), new FakeLogger()));
+        Assert.Throws<ArgumentNullException>(() => new FanController(0, transport, protocol, flags, null!, new FakeLogger()));
+        Assert.Throws<ArgumentNullException>(() => new FanController(0, transport, protocol, flags, new FakeClock(), null!));
+    }
+
+    [Fact]
+    public void ApplyPending_AfterAReopen_WithNoReplayRegistered_StillReplaysTheSetup() {
+        var (controller, transport, _) = NewSlController();
+        controller.SetTarget(0, 50);
+        controller.ApplyPending();
+        transport.Clear();
+
+        transport.Generation = 1; // reopened; the standard build registers no lighting replay
+        controller.ApplyPending();
+
+        Assert.NotEmpty(transport.Features); // manual mode and the duty went out again
+    }
+
+    [Fact]
+    public void DetectPopulation_AnImplausibleReading_DoesNotCountAsAFan() {
+        var (controller, transport, _) = NewSlController();
+        var buffer = new byte[65];
+        buffer[1] = 0xC3; buffer[2] = 0x50; // ch0 reads 50000 rpm: garbage, not a fan
+        transport.InputReport = buffer;
+
+        controller.DetectPopulation();
+
+        Assert.True(controller.IsChannelPopulated(0)); // nothing read plausibly anywhere: all shown
+        Assert.True(controller.IsChannelPopulated(1));
     }
 }

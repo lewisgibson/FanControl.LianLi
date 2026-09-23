@@ -33,4 +33,8 @@ public class ChannelWriteDecisionTests {
         DateTime lastWrite = Now - TimeSpan.FromSeconds(15);
         Assert.True(ChannelWriteDecision.ShouldWrite(50, 50, lastWrite, Now, Refresh));
     }
+
+    [Fact]
+    public void AClockThatWentBack_MakesTheWriteDueAtOnce_RatherThanWaitingForIt()
+        => Assert.True(ChannelWriteDecision.ShouldWrite(50, 50, Now, Now.AddMinutes(-10), Refresh));
 }

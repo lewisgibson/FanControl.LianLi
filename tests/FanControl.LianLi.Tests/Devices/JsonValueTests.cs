@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using FanControl.LianLi.Devices;
 using Xunit;
 
@@ -58,6 +59,21 @@ public sealed class JsonValueTests {
     [InlineData("{ a: 1 }")]         // unquoted key
     [InlineData("nul")]              // bad literal
     [InlineData("1 2")]              // trailing content
+    [InlineData("")]                 // nothing at all
+    [InlineData("   ")]              // only whitespace
+    [InlineData("{ \"a\" 1 }")]      // missing ':'
+    [InlineData("{ \"a\": 1 ; }")]   // bad member separator
+    [InlineData("[1 ; 2]")]          // bad element separator
+    [InlineData("\"abc")]            // unterminated string
+    [InlineData("\"abc\\")]         // unterminated escape
+    [InlineData("\"\\u12\"")]        // incomplete unicode escape
+    [InlineData("\"\\q\"")]          // unknown escape
+    [InlineData("tru")]              // bad true
+    [InlineData("fals")]             // bad false
+    [InlineData("@")]                // not a value
+    [InlineData("1e")]               // not a number
+    [InlineData("{")]                // ends where a key should be
+    [InlineData("{ \"a\"")]          // ends where ':' should be
     public void Parse_Malformed_Throws(string text) {
         Assert.Throws<FormatException>(() => JsonValue.Parse(text));
     }
@@ -69,4 +85,51 @@ public sealed class JsonValueTests {
         string json = new string('[', 5000) + new string(']', 5000);
         Assert.Throws<FormatException>(() => JsonValue.Parse(json));
     }
+
+    [Fact]
+    public void Parse_DecodesEveryEscape() {
+        JsonValue value = JsonValue.Parse("\"\\/ \\b \\f \\n \\r \\t \\u0041\"");
+
+        Assert.Equal("/ \b \f \n \r \t A", value.AsString());
+    }
+
+    [Fact]
+    public void Parse_ReadsEmptyContainersBoolsAndDoubles() {
+        JsonValue root = JsonValue.Parse("{ \"o\": {}, \"a\": [], \"t\": true, \"f\": false, \"d\": 2.5 }");
+
+        Assert.Empty(root.Member("o")!.MemberNames);
+        Assert.Empty(root.Member("a")!.Elements);
+        Assert.True(root.Member("t")!.AsBool());
+        Assert.False(root.Member("f")!.AsBool());
+        Assert.Equal(2.5, root.Member("d")!.AsDouble());
+        Assert.Null(root.Member("t")!.AsDouble());
+        Assert.Null(root.Member("d")!.AsBool());
+        Assert.Equal(new[] { "a", "d", "f", "o", "t" }, root.MemberNames.OrderBy(name => name, StringComparer.Ordinal));
+        Assert.Empty(root.Member("d")!.MemberNames); // a number has no members
+        Assert.Null(root.Member("d")!.Member("x"));  // nor a member by name
+    }
+
+    [Fact]
+    public void Parse_NullText_Throws()
+        => Assert.Throws<ArgumentNullException>(() => JsonValue.Parse(null!));
+
+    [Fact]
+    public void Parse_TreatsEveryJsonWhitespaceAlike()
+        => Assert.Equal(1, JsonValue.Parse(" \t\r\n1\r\n").AsInt());
+
+    [Fact]
+    public void MemberValues_ListsAnObjectsValues_AndNothingElse() {
+        JsonValue root = JsonValue.Parse("{ \"a\": 1, \"b\": 2 }");
+
+        Assert.Equal(new[] { 1, 2 }, root.MemberValues.Select(value => value.AsInt() ?? 0).OrderBy(n => n));
+        Assert.Empty(root.Member("a")!.MemberValues);
+    }
+
+    [Theory]
+    [InlineData("[]", true)]
+    [InlineData("[1,2]", true)]
+    [InlineData("{}", false)]
+    [InlineData("\"x\"", false)]
+    public void IsArray_OnlyForAnArray(string json, bool expected)
+        => Assert.Equal(expected, JsonValue.Parse(json).IsArray);
 }

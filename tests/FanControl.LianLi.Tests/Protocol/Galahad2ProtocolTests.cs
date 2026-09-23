@@ -55,4 +55,8 @@ public sealed class Galahad2ProtocolTests {
         Assert.Equal(1200, reading.FanRpm);
         Assert.Equal(2800, reading.PumpRpm);
     }
+
+    [Fact]
+    public void DecodeHandshake_NullReply_Throws()
+        => Assert.Throws<System.ArgumentNullException>(() => Galahad2Protocol.DecodeHandshake(null!));
 }

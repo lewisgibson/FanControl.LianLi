@@ -59,4 +59,37 @@ public sealed class TlFanProtocolTests {
         Assert.Equal(0, reading.FanIndex);
         Assert.Equal(1500, reading.Rpm);
     }
+
+    // TLFanDevice.GetHandshakeInfo trusts a reply only when it echoes the handshake command.
+    [Fact]
+    public void DecodeHandshake_APacketAnsweringAnotherCommand_HoldsNoFans() {
+        byte[] speedAnswer = CommandPacket.Build(0xAA, 0x90, 0x05, 0xDC);
+
+        Assert.False(TlFanProtocol.IsHandshakeReply(speedAnswer));
+        Assert.True(TlFanProtocol.IsHandshakeReply(CommandPacket.Build(0xA1)));
+        Assert.Empty(TlFanProtocol.DecodeHandshake(speedAnswer));
+    }
+
+    // TLFanHandshakeInfo.Parse stores each record at its address, so the later of two wins.
+    [Fact]
+    public void DecodeHandshake_ASecondRecordForTheSameFan_ReplacesTheFirst() {
+        byte[] reply = CommandPacket.Build(0xA1, 0x90, 0x05, 0xDC, 0x90, 0x07, 0xD0);
+
+        TlFanReading reading = Assert.Single(TlFanProtocol.DecodeHandshake(reply));
+        Assert.Equal(2000, reading.Rpm);
+    }
+
+    // LEDPacket.Data reads at most 58 payload bytes, whatever the length byte claims.
+    [Fact]
+    public void DecodeHandshake_ALengthPastTheFrame_IsReadAsTheWholeFrame() {
+        byte[] reply = CommandPacket.Build(0xA1, 0x90, 0x05, 0xDC);
+        reply[5] = 0xFF;
+
+        TlFanReading reading = Assert.Single(TlFanProtocol.DecodeHandshake(reply));
+        Assert.Equal(1500, reading.Rpm);
+    }
+
+    [Fact]
+    public void DecodeHandshake_NullReply_Throws()
+        => Assert.Throws<System.ArgumentNullException>(() => TlFanProtocol.DecodeHandshake(null!));
 }

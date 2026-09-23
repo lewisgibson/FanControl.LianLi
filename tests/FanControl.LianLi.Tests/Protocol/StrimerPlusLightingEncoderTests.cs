@@ -129,5 +129,22 @@ public sealed class StrimerPlusLightingEncoderTests
 
         Assert.Empty(StrimerPlusLightingEncoder.Encode(ports));
     }
+
+    [Fact]
+    public void Encode_NullPorts_Throws()
+        => Assert.Throws<System.ArgumentNullException>(() => StrimerPlusLightingEncoder.Encode(null!));
+
+    [Fact]
+    public void Encode_SingleColourModeWithNoColourSaved_SendsTheEffectButNoColourReport()
+    {
+        var ports = new[] { Port(port: 3, mode: 1, speed: 0, direction: 0, brightness: 0) };
+
+        IReadOnlyList<LightingTransfer> transfers = StrimerPlusLightingEncoder.Encode(ports);
+
+        Assert.Equal(2, transfers.Count); // effect, then the single-port enable
+        Assert.True(transfers[0].IsFeature);
+        Assert.Equal(0x13, transfers[0].Report[1]);
+        Assert.Equal(new byte[] { 0xE0, 0x23, 0x00, 0x00 }, transfers[1].Report);
+    }
 }
 #endif

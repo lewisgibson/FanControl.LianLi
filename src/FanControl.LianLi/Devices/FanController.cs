@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using FanControl.LianLi.Hid;
 using FanControl.LianLi.Logging;
 using FanControl.LianLi.Protocol;
+using FanControl.LianLi.Transport;
 
 namespace FanControl.LianLi.Devices;
 
@@ -25,7 +25,7 @@ internal sealed class FanController : IFanDevice {
     private const int PopulationProbeReads = 6;
 
     private readonly int _index;
-    private readonly IHidTransport _transport;
+    private readonly IDeviceTransport _transport;
     private readonly IFanProtocol _protocol;
     private readonly bool[] _startStopEnabled;   // per-channel L-Connect start/stop toggle
     private readonly IClock _clock;
@@ -57,7 +57,7 @@ internal sealed class FanController : IFanDevice {
 
     public FanController(
         int index,
-        IHidTransport transport,
+        IDeviceTransport transport,
         IFanProtocol protocol,
         bool[] startStopEnabled,
         IClock clock,
@@ -80,9 +80,6 @@ internal sealed class FanController : IFanDevice {
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _setUpGeneration = _transport.Generation;
     }
-
-    /// <summary>The controller family, for logging/diagnostics.</summary>
-    public DeviceFamily Family => _protocol.Family;
 
     /// <summary>The Uni controllers expose four fan channels.</summary>
     public int ChannelCount => Channels;

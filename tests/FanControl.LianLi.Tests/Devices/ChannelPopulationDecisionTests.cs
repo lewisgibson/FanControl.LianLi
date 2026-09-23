@@ -43,4 +43,8 @@ public class ChannelPopulationDecisionTests {
 
         Assert.Equal(new[] { true, true }, populated);
     }
+
+    [Fact]
+    public void Resolve_NullCounts_Throws()
+        => Assert.Throws<System.ArgumentNullException>(() => ChannelPopulationDecision.Resolve(null!, 1));
 }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using FanControl.LianLi.Devices;
 using FanControl.LianLi.Protocol;
 using FanControl.LianLi.Tests.Fakes;
@@ -11,8 +12,8 @@ public class Galahad2ControllerTests {
     private const int FanChannel = 0;
     private const int PumpChannel = 1;
 
-    private static (Galahad2Controller controller, FakeHidTransport transport, FakeClock clock) NewController() {
-        var transport = new FakeHidTransport();
+    private static (Galahad2Controller controller, FakeDeviceTransport transport, FakeClock clock) NewController() {
+        var transport = new FakeDeviceTransport();
         var clock = new FakeClock();
         var controller = new Galahad2Controller(0, transport, clock, new FakeLogger());
         return (controller, transport, clock);
@@ -165,5 +166,62 @@ public class Galahad2ControllerTests {
         var (controller, transport, _) = NewController();
         controller.Dispose();
         Assert.True(transport.IsDisposed);
+    }
+
+    [Fact]
+    public void PollRpm_LogsImplausibleOnsetOnce_ThenRecovery() {
+        var transport = new FakeDeviceTransport();
+        var logger = new FakeLogger();
+        var controller = new Galahad2Controller(0, transport, new FakeClock(), logger);
+        transport.ReadReplies.Enqueue(HandshakeReply(1500, 2800));
+        transport.ReadReplies.Enqueue(HandshakeReply(1500, 50000));
+        transport.ReadReplies.Enqueue(HandshakeReply(1500, 50000));
+        transport.ReadReplies.Enqueue(HandshakeReply(1500, 2700));
+
+        for (int i = 0; i < 4; i++) {
+            controller.PollRpm();
+        }
+
+        Assert.Equal(2700f, controller.GetRpm(PumpChannel));
+        Assert.Single(logger.Messages, m => m.Contains("G0:1 implausible rpm 50000"));
+        Assert.Single(logger.Messages, m => m.Contains("G0:1 rpm recovered (2700)"));
+    }
+
+    [Fact]
+    public void Constructor_RejectsMissingDependencies() {
+        Assert.Throws<ArgumentNullException>(() => new Galahad2Controller(0, null!, new FakeClock(), new FakeLogger()));
+        Assert.Throws<ArgumentNullException>(() => new Galahad2Controller(0, new FakeDeviceTransport(), null!, new FakeLogger()));
+        Assert.Throws<ArgumentNullException>(() => new Galahad2Controller(0, new FakeDeviceTransport(), new FakeClock(), null!));
+        Assert.Throws<ArgumentNullException>(
+            () => new Galahad2Controller(0, new FakeDeviceTransport(), new FakeClock(), new FakeLogger()).ReplayOnReconnect(null!));
+    }
+
+    [Fact]
+    public void ApplyPending_AfterAReopen_WithNoReplayRegistered_ResendsBothDuties() {
+        var (controller, transport, _) = NewController();
+        controller.SetTarget(FanChannel, 50);
+        controller.SetTarget(PumpChannel, 70);
+        controller.ApplyPending();
+        transport.Clear();
+
+        transport.Generation = 1;
+        controller.ApplyPending();
+
+        Assert.Equal(2, transport.Writes.Count);
+    }
+
+    [Fact]
+    public void PollRpm_BothChannelsChangingStateInOnePoll_AreBothLogged() {
+        var transport = new FakeDeviceTransport();
+        var logger = new FakeLogger();
+        var controller = new Galahad2Controller(0, transport, new FakeClock(), logger);
+        transport.ReadReplies.Enqueue(HandshakeReply(50000, 50000));
+        transport.ReadReplies.Enqueue(HandshakeReply(1500, 2800));
+
+        controller.PollRpm();
+        controller.PollRpm();
+
+        Assert.Equal(2, logger.Messages.Count(m => m.Contains("implausible rpm")));
+        Assert.Equal(2, logger.Messages.Count(m => m.Contains("rpm recovered")));
     }
 }

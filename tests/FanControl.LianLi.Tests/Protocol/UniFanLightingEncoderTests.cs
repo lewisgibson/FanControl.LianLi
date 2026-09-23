@@ -268,6 +268,23 @@ public sealed class UniFanLightingEncoderTests
         AssertTransfer(transfers[6], feature: true, Feature(0xE0, 0x60, 0, 1));
     }
 
+    [Theory]
+    [InlineData(70, 2)] // Breathing_Outer
+    [InlineData(92, 1)] // StaticColor_Outer
+    public void AlAndAlV2_OuterRingModes_FillTwelveLedsPerFan(int mode, int wire)
+    {
+        var colors = new[] { Rgb(1, 1, 1), Rgb(2, 2, 2), Rgb(3, 3, 3), Rgb(4, 4, 4), Rgb(5, 5, 5), Rgb(6, 6, 6) };
+        var ports = new[] { Port(port: 0, mode: mode, speed: 0, direction: 0, brightness: 0, colors) };
+
+        IReadOnlyList<LightingTransfer> al = UniFanLightingEncoder.Encode(UniFanLightingProfiles.Al, ports, new[] { 4, 4, 4, 4 });
+        IReadOnlyList<LightingTransfer> alV2 = UniFanLightingEncoder.Encode(UniFanLightingProfiles.AlV2, ports, new[] { 6, 6, 6, 6 });
+
+        AssertTransfer(al[4], feature: false, ColorReport(0, PerFanLeds(fanCount: 4, ledsPerFan: 12, colors)));
+        AssertTransfer(al[5], feature: true, Feature(0xE0, 0x10, (byte)wire, 0, 0, 0));
+        AssertTransfer(alV2[4], feature: false, ColorReport(0, PerFanLeds(fanCount: 6, ledsPerFan: 12, colors)));
+        AssertTransfer(alV2[5], feature: true, Feature(0xE0, 0x10, (byte)wire, 0, 0, 0));
+    }
+
     [Fact]
     public void AlV2_MeteorMode_CycleFillsFanGroupPalette()
     {
@@ -428,6 +445,95 @@ public sealed class UniFanLightingEncoderTests
     {
         Assert.Equal(feature, transfer.IsFeature);
         Assert.Equal(report, transfer.Report);
+    }
+
+    [Fact]
+    public void Encode_NullArguments_Throw()
+    {
+        Assert.Throws<System.ArgumentNullException>(() => UniFanLightingEncoder.Encode(null!, new List<LightingPortState>(), null));
+        Assert.Throws<System.ArgumentNullException>(() => UniFanLightingEncoder.Encode(UniFanLightingProfiles.Sl, null!, null));
+    }
+
+    [Fact]
+    public void Profile_RejectsAnInconsistentDefinition()
+    {
+        var modes = new Dictionary<int, byte>();
+        System.Func<int, IReadOnlyList<RgbColor>, RgbColor[]> expand = (_, colors) => System.Array.Empty<RgbColor>();
+
+        Assert.Throws<System.ArgumentOutOfRangeException>(
+            () => new UniFanLightingProfile(false, 0, 0x10, true, 4, System.Array.Empty<int>(), 1, modes, expand));
+        Assert.Throws<System.ArgumentOutOfRangeException>(
+            () => new UniFanLightingProfile(false, 1, 0x10, true, -1, new[] { 1 }, 1, modes, expand));
+        Assert.Throws<System.ArgumentNullException>(
+            () => new UniFanLightingProfile(false, 1, 0x10, true, 4, null!, 1, modes, expand));
+        Assert.Throws<System.ArgumentException>(
+            () => new UniFanLightingProfile(false, 2, 0x10, true, 4, new[] { 1 }, 1, modes, expand));
+        Assert.Throws<System.ArgumentNullException>(
+            () => new UniFanLightingProfile(false, 1, 0x10, true, 4, new[] { 1 }, 1, null!, expand));
+        Assert.Throws<System.ArgumentNullException>(
+            () => new UniFanLightingProfile(false, 1, 0x10, true, 4, new[] { 1 }, 1, modes, null!));
+    }
+
+    [Fact]
+    public void ExpandFanGroup_CycleFillWithNoColours_IsAllBlack()
+        => Assert.All(UniFanLightingEncoder.ExpandFanGroup(2, 3, new List<RgbColor>(), cycleFill: true), c => Assert.Equal(default, c));
+
+    [Fact]
+    public void ExpandOuterCorner_PastTheSuppliedColours_IsBlack()
+    {
+        RgbColor[] leds = UniFanLightingEncoder.ExpandOuterCorner(1, new[] { Rgb(9, 9, 9) });
+
+        Assert.Equal(Rgb(9, 9, 9), leds[0]);
+        Assert.Equal(default, leds[3]); // the second corner has no colour
+    }
+
+    // Every mode a profile expands specially, checked against the expansion it should choose.
+    [Theory]
+    [InlineData("Sl", 1, "perfan:4:16")]
+    [InlineData("Sl", 26, "perfan:4:16")]
+    [InlineData("SlV2", 1, "perfan:6:16")]
+    [InlineData("SlV2", 26, "perfan:6:16")]
+    [InlineData("Al", 36, "perfan:4:8")]
+    [InlineData("Al", 62, "perfan:4:8")]
+    [InlineData("AlV2", 12, "cycle:6:6")]
+    [InlineData("AlV2", 47, "cycle:6:6")]
+    [InlineData("AlV2", 80, "cycle:6:6")]
+    [InlineData("AlV2", 36, "perfan:6:8")]
+    [InlineData("AlV2", 62, "perfan:6:8")]
+    [InlineData("Al", 70, "perfan:4:12")]
+    [InlineData("Al", 92, "perfan:4:12")]
+    [InlineData("Al", 71, "corner:4:0")]
+    [InlineData("Al", 93, "corner:4:0")]
+    [InlineData("Al", 2, "group:4:4")]
+    [InlineData("AlV2", 70, "perfan:6:12")]
+    [InlineData("AlV2", 92, "perfan:6:12")]
+    [InlineData("AlV2", 71, "corner:6:0")]
+    [InlineData("AlV2", 93, "corner:6:0")]
+    [InlineData("AlV2", 2, "group:6:6")]
+    [InlineData("Sl", 2, "group:4:4")]
+    [InlineData("SlV2", 2, "group:6:4")]
+    public void Profiles_ExpandEachSpecialModeTheWayItsFamilyDoes(string family, int mode, string expansion)
+    {
+        UniFanLightingProfile profile = family switch
+        {
+            "Sl" => UniFanLightingProfiles.Sl,
+            "SlV2" => UniFanLightingProfiles.SlV2,
+            "Al" => UniFanLightingProfiles.Al,
+            _ => UniFanLightingProfiles.AlV2,
+        };
+        var colors = new[] { Rgb(1, 1, 1), Rgb(2, 2, 2), Rgb(3, 3, 3), Rgb(4, 4, 4), Rgb(5, 5, 5), Rgb(6, 6, 6) };
+        string[] parts = expansion.Split(':');
+        int fans = int.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture);
+        int size = int.Parse(parts[2], System.Globalization.CultureInfo.InvariantCulture);
+        RgbColor[] expected = parts[0] switch
+        {
+            "perfan" => UniFanLightingEncoder.ExpandPerFan(fans, size, colors),
+            "cycle" => UniFanLightingEncoder.ExpandFanGroup(fans, size, colors, cycleFill: true),
+            "corner" => UniFanLightingEncoder.ExpandOuterCorner(fans, colors),
+            _ => UniFanLightingEncoder.ExpandFanGroup(fans, size, colors, cycleFill: false),
+        };
+
+        Assert.Equal(expected, profile.ExpandColors(mode, colors));
     }
 }
 #endif

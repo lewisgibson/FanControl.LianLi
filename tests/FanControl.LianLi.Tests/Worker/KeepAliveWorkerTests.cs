@@ -9,14 +9,14 @@ using Xunit;
 namespace FanControl.LianLi.Tests.Worker;
 
 public class KeepAliveWorkerTests {
-    private static FanController NewController(int index, FakeHidTransport transport, FakeLogger logger)
+    private static FanController NewController(int index, FakeDeviceTransport transport, FakeLogger logger)
         => new FanController(index, transport, new SlProtocol(), new bool[4], new FakeClock(), logger);
 
     [Fact]
     public void Tick_IsolatesAndLogsAPerControllerFault() {
         var logger = new FakeLogger();
-        var badTransport = new FakeHidTransport { FailReads = true };
-        var goodTransport = new FakeHidTransport();
+        var badTransport = new FakeDeviceTransport { FailReads = true };
+        var goodTransport = new FakeDeviceTransport();
         var goodBuffer = new byte[65];
         goodBuffer[1] = 0x05; // ch0 high
         goodBuffer[2] = 0xDC; // ch0 low -> 1500
@@ -37,13 +37,14 @@ public class KeepAliveWorkerTests {
     [Fact]
     public void Start_RunsBackgroundLoopUntilDisposed() {
         var logger = new FakeLogger();
-        var transport = new FakeHidTransport();
+        var transport = new FakeDeviceTransport();
         var buffer = new byte[65];
         buffer[1] = 0x05; // ch0 high
         buffer[2] = 0xDC; // ch0 low -> 1500
         transport.InputReport = buffer;
         FanController controller = NewController(0, transport, logger);
-        var worker = new KeepAliveWorker(new[] { controller }, logger);
+        var healthy = new FakeDeviceTransport();
+        var worker = new KeepAliveWorker(new[] { controller, NewController(1, healthy, logger) }, logger);
 
         worker.Start();
         // The loop ticks immediately; wait until it has polled at least once.
@@ -56,8 +57,8 @@ public class KeepAliveWorkerTests {
 
     [Fact]
     public void Dispose_DisposesEveryController() {
-        var t0 = new FakeHidTransport();
-        var t1 = new FakeHidTransport();
+        var t0 = new FakeDeviceTransport();
+        var t1 = new FakeDeviceTransport();
         FanController c0 = NewController(0, t0, new FakeLogger());
         FanController c1 = NewController(1, t1, new FakeLogger());
         var worker = new KeepAliveWorker(new[] { c0, c1 }, new FakeLogger());
@@ -69,46 +70,46 @@ public class KeepAliveWorkerTests {
     }
 
     [Fact]
-    public void TryTick_WhenBackgroundTickHoldsGate_SkipsWithoutBlocking() {
+    public void Wake_TicksAtOnce_RatherThanAtTheNextInterval() {
         var logger = new FakeLogger();
-        using var gate = new ManualResetEventSlim(false);
-        var transport = new FakeHidTransport { BlockReadsUntil = gate };
+        var transport = new FakeDeviceTransport();
         FanController controller = NewController(0, transport, logger);
-        using var worker = new KeepAliveWorker(new[] { controller }, logger);
-
-        // A background tick blocks inside the HID read while holding the tick gate, mimicking the
-        // slow post-hibernate read.
-        var background = new Thread(worker.Tick) { IsBackground = true };
-        background.Start();
+        // An interval far longer than the test: any second tick can only have come from the wake.
+        using var worker = new KeepAliveWorker(new[] { controller }, logger, tickIntervalMs: 600_000);
+        worker.Start();
         Assert.True(
-            SpinWait.SpinUntil(() => transport.ReadCount >= 1, TimeSpan.FromSeconds(2)),
-            "background tick never reached the blocking read");
-        int readsWhileBlocked = transport.ReadCount;
+            SpinWait.SpinUntil(() => transport.ReadCount >= 1, TimeSpan.FromSeconds(5)),
+            "the worker never ran its first tick");
 
-        // The host path (Update -> TryTick) must skip immediately instead of blocking on the gate -
-        // this is the freeze fix. Run it on its own thread bounded by Join so a regression (reverting
-        // TryTick to a blocking lock) fails the assert promptly instead of hanging the suite.
-        var tryTickThread = new Thread(worker.TryTick) { IsBackground = true };
-        tryTickThread.Start();
+        controller.SetTarget(0, 60);
+        worker.Wake();
+
         Assert.True(
-            tryTickThread.Join(TimeSpan.FromSeconds(1)),
-            "TryTick blocked on the held gate instead of skipping");
-        Assert.Equal(readsWhileBlocked, transport.ReadCount); // skipped: did no work while busy
-
-        // Once the gate frees, a TryTick performs the work again (proving it was a skip, not a no-op).
-        gate.Set();
-        Assert.True(background.Join(TimeSpan.FromSeconds(2)), "background tick did not complete");
-        worker.TryTick();
-        Assert.True(transport.ReadCount > readsWhileBlocked);
+            SpinWait.SpinUntil(() => transport.ReadCount >= 2, TimeSpan.FromSeconds(5)),
+            "the wake did not bring the next tick forward");
     }
+
+    [Fact]
+    public void Wake_AfterDispose_IsANoOp() {
+        var worker = new KeepAliveWorker(new[] { NewController(0, new FakeDeviceTransport(), new FakeLogger()) }, new FakeLogger());
+        worker.Dispose();
+
+        worker.Wake();
+    }
+
+    [Fact]
+    public void Constructor_RejectsANonPositiveInterval()
+        => Assert.Throws<ArgumentOutOfRangeException>(
+            () => new KeepAliveWorker(Array.Empty<IFanDevice>(), new FakeLogger(), tickIntervalMs: 0));
 
     [Fact]
     public void Dispose_WhenBackgroundReadBlocked_ReturnsPromptly() {
         var logger = new FakeLogger();
         using var gate = new ManualResetEventSlim(false);
-        var transport = new FakeHidTransport { BlockReadsUntil = gate };
+        var transport = new FakeDeviceTransport { BlockReadsUntil = gate };
         FanController controller = NewController(0, transport, logger);
-        var worker = new KeepAliveWorker(new[] { controller }, logger);
+        var healthy = new FakeDeviceTransport();
+        var worker = new KeepAliveWorker(new[] { controller, NewController(1, healthy, logger) }, logger);
 
         worker.Start();
         Assert.True(
@@ -124,10 +125,122 @@ public class KeepAliveWorkerTests {
         gate.Set(); // always release so the blocked thread can exit, even if Dispose regressed
         Assert.True(returned, "Dispose blocked on the stuck HID read instead of returning within the join timeout");
 
-        // The join timed out (the thread is still mid-read holding the gate), so the controller is
-        // intentionally left undisposed rather than racing a use-after-dispose against the worker.
-        Assert.False(transport.IsDisposed);
-
+        // The join timed out (the thread is still mid-read holding the gate), so Dispose left the
+        // controller alone rather than race a use-after-dispose against the worker - the loop thread
+        // itself disposes it once the stuck read returns and the loop exits.
         Assert.True(disposeThread.Join(TimeSpan.FromSeconds(2)));
+        Assert.True(
+            SpinWait.SpinUntil(() => transport.IsDisposed, TimeSpan.FromSeconds(2)),
+            "the loop thread did not dispose the controller after the stuck read returned");
+        Assert.Contains(logger.Messages, m => m.Contains("C0 still inside a device call at shutdown"));
+        Assert.DoesNotContain(logger.Messages, m => m.Contains("C1 still inside")); // the healthy one had stopped
+        Assert.True(healthy.IsDisposed);
+    }
+
+    [Fact]
+    public void Dispose_Twice_IsANoOp() {
+        var transport = new FakeDeviceTransport();
+        var worker = new KeepAliveWorker(new[] { NewController(0, transport, new FakeLogger()) }, new FakeLogger());
+
+        worker.Dispose();
+        worker.Dispose();
+
+        Assert.True(transport.IsDisposed);
+    }
+
+    [Fact]
+    public void Constructor_RejectsMissingDependencies() {
+        Assert.Throws<ArgumentNullException>(() => new KeepAliveWorker(null!, new FakeLogger()));
+        Assert.Throws<ArgumentNullException>(() => new KeepAliveWorker(Array.Empty<IFanDevice>(), null!));
+    }
+
+    [Fact]
+    public void Tick_IsolatesAndLogsAFailedApply() {
+        var logger = new FakeLogger();
+        var transport = new FakeDeviceTransport { FailFeatures = true };
+        FanController controller = NewController(0, transport, logger);
+        controller.SetTarget(0, 60);
+        using var worker = new KeepAliveWorker(new[] { controller }, logger);
+
+        worker.Tick();
+
+        Assert.Contains(logger.Messages, m => m.Contains("apply err C0"));
+    }
+
+    [Fact]
+    public void AControllerStuckInADeviceCall_DoesNotHoldUpTheOthers() {
+        var logger = new FakeLogger();
+        using var gate = new ManualResetEventSlim(false);
+        var stuck = new FakeDeviceTransport { BlockReadsUntil = gate };
+        var healthy = new FakeDeviceTransport();
+        using var worker = new KeepAliveWorker(
+            new[] { NewController(0, stuck, logger), NewController(1, healthy, logger) }, logger, tickIntervalMs: 20);
+        worker.Start();
+
+        try {
+            // The first controller never gets past its first read; the second keeps ticking.
+            Assert.True(SpinWait.SpinUntil(() => healthy.ReadCount >= 5, TimeSpan.FromSeconds(5)));
+            Assert.Equal(1, stuck.ReadCount);
+        } finally {
+            gate.Set();
+        }
+    }
+
+    // A controller whose close takes seconds, as a device that came back from sleep wedged does.
+    private sealed class SlowToCloseDevice : IFanDevice {
+        private readonly CountdownEvent _closing;
+
+        public SlowToCloseDevice(CountdownEvent closing) => _closing = closing;
+
+        public bool SawTheOther { get; private set; }
+
+        private volatile bool _closed;
+
+        public bool Closed => _closed;
+
+        public int ChannelCount => 0;
+
+        public bool IsChannelPopulated(int channel) => true;
+
+        public ChannelDescriptor Describe(int channel) => throw new NotSupportedException();
+
+        public void SetTarget(int channel, int duty) {
+        }
+
+        public void ReleaseChannel(int channel) {
+        }
+
+        public float GetRpm(int channel) => 0f;
+
+        public void ApplyPending() {
+        }
+
+        public void PollRpm() {
+        }
+
+        public void ReplayOnReconnect(Action replay) {
+        }
+
+        // Each close waits until both are closing, which they can only do if they overlap.
+        public void Dispose() {
+            _closing.Signal();
+            SawTheOther = _closing.Wait(TimeSpan.FromSeconds(10));
+            _closed = true;
+        }
+    }
+
+    [Fact]
+    public void Dispose_ClosesEveryController_SideBySide() {
+        using var closing = new CountdownEvent(2);
+        var first = new SlowToCloseDevice(closing);
+        var second = new SlowToCloseDevice(closing);
+        var worker = new KeepAliveWorker(new IFanDevice[] { first, second }, new FakeLogger());
+        worker.Start();
+
+        worker.Dispose();
+
+        // The two closes run on the loops' own threads, rather than one after the other.
+        Assert.True(SpinWait.SpinUntil(() => first.Closed && second.Closed, TimeSpan.FromSeconds(15)));
+        Assert.True(first.SawTheOther && second.SawTheOther);
     }
 }

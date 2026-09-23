@@ -117,10 +117,9 @@ jobs:
             - name: Package
               # PowerShell so packaging does not depend on `zip`/`sha256sum` being present in
               # the runner's bash. Each variant ships as its own zip holding a SINGLE plugin
-              # DLL plus license and install notes. The host supplies FanControl.Plugins.dll
-              # and HidSharp.dll (FanControl ships HidSharp for its own HID sensors; it is not
-              # strong-named, so the plugin binds to whatever 2.6.x the host loaded). Shipping
-              # our own HidSharp is unnecessary - the host's already-loaded copy wins.
+              # DLL plus license and install notes. The host supplies FanControl.Plugins.dll;
+              # the plugin reaches the controllers through Windows' own hid.dll, winusb.dll and
+              # cfgmgr32.dll, so nothing else ships beside it.
               shell: pwsh
               run: |
                   $version = "${{ steps.vars.outputs.version }}"
@@ -135,6 +134,8 @@ jobs:
                       $install = @(
                           "FanControl.LianLi v$version ($variant build)",
                           "",
+                          "Requires FanControl V243 or newer.",
+                          "",
                           "Install:",
                           "  1. Unblock the DLL: right-click $dll -> Properties -> tick 'Unblock' -> OK.",
                           "     Windows blocks files downloaded from the internet and FanControl",
@@ -142,13 +143,13 @@ jobs:
                           "  2. In FanControl, open the menu, click 'Install plugin', and pick $dll.",
                           "     It loads immediately - no restart needed.",
                           "",
-                          "  That single DLL is all you need; FanControl already provides HidSharp.dll",
-                          "  and FanControl.Plugins.dll.",
+                          "  That single DLL is all you need.",
                           "",
-                          "Do NOT run Lian Li L-Connect at the same time. Both drive the same USB",
-                          "controller and L-Connect writes aggressively, which fights this plugin.",
-                          "Uninstall L-Connect, or fully exit it and stop its background process",
-                          "(L ConnectSystem.exe in Task Manager) before using this plugin."
+                          "Do NOT run Lian Li L-Connect at the same time. Both drive the same",
+                          "controllers, and the wireless dongles can only be open in one program.",
+                          "Keep L-Connect installed, but in services.msc set 'L-Connect Service",
+                          "Watcher' and then 'L-Connect Service' to Disabled and stop them, then",
+                          "restart FanControl. The README has the details."
                       ) + $extraNotes + @(
                           "",
                           "License: MIT (see LICENSE.txt)."

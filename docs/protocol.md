@@ -119,6 +119,10 @@ What the hardware confirmation added, and what the plugin does with it:
 - L-Connect's fan slider floors at 10% (`FanPWMMin`), and the plugin does not: a 0% curve point sends duty 0, which spins the radiator fans down to roughly 250-350 rpm rather than stopping them.
 - Commanded fan and pump duty **persist in the controller across a full power cut**, and there is no autonomous thermal failsafe: with nothing driving it, the cooler holds whatever duty it was last given, however hot the CPU gets. That is why the plugin keeps re-asserting the duty on the keepalive cadence rather than writing once.
 
+## The L-Wireless SYNC dongles: wireless UNI FAN
+
+The wireless UNI FAN range (SL V3, TL V2, SL-Infinity Wireless, CL), the wireless water blocks and the Lancool 217 case fans are not on a USB controller and do not speak either protocol above. They pair over radio with the L-Wireless SYNC controller, whose two dongles are WinUSB devices carrying 64-byte packets, and everything about them - how Windows binds them, the packet and RF payload layers, the device list, the duty and pump maths, and the lighting replay - is documented separately in [`wireless.md`](wireless.md).
+
 ## Recorded upstream bugs we deliberately avoid
 
 These are real defects observed in upstream and forked implementations. They are listed here so the encoders are never "simplified" back into them.
@@ -140,7 +144,7 @@ The byte-level facts above were learned and cross-checked against Lian Li L-Conn
 
 These Lian Li products are intentionally NOT in this plugin's catalog, confirmed against a full decompile of L-Connect 3. They are unreachable or have no fan/pump/RGB surface over plain USB HID:
 
-- **The entire wireless family** - Uni Fan SL V3, TL V2, SL-Infinity Wireless, CL, Lancool 217 Infinity, and the wireless Galahad/HydroShift II AIOs. Their fans, pump, and lighting are reachable only over RF, MAC-keyed, after pairing through the wireless dongle - not over USB HID.
+- **The wireless screens and the configuration surface** - an AIO's screen images, themes and carousels, and binding, unbinding or moving a device between RF channels. The wireless fans, pumps, case fans and lighting replay are driven through the dongles (see above); pairing and screen content stay L-Connect's job.
 - **LCD screen render** - the screens on the Uni Fan TL LCD (`0x7393`), the Universal 8.8-inch panel (a WinUSB device, not HID), and the HydroShift II / Lancool 207 displays. On the coolers that also have a screen (Galahad II Vision, HydroShift LCD) the plugin drives the fans, pump, and RGB and simply leaves the screen alone.
 
 Note: the Strimer Plus (`0xA200`) and the 0x0416 fan/pump coolers (Uni Fan TL, Galahad II Trinity/Vision, HydroShift LCD) **are** supported - see [the supported-devices list](../README.md#supported-devices).
