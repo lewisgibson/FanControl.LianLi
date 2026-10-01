@@ -50,11 +50,11 @@ The FLEX and P28 V2 lighting is kept when they're paired to an L-Wireless SYNC c
 
 Install only one of these.
 
-| Build | Download | Use It If |
-| --- | --- | --- |
-| 🎨 Lighting | `FanControl.LianLi-Lighting-vX.Y.Z.zip` | You set up your lighting in L-Connect. Most people want this one. |
-| 🌈 ARGB | `FanControl.LianLi-Argb-vX.Y.Z.zip` | Your motherboard's RGB software controls your fan lighting. |
-| 🌀 Standard | `FanControl.LianLi-vX.Y.Z.zip` | OpenRGB, SignalRGB or another tool controls your lighting. |
+| Build            | Download                                | Use It If                        |
+| ---------------- | --------------------------------------- | -------------------------------- |
+| 🎨&nbsp;Lighting | `FanControl.LianLi-Lighting-vX.Y.Z.zip` | You use L-Connect (most people)  |
+| 🌈&nbsp;ARGB     | `FanControl.LianLi-Argb-vX.Y.Z.zip`     | Your motherboard runs your RGB   |
+| 🌀&nbsp;Standard | `FanControl.LianLi-vX.Y.Z.zip`          | OpenRGB or similar runs your RGB |
 
 ## Install
 
