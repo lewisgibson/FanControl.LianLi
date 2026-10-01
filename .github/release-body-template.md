@@ -1,19 +1,19 @@
 **FanControl.LianLi v{{VERSION}}**, released {{DATE}}
 
-An unofficial [FanControl](https://getfancontrol.com/) plugin for Lian Li UNI FAN fans, STRIMER cables and GALAHAD II and HydroShift coolers. Every fan and pump becomes a control you can put on a curve, with its RPM, and the Lighting build keeps your L-Connect look without L-Connect running.
+A [FanControl](https://getfancontrol.com/) plugin for Lian Li fans, AIO coolers and STRIMER cables. It needs FanControl V243 or newer, and the [README](https://github.com/lewisgibson/FanControl.LianLi#readme) lists the supported devices.
 
 ## Download and install
 
-Pick one zip. Each holds a single `.dll` with `INSTALL.txt` and `LICENSE.txt` beside it; the `.sha256` file is that zip's checksum.
+Download one of these:
 
-- 🌀 `FanControl.LianLi-v{{VERSION}}.zip`: Standard. Fan speed and RPM, never touches lighting. Pick this if you're not sure.
-- 🌈 `FanControl.LianLi-Argb-v{{VERSION}}.zip`: ARGB. The same, and hands the fan lighting to your motherboard's ARGB header.
-- 🎨 `FanControl.LianLi-Lighting-v{{VERSION}}.zip`: Lighting. The same, and keeps the look you designed in L-Connect.
+- 🎨 `FanControl.LianLi-Lighting-v{{VERSION}}.zip` if you set up your lighting in L-Connect. Most people want this one.
+- 🌈 `FanControl.LianLi-Argb-v{{VERSION}}.zip` if your motherboard's RGB software controls your fan lighting.
+- 🌀 `FanControl.LianLi-v{{VERSION}}.zip` if OpenRGB, SignalRGB or another tool controls your lighting.
 
-Extract the `.dll`, right-click it, choose Properties, tick Unblock and click OK (FanControl silently ignores a blocked plugin). Then in FanControl open the menu, click Install plugin and pick the `.dll`. It loads straight away. To upgrade, do the same with the new `.dll`; your curves stay bound.
+1. Extract the `.dll` from the zip.
+2. Right-click the `.dll`, choose Properties, tick Unblock and click OK.
+3. In FanControl, open the menu, click Install plugin and pick the `.dll`.
 
-Don't run L-Connect at the same time as the plugin. The README explains [how to set up in L-Connect and then switch it off](https://github.com/lewisgibson/FanControl.LianLi#using-it-with-l-connect). Needs FanControl V243 or newer.
-
-Full details are in the [README](https://github.com/lewisgibson/FanControl.LianLi#readme), and if something isn't working, see [troubleshooting](https://github.com/lewisgibson/FanControl.LianLi/blob/main/docs/troubleshooting.md).
+If you use L-Connect, [switch it off first](https://github.com/lewisgibson/FanControl.LianLi#using-it-with-l-connect). If something isn't working, see [troubleshooting](https://github.com/lewisgibson/FanControl.LianLi/blob/main/docs/troubleshooting.md).
 
 ## What's changed
