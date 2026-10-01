@@ -232,20 +232,28 @@ public class WindowsNativeApiTests {
         // An anonymous pipe nobody writes to blocks a synchronous ReadFile for good: the shape of a
         // wedged device's synchronous IOCTL. The bound gives up, CancelSynchronousIo reaches the
         // blocked read, and the abandoned call's failure is reported rather than lost.
-        using var server = new AnonymousPipeServerStream(PipeDirection.In);
-        using var client = new AnonymousPipeClientStream(PipeDirection.Out, server.ClientSafePipeHandle);
-        using var reported = new ManualResetEventSlim(false);
-        Exception? late = null;
+        AbandonedCallScenario.Run(() => {
+            using var server = new AnonymousPipeServerStream(PipeDirection.In);
+            using var client = new AnonymousPipeClientStream(PipeDirection.Out, server.ClientSafePipeHandle);
+            using var running = new ManualResetEventSlim(false);
+            using var returned = new ManualResetEventSlim(false);
+            Exception? late = null;
 
-        bool completed = BoundedDeviceCall.TryRun(
-            _ => server.ReadByte(),
-            100,
-            () => { },
-            failure => { late = failure; reported.Set(); },
-            () => { });
+            bool completed = BoundedDeviceCall.TryRun(
+                _ => { running.Set(); server.ReadByte(); },
+                100,
+                () => { },
+                failure => late = failure,
+                returned.Set);
 
-        Assert.False(completed);
-        Assert.True(reported.Wait(5000, TestContext.Current.CancellationToken));
-        Assert.NotNull(late);
+            Assert.False(completed);
+            Assert.True(returned.Wait(5000, TestContext.Current.CancellationToken));
+            if (!running.IsSet) {
+                return false;
+            }
+
+            Assert.NotNull(late);
+            return true;
+        });
     }
 }

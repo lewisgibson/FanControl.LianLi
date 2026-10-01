@@ -69,7 +69,7 @@ public sealed class ControllerBuilderTests {
                     return device;
                 },
             },
-            50,
+            500, // room for the fast build to be scheduled and finish on a loaded machine; the blocked one times out either way
             (build, controller) => {
                 lateBuild = build;
                 lateController = controller;

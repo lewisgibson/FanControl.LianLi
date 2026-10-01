@@ -27,23 +27,31 @@ public class BoundedDeviceCallRunnerTests {
 
     [Fact]
     public void TryRun_FailureAfterTheDeadline_IsLoggedWithTheOperationAndTheBound() {
-        var log = new FakeLogger();
-        using var release = new ManualResetEventSlim(false);
-        using var returned = new ManualResetEventSlim(false);
+        AbandonedCallScenario.Run(() => {
+            var log = new FakeLogger();
+            using var release = new ManualResetEventSlim(false);
+            using var running = new ManualResetEventSlim(false);
+            using var returned = new ManualResetEventSlim(false);
 
-        bool completed = new BoundedDeviceCallRunner(log).TryRun(
-            "reopen on fake/0",
-            _ => { release.Wait(CancellationToken.None); throw new InvalidOperationException("the open finally failed"); },
-            50,
-            () => { },
-            returned.Set);
+            bool completed = new BoundedDeviceCallRunner(log).TryRun(
+                "reopen on fake/0",
+                _ => { running.Set(); release.Wait(CancellationToken.None); throw new InvalidOperationException("the open finally failed"); },
+                50,
+                () => { },
+                returned.Set);
 
-        Assert.False(completed);
-        release.Set();
-        Assert.True(returned.Wait(5000, TestContext.Current.CancellationToken));
-        Assert.Equal(
-            "  reopen on fake/0 failed after its 50 ms bound had already given up on it: InvalidOperationException: the open finally failed",
-            Assert.Single(log.Messages));
+            Assert.False(completed);
+            release.Set();
+            Assert.True(returned.Wait(5000, TestContext.Current.CancellationToken));
+            if (!running.IsSet) {
+                return false;
+            }
+
+            Assert.Equal(
+                "  reopen on fake/0 failed after its 50 ms bound had already given up on it: InvalidOperationException: the open finally failed",
+                Assert.Single(log.Messages));
+            return true;
+        });
     }
 
     [Fact]

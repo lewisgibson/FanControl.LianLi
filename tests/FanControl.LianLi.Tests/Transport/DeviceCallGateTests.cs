@@ -223,16 +223,28 @@ public class DeviceCallGateTests {
 
     [Fact]
     public void TryRun_OverTheRealBound_AnAbandonedThreadThatFinallyReturns_ReleasesTheDevice() {
-        using var release = new ManualResetEventSlim(false);
-        var gate = new DeviceCallGate(new BoundedDeviceCallRunner(_log), _clock, _log);
+        AbandonedCallScenario.Run(() => {
+            using var release = new ManualResetEventSlim(false);
+            using var running = new ManualResetEventSlim(false);
+            var log = new FakeLogger();
+            var gate = new DeviceCallGate(new BoundedDeviceCallRunner(log), _clock, log);
 
-        Assert.False(gate.TryRun(Device, "reopen on " + Device, _ => release.Wait(CancellationToken.None), 50, () => { }));
-        Assert.Throws<IOException>(() => gate.TryRun(Device, "reopen on " + Device, _ => { }, 50, () => { }));
+            Assert.False(gate.TryRun(Device, "reopen on " + Device, _ => { running.Set(); release.Wait(CancellationToken.None); }, 50, () => { }));
 
-        release.Set();
-        Assert.True(SpinWait.SpinUntil(() => _log.Messages.Count == 2, TimeSpan.FromSeconds(5)));
-        Assert.EndsWith("calls to " + Device + " resume (1 refused meanwhile)", _log.Messages[1]);
-        Assert.True(gate.TryRun(Device, "reopen on " + Device, _ => { }, 1000, () => { }));
+            // Refused only while the call is still out: a thread that never ran it can already have
+            // reported it returned, in which case the device was rightly let go and nothing was tested.
+            Exception? refusal = Record.Exception(() => gate.TryRun(Device, "reopen on " + Device, _ => { }, 50, () => { }));
+            release.Set();
+            if (refusal is null && !running.IsSet) {
+                return false;
+            }
+
+            Assert.IsType<IOException>(refusal);
+            Assert.True(SpinWait.SpinUntil(() => log.Messages.Count == 2, TimeSpan.FromSeconds(5)));
+            Assert.EndsWith("calls to " + Device + " resume (1 refused meanwhile)", log.Messages[1]);
+            Assert.True(gate.TryRun(Device, "reopen on " + Device, _ => { }, 1000, () => { }));
+            return true;
+        });
     }
 
     [Fact]
