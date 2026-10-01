@@ -64,7 +64,11 @@ internal static class StartStopConfigurationReader {
 
     // A group's RPMSetting.Mode selects the active profile; the active profile is the entry in
     // Profiles whose own Mode matches it, and that profile's IsStartStop is the switch. Matching on
-    // Mode (not a hard-coded profile name) keeps this independent of the profile-name ordering.
+    // Mode (not a hard-coded profile name) keeps this independent of the profile-name ordering, and
+    // matching two numbers from the same file keeps it independent of L-Connect's numbering: a
+    // release that inserts a mode renumbers every RPMMode above it (as Turbo at 8 did), so a fixed
+    // number here would read a profile written under the other numbering wrongly, while a
+    // within-file match cannot.
     private static bool ReadGroupStartStop(JsonValue group) {
         JsonValue? rpmSetting = group.Member("RPMSetting");
         int? activeMode = rpmSetting?.Member("Mode")?.AsInt();

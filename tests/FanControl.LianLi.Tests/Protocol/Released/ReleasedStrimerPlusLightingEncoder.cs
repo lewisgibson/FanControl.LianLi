@@ -1,3 +1,4 @@
+#pragma warning disable CA1510, CA1512 // The released v1.1.34 source, kept verbatim as the oracle the current encoder is compared against (ReleasedLightingEncoderTests); it compiles here on net8.0, where the analyzer would have it use ThrowIfNull.
 #if ENABLE_LIGHTING
 using System;
 using System.Collections.Generic;
@@ -16,22 +17,14 @@ namespace FanControl.LianLi.Protocol;
 /// After every configured port is written, a single enable latch is sent - a per-port enable
 /// when exactly one port is configured, otherwise a multi-port enable carrying a 12-bit bitmask
 /// of the configured ports. Unlike SL-Infinity the saved mode integer is the wire byte directly
-/// (no lookup); colours expand per mode before they are serialised in R,B,G order. When the
-/// cable's L-Connect "sync to motherboard" switch is on, no effect is written: the ARGB-sync
-/// register is set and port 0 enabled, which hands the LEDs to the motherboard's ARGB header the
-/// way L-Connect hands them over.
+/// (no lookup); colours expand per mode before they are serialised in R,B,G order.
 /// </remarks>
-internal static class StrimerPlusLightingEncoder
+internal static class ReleasedStrimerPlusLightingEncoder
 {
     // Every Uni-family report starts with report id 0xE0 (224). The Strimer Plus exposes
     // 2 channels x 6 ports = 12 logical ports.
     private const byte ReportId = 0xE0;
     private const int PortCount = 12;
-
-    // The ARGB-sync switch is the effect report's mode byte 64 on port 0, with 1 in the speed
-    // byte's place to hand the LEDs to the motherboard (0 takes them back), followed by a
-    // single-port enable of port 0. Both as L-Connect's setMotherboardARGBSync sends them.
-    private const byte ArgbSyncMode = 64;
 
     // L-Connect's normalize step folds the lowest brightness step into Off, and an unset
     // direction into Right - selecting the lowest brightness turns the LEDs off.
@@ -65,11 +58,10 @@ internal static class StrimerPlusLightingEncoder
     };
 
     /// <summary>
-    /// Encode the ordered transfers that reproduce <paramref name="ports"/> on a Strimer Plus, or
-    /// the two that hand its LEDs to the motherboard when <paramref name="motherboardArgbSync"/>.
+    /// Encode the ordered transfers that reproduce <paramref name="ports"/> on a Strimer Plus.
     /// Ports outside 0-11 are ignored. Returns an empty list when no port is configured.
     /// </summary>
-    public static IReadOnlyList<LightingTransfer> Encode(IReadOnlyList<LightingPortState> ports, bool motherboardArgbSync = false)
+    public static IReadOnlyList<LightingTransfer> Encode(IReadOnlyList<LightingPortState> ports)
     {
         if (ports is null)
         {
@@ -77,13 +69,6 @@ internal static class StrimerPlusLightingEncoder
         }
 
         var transfers = new List<LightingTransfer>();
-        if (motherboardArgbSync)
-        {
-            transfers.Add(new LightingTransfer(isFeature: true, new byte[] { ReportId, 0x10, ArgbSyncMode, 1, 0, 0 }));
-            transfers.Add(EncodeSinglePortEnable(0));
-            return transfers;
-        }
-
         int portMask = 0;
         int configuredCount = 0;
         int lastPort = 0;
@@ -208,3 +193,5 @@ internal static class StrimerPlusLightingEncoder
     }
 }
 #endif
+
+#pragma warning restore CA1510, CA1512

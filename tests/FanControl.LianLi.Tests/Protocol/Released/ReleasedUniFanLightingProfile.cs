@@ -1,3 +1,4 @@
+#pragma warning disable CA1510, CA1512 // The released v1.1.34 source, kept verbatim as the oracle the current encoder is compared against (ReleasedLightingEncoderTests); it compiles here on net8.0, where the analyzer would have it use ThrowIfNull.
 #if ENABLE_LIGHTING
 using System;
 using System.Collections.Generic;
@@ -5,16 +6,13 @@ using System.Collections.Generic;
 namespace FanControl.LianLi.Protocol;
 
 /// <summary>
-/// The per-family parameters that drive <see cref="UniFanLightingEncoder"/>. The Uni fan
+/// The per-family parameters that drive <see cref="ReleasedUniFanLightingEncoder"/>. The Uni fan
 /// controllers (SL, AL, SL v2, AL v2, and the Redragon SL variant) share one apply sequence -
-/// fan-quantity, then per-port colour and effect, then a frame latch, then the merge sequence when
-/// port 0 holds a merge effect - and differ only in the values captured here: the port apply
-/// order, the fan-quantity report layout, the ARGB-sync register, the mode-to-wire table, the
-/// frame-latch value, the colour-expansion rule, which modes are merge effects, the report (if
-/// any) that puts the controller into merge mode, whether the other ports are blanked after the
-/// merge effect, and the merge-order register (if the family has one).
+/// fan-quantity, then per-port colour + effect, then a frame latch - and differ only in the
+/// values captured here: the port apply order, the fan-quantity report layout, the mode-to-wire
+/// table, the frame-latch value, and the colour-expansion rule.
 /// </summary>
-internal sealed class UniFanLightingProfile
+internal sealed class ReleasedUniFanLightingProfile
 {
     /// <summary>Create a family profile from its wire parameters.</summary>
     /// <param name="reverseApplyOrder">True to apply ports high-to-low (AL, AL v2); false low-to-high (SL, SL v2).</param>
@@ -24,17 +22,12 @@ internal sealed class UniFanLightingProfile
     /// <param name="maxQuantity">The inclusive upper bound L-Connect validates each group's fan quantity against (4 on SL/AL, 6 on the v2 families).</param>
     /// <param name="defaultQuantity">The per-group fan quantity used when the saved value is absent or out of range; its length must equal <paramref name="quantityGroupCount"/>.</param>
     /// <param name="frameValue">The value latched by the frame report (1 on every family except SL v2, which latches 4).</param>
-    /// <param name="argbSyncRegister">The <c>byte[2]</c> register that hands this family's LEDs to the motherboard's ARGB header (48 on SL, 65 on AL, 97 on the v2 families), the same register the fan protocol's ARGB-sync report uses.</param>
     /// <param name="modeToWire">Saved lighting-mode value to on-wire effect byte; a mode absent here is one the controller does not apply, so its port is skipped.</param>
     /// <param name="expandColors">Given the saved mode and its colours, the exact per-LED buffer this family writes (fan-group palette, per-fan ring, outer-corner, or cycle-fill).</param>
-    /// <param name="mergeModes">The saved lighting-mode values this family's controller treats as merge effects (one effect run across every fan group from port 0); every entry must also be in <paramref name="modeToWire"/>.</param>
-    /// <param name="mergeCommand">The exact feature report that puts the controller into merge mode, sent before port 0 in the merge sequence (SL's StartMerge, AL's merge command), or null for a family whose merge is carried by the effect byte alone (SL v2, AL v2).</param>
-    /// <param name="blankOtherPortsInMerge">True to follow port 0 with an effect-only blank on ports 1 to 7 in the merge sequence (AL v2); false to write port 0 alone.</param>
-    /// <param name="mergeOrderRegister">The <c>byte[2]</c> register of the merge-order report this family sends on every start and resume (0x63 on the v2 families), or null for a family without one (SL, AL).</param>
-    /// <exception cref="ArgumentNullException"><paramref name="defaultQuantity"/>, <paramref name="modeToWire"/>, <paramref name="expandColors"/>, or <paramref name="mergeModes"/> is null.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="defaultQuantity"/>, <paramref name="modeToWire"/>, or <paramref name="expandColors"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="quantityGroupCount"/> is not positive or <paramref name="maxQuantity"/> is negative.</exception>
-    /// <exception cref="ArgumentException"><paramref name="defaultQuantity"/> does not have <paramref name="quantityGroupCount"/> entries, or a merge mode is not in <paramref name="modeToWire"/>.</exception>
-    public UniFanLightingProfile(
+    /// <exception cref="ArgumentException"><paramref name="defaultQuantity"/> does not have <paramref name="quantityGroupCount"/> entries.</exception>
+    public ReleasedUniFanLightingProfile(
         bool reverseApplyOrder,
         int quantityGroupCount,
         byte quantityRegister,
@@ -42,13 +35,8 @@ internal sealed class UniFanLightingProfile
         int maxQuantity,
         IReadOnlyList<int> defaultQuantity,
         byte frameValue,
-        byte argbSyncRegister,
         IReadOnlyDictionary<int, byte> modeToWire,
-        Func<int, IReadOnlyList<RgbColor>, RgbColor[]> expandColors,
-        IReadOnlyCollection<int> mergeModes,
-        IReadOnlyList<byte>? mergeCommand,
-        bool blankOtherPortsInMerge,
-        byte? mergeOrderRegister)
+        Func<int, IReadOnlyList<RgbColor>, RgbColor[]> expandColors)
     {
         if (quantityGroupCount <= 0)
         {
@@ -70,24 +58,6 @@ internal sealed class UniFanLightingProfile
             throw new ArgumentException("Default quantity length must match the group count.", nameof(defaultQuantity));
         }
 
-        if (modeToWire is null)
-        {
-            throw new ArgumentNullException(nameof(modeToWire));
-        }
-
-        if (mergeModes is null)
-        {
-            throw new ArgumentNullException(nameof(mergeModes));
-        }
-
-        foreach (int mode in mergeModes)
-        {
-            if (!modeToWire.ContainsKey(mode))
-            {
-                throw new ArgumentException("Every merge mode must have a wire byte.", nameof(mergeModes));
-            }
-        }
-
         ReverseApplyOrder = reverseApplyOrder;
         QuantityGroupCount = quantityGroupCount;
         QuantityRegister = quantityRegister;
@@ -95,13 +65,8 @@ internal sealed class UniFanLightingProfile
         MaxQuantity = maxQuantity;
         DefaultQuantity = defaultQuantity;
         FrameValue = frameValue;
-        ArgbSyncRegister = argbSyncRegister;
-        ModeToWire = modeToWire;
+        ModeToWire = modeToWire ?? throw new ArgumentNullException(nameof(modeToWire));
         ExpandColors = expandColors ?? throw new ArgumentNullException(nameof(expandColors));
-        MergeModes = mergeModes;
-        MergeCommand = mergeCommand;
-        BlankOtherPortsInMerge = blankOtherPortsInMerge;
-        MergeOrderRegister = mergeOrderRegister;
     }
 
     /// <summary>True to apply ports high-to-low; false low-to-high.</summary>
@@ -125,25 +90,12 @@ internal sealed class UniFanLightingProfile
     /// <summary>The value latched by the frame report to display the assembled look.</summary>
     public byte FrameValue { get; }
 
-    /// <summary>The register that hands this family's LEDs to the motherboard's ARGB header.</summary>
-    public byte ArgbSyncRegister { get; }
-
     /// <summary>Saved lighting-mode value to on-wire effect byte; absent modes leave their port untouched.</summary>
     public IReadOnlyDictionary<int, byte> ModeToWire { get; }
 
     /// <summary>Given a saved mode and its colours, the exact per-LED buffer this family writes.</summary>
     public Func<int, IReadOnlyList<RgbColor>, RgbColor[]> ExpandColors { get; }
-
-    /// <summary>The saved lighting-mode values that are merge effects on this family; only port 0's mode decides merge mode.</summary>
-    public IReadOnlyCollection<int> MergeModes { get; }
-
-    /// <summary>The feature report that puts the controller into merge mode, sent before port 0; null when the effect byte alone carries the merge.</summary>
-    public IReadOnlyList<byte>? MergeCommand { get; }
-
-    /// <summary>True to blank ports 1 to 7 with an effect-only report after port 0 in the merge sequence.</summary>
-    public bool BlankOtherPortsInMerge { get; }
-
-    /// <summary>The register of the merge-order report sent after the look and its frame at every start and reconnect (see <c>docs/lighting.md</c>); null for a family without one.</summary>
-    public byte? MergeOrderRegister { get; }
 }
 #endif
+
+#pragma warning restore CA1510, CA1512

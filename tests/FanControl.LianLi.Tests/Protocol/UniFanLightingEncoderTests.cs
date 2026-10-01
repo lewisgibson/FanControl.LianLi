@@ -1,5 +1,6 @@
 #if ENABLE_LIGHTING
 using System.Collections.Generic;
+using System.Linq;
 using FanControl.LianLi.Protocol;
 using Xunit;
 
@@ -10,10 +11,40 @@ namespace FanControl.LianLi.Tests.Protocol;
 /// AL, SL v2, AL v2). Each asserts the exact wire output: the fan-quantity reports (family
 /// register and packing), a colour output report for a per-fan/full-expansion mode and a
 /// fan-group mode, the effect report (a looked-up wire byte and the Lowest->Off brightness fold),
-/// the apply order, and that an unrecognised mode leaves its port untouched.
+/// the apply order, and that an unrecognised mode leaves its port untouched. The motherboard
+/// ARGB-sync hand-over is asserted once for every family against the fan protocol's own report,
+/// and each family's merge sequence and (on the v2 families) merge-order report byte for byte.
 /// </summary>
 public sealed class UniFanLightingEncoderTests
 {
+    [Theory]
+    [InlineData("Sl", 0x32, 48, 5)]
+    [InlineData("Al", 0x40, 65, 5)]
+    [InlineData("SlV2", 0x60, 97, 6)]
+    [InlineData("AlV2", 0x60, 97, 6)]
+    public void MotherboardArgbSync_WritesQuantityThenTheFamilysSyncRegisterAndNoLook(string family, byte quantityRegister, byte syncRegister, int count)
+    {
+        // L-Connect's Init and resume with the controller's "sync to motherboard" switch on: the
+        // fan quantity (and on the v2 families the merge order), then the family's ARGB-sync
+        // register written 1, and no look or frame. The sync report is byte for byte the one the
+        // ARGB build sends through the fan protocol.
+        (UniFanLightingProfile profile, IFanProtocol protocol) = family switch
+        {
+            "Sl" => (UniFanLightingProfiles.Sl, (IFanProtocol)new SlProtocol()),
+            "Al" => (UniFanLightingProfiles.Al, new AlProtocol()),
+            "SlV2" => (UniFanLightingProfiles.SlV2, new SlV2Protocol()),
+            _ => (UniFanLightingProfiles.AlV2, new AlV2Protocol()),
+        };
+        var ports = new[] { Port(port: 0, mode: 26, speed: 0, direction: 0, brightness: 0, Rgb(255, 0, 0)) };
+
+        IReadOnlyList<LightingTransfer> transfers = UniFanLightingEncoder.Encode(profile, ports, new[] { 3, 3, 3, 3 }, motherboardArgbSync: true);
+
+        Assert.Equal(count, transfers.Count); // 4x SetQuantity (+ merge order) + ARGB sync
+        Assert.Equal(quantityRegister, transfers[0].Report[2]);
+        AssertTransfer(transfers[count - 1], feature: true, Feature(0xE0, 0x10, syncRegister, 1));
+        Assert.Equal(protocol.EncodeArgbSync(true), transfers[count - 1].Report);
+    }
+
     // ---- SL (0xA100 / Redragon 0xA106): 4 ports, forward order, register 0x32 packed, frame 1 ----
 
     [Fact]
@@ -181,7 +212,7 @@ public sealed class UniFanLightingEncoderTests
 
         IReadOnlyList<LightingTransfer> transfers = UniFanLightingEncoder.Encode(UniFanLightingProfiles.SlV2, ports, new[] { 1, 2, 5, 6 });
 
-        Assert.Equal(7, transfers.Count);
+        Assert.Equal(8, transfers.Count); // 4x SetQuantity + colour + effect + SetFrame + merge order
 
         // Register 0x60, group + quantity packed; SL v2 accepts quantity up to 6.
         AssertTransfer(transfers[0], feature: true, Feature(0xE0, 0x10, 0x60, 0x01));
@@ -192,6 +223,10 @@ public sealed class UniFanLightingEncoderTests
         AssertTransfer(transfers[4], feature: false, ColorReport(0, PerFanLeds(fanCount: 6, ledsPerFan: 16, Rgb(255, 0, 0), Rgb(0, 255, 0))));
         AssertTransfer(transfers[5], feature: true, Feature(0xE0, 0x10, 1, 0, 0, 0));
         AssertTransfer(transfers[6], feature: true, Feature(0xE0, 0x60, 0, 4)); // SetFrame(4), not 1
+
+        // The merge order, after setFanQuantity's look and frame as Init and ResumeSuspend send it:
+        // L-Connect's default 0,1,2,3 when none is saved, an 8-byte report on 0x63.
+        AssertTransfer(transfers[7], feature: true, MergeOrder(0, 1, 2, 3));
     }
 
     [Fact]
@@ -208,6 +243,7 @@ public sealed class UniFanLightingEncoderTests
         AssertTransfer(transfers[6], feature: false, ColorReport(2, FanGroupLeds(fanCount: 6, slots: 4, cycleFill: false, Rgb(1, 2, 3), Rgb(4, 5, 6))));
         AssertTransfer(transfers[7], feature: true, Feature(0xE0, 0x12, 35, 0, 0, 0));
         AssertTransfer(transfers[8], feature: true, Feature(0xE0, 0x60, 0, 4));
+        AssertTransfer(transfers[9], feature: true, MergeOrder(0, 1, 2, 3));
     }
 
     [Fact]
@@ -240,8 +276,9 @@ public sealed class UniFanLightingEncoderTests
 
         IReadOnlyList<LightingTransfer> transfers = UniFanLightingEncoder.Encode(UniFanLightingProfiles.SlV2, ports, new[] { 3, 3, 3, 3 });
 
-        Assert.Equal(5, transfers.Count);
+        Assert.Equal(6, transfers.Count); // 4x SetQuantity + SetFrame + merge order
         AssertTransfer(transfers[4], feature: true, Feature(0xE0, 0x60, 0, 4));
+        AssertTransfer(transfers[5], feature: true, MergeOrder(0, 1, 2, 3));
     }
 
     // ---- AL v2 (0xA104): 8 ports, reverse order, register 0x60 separate bytes, frame 1 ----
@@ -255,7 +292,7 @@ public sealed class UniFanLightingEncoderTests
 
         IReadOnlyList<LightingTransfer> transfers = UniFanLightingEncoder.Encode(UniFanLightingProfiles.AlV2, ports, new[] { 1, 2, 5, 6 });
 
-        Assert.Equal(7, transfers.Count);
+        Assert.Equal(8, transfers.Count); // 4x SetQuantity + colour + effect + SetFrame + merge order
 
         // Register 0x60, group+1 (1-based) in byte[3], quantity in byte[4]; AL v2 accepts up to 6.
         AssertTransfer(transfers[0], feature: true, Feature(0xE0, 0x10, 0x60, 1, 1, 0));
@@ -266,6 +303,8 @@ public sealed class UniFanLightingEncoderTests
         AssertTransfer(transfers[4], feature: false, ColorReport(0, PerFanLeds(fanCount: 6, ledsPerFan: 8, colors)));
         AssertTransfer(transfers[5], feature: true, Feature(0xE0, 0x10, 1, 0, 0, 0));
         AssertTransfer(transfers[6], feature: true, Feature(0xE0, 0x60, 0, 1));
+
+        AssertTransfer(transfers[7], feature: true, MergeOrder(0, 1, 2, 3));
     }
 
     [Theory]
@@ -347,9 +386,181 @@ public sealed class UniFanLightingEncoderTests
 
         IReadOnlyList<LightingTransfer> transfers = UniFanLightingEncoder.Encode(UniFanLightingProfiles.AlV2, ports, new[] { 3, 3, 3, 3 });
 
-        Assert.Equal(5, transfers.Count);
+        Assert.Equal(6, transfers.Count); // 4x SetQuantity + SetFrame + merge order
         AssertTransfer(transfers[4], feature: true, Feature(0xE0, 0x60, 0, 1));
+        AssertTransfer(transfers[5], feature: true, MergeOrder(0, 1, 2, 3));
     }
+
+    // ---- Merge mode: L-Connect's setMergeLighting per family, after the look its setFanQuantity writes ----
+
+    [Theory]
+    [InlineData(104, 36)] // Meteor_Merge
+    [InlineData(107, 28)] // Runway_Merge
+    public void Sl_MergeEffectOnPortZero_WritesTheLookThenStartMergeThenPortZeroAgain(int mode, byte wire)
+    {
+        // SLFanController: setFanQuantity applies every port and latches the frame, then
+        // setMergeLighting sends SLFanDevice.StartMerge {E0,10,33,0,1,2,3,8} and port 0 once more,
+        // with no frame after it. The other saved ports are still written first, as L-Connect does.
+        var ports = new[]
+        {
+            Port(port: 1, mode: 26, speed: 0, direction: 0, brightness: 0, Rgb(9, 9, 9)),
+            Port(port: 0, mode: mode, speed: 1, direction: 1, brightness: 2, Rgb(255, 0, 0), Rgb(0, 255, 0)),
+        };
+
+        IReadOnlyList<LightingTransfer> transfers = UniFanLightingEncoder.Encode(UniFanLightingProfiles.Sl, ports, new[] { 3, 3, 3, 3 });
+
+        Assert.Equal(12, transfers.Count); // 4x SetQuantity + 2 ports x (colour + effect) + SetFrame + StartMerge + port 0 x (colour + effect)
+        AssertTransfer(transfers[4], feature: false, ColorReport(0, FanGroupLeds(fanCount: 4, slots: 4, cycleFill: false, Rgb(255, 0, 0), Rgb(0, 255, 0))));
+        AssertTransfer(transfers[5], feature: true, Feature(0xE0, 0x10, wire, 1, 1, 2));
+        AssertTransfer(transfers[6], feature: false, ColorReport(1, PerFanLeds(fanCount: 4, ledsPerFan: 16, Rgb(9, 9, 9))));
+        AssertTransfer(transfers[7], feature: true, Feature(0xE0, 0x11, 1, 0, 0, 0));
+        AssertTransfer(transfers[8], feature: true, Feature(0xE0, 0x60, 0, 1));
+        AssertTransfer(transfers[9], feature: true, new byte[] { 0xE0, 0x10, 0x33, 0, 1, 2, 3, 8 });
+        AssertTransfer(transfers[10], feature: false, ColorReport(0, FanGroupLeds(fanCount: 4, slots: 4, cycleFill: false, Rgb(255, 0, 0), Rgb(0, 255, 0))));
+        AssertTransfer(transfers[11], feature: true, Feature(0xE0, 0x10, wire, 1, 1, 2));
+    }
+
+    [Theory]
+    [InlineData(100, 51)] // Contest_Merge
+    [InlineData(108, 50)] // Scan_Merge
+    public void Al_MergeEffectOnPortZero_WritesTheLookThenMergeOnThenPortZeroAgain(int mode, byte wire)
+    {
+        // ALFanController: the look and frame from setFanQuantity, then setMergeLighting sends
+        // ALFanDevice.SendMergeCommand(true) {E0,10,43,1} and port 0 again, no frame after.
+        var ports = new[] { Port(port: 0, mode: mode, speed: 0, direction: 0, brightness: 0, Rgb(1, 2, 3)) };
+
+        IReadOnlyList<LightingTransfer> transfers = UniFanLightingEncoder.Encode(UniFanLightingProfiles.Al, ports, new[] { 3, 3, 3, 3 });
+
+        Assert.Equal(10, transfers.Count); // 4x SetQuantity + colour + effect + SetFrame + merge on + colour + effect
+        AssertTransfer(transfers[6], feature: true, Feature(0xE0, 0x60, 0, 1));
+        AssertTransfer(transfers[7], feature: true, Feature(0xE0, 0x10, 0x43, 1));
+        AssertTransfer(transfers[8], feature: false, ColorReport(0, FanGroupLeds(fanCount: 4, slots: 4, cycleFill: false, Rgb(1, 2, 3))));
+        AssertTransfer(transfers[9], feature: true, Feature(0xE0, 0x10, wire, 0, 0, 0));
+    }
+
+    [Theory]
+    [InlineData(104, 42)] // Meteor_Merge
+    [InlineData(105, 45)] // Mixing_Merge
+    [InlineData(107, 43)] // Runway_Merge
+    [InlineData(111, 46)] // StackMulti_Merge
+    [InlineData(113, 44)] // Tide_Merge
+    public void SlV2_MergeEffectOnPortZero_WritesTheLookThenPortZeroAgain(int mode, byte wire)
+    {
+        // SLV2FanController.setMergeLighting is port 0 alone: no merge command (the merge is in
+        // the effect byte) and no blanking, after the look and frame from setFanQuantity and the
+        // merge order (ResumeSuspend: setFanQuantity, setMergeOrder, setMergeLighting).
+        var ports = new[] { Port(port: 0, mode: mode, speed: 0, direction: 0, brightness: 0, Rgb(1, 2, 3)) };
+
+        IReadOnlyList<LightingTransfer> transfers = UniFanLightingEncoder.Encode(UniFanLightingProfiles.SlV2, ports, new[] { 3, 3, 3, 3 });
+
+        Assert.Equal(10, transfers.Count); // 4x SetQuantity + colour + effect + SetFrame(4) + merge order + colour + effect
+        AssertTransfer(transfers[6], feature: true, Feature(0xE0, 0x60, 0, 4));
+        AssertTransfer(transfers[7], feature: true, MergeOrder(0, 1, 2, 3));
+        AssertTransfer(transfers[8], feature: false, ColorReport(0, FanGroupLeds(fanCount: 6, slots: 4, cycleFill: false, Rgb(1, 2, 3))));
+        AssertTransfer(transfers[9], feature: true, Feature(0xE0, 0x10, wire, 0, 0, 0));
+    }
+
+    [Theory]
+    [InlineData(100, 69)] // Contest_Merge
+    [InlineData(102, 79)] // ElectricCurrent_Merge
+    [InlineData(105, 71)] // Mixing_Merge
+    [InlineData(106, 76)] // MopUp_Merge
+    [InlineData(107, 70)] // Runway_Merge
+    [InlineData(108, 68)] // Scan_Merge
+    [InlineData(109, 75)] // Spring_Merge
+    [InlineData(112, 74)] // TailChasing_Merge
+    [InlineData(113, 72)] // Tide_Merge
+    [InlineData(114, 73)] // Wave_Merge
+    public void AlV2_MergeEffectOnPortZero_WritesTheLookThenPortZeroThenBlanksPortsOneToSeven(int mode, byte wire)
+    {
+        // ALV2FanController.setMergeLighting: port 0 first, then ports 1..7 ascending get the empty
+        // config - Rainbow (wire 43) at speed 0, direction 0, brightness Off (8), and no colour
+        // report because the empty colour list sends none - after the look and frame.
+        var ports = new[]
+        {
+            Port(port: 0, mode: mode, speed: 2, direction: 1, brightness: 1, Rgb(1, 2, 3)),
+            Port(port: 3, mode: 26, speed: 0, direction: 0, brightness: 0, Rgb(4, 5, 6)),
+        };
+
+        IReadOnlyList<LightingTransfer> transfers = UniFanLightingEncoder.Encode(UniFanLightingProfiles.AlV2, ports, new[] { 3, 3, 3, 3 });
+
+        Assert.Equal(19, transfers.Count); // 4x SetQuantity + 2 ports x (colour + effect) + SetFrame + merge order + colour + effect + 7 blanks
+        AssertTransfer(transfers[4], feature: false, ColorReport(3, FanGroupLeds(fanCount: 6, slots: 6, cycleFill: false, Rgb(4, 5, 6))));
+        AssertTransfer(transfers[8], feature: true, Feature(0xE0, 0x60, 0, 1));
+        AssertTransfer(transfers[9], feature: true, MergeOrder(0, 1, 2, 3));
+        AssertTransfer(transfers[10], feature: false, ColorReport(0, FanGroupLeds(fanCount: 6, slots: 6, cycleFill: false, Rgb(1, 2, 3))));
+        AssertTransfer(transfers[11], feature: true, Feature(0xE0, 0x10, wire, 2, 1, 1));
+        for (int port = 1; port <= 7; port++)
+        {
+            AssertTransfer(transfers[11 + port], feature: true, Feature(0xE0, (byte)(0x10 | port), 43, 0, 0, 8));
+        }
+    }
+
+    [Fact]
+    public void MergeEffectOnAnotherPort_IsNotMergeMode()
+    {
+        // Only port 0 decides merge mode (every family's isMergeMode reads port 0's saved mode).
+        var ports = new[]
+        {
+            Port(port: 2, mode: 107, speed: 0, direction: 0, brightness: 0, Rgb(1, 2, 3)),
+            Port(port: 0, mode: 26, speed: 0, direction: 0, brightness: 0, Rgb(4, 5, 6)),
+        };
+
+        IReadOnlyList<LightingTransfer> transfers = UniFanLightingEncoder.Encode(UniFanLightingProfiles.Sl, ports, new[] { 3, 3, 3, 3 });
+
+        Assert.Equal(9, transfers.Count); // 4x SetQuantity + 2 ports x (colour + effect) + SetFrame, nothing after
+        AssertTransfer(transfers[8], feature: true, Feature(0xE0, 0x60, 0, 1));
+    }
+
+    [Fact]
+    public void MergeOrder_WritesTheSavedOrderOnTheFamiliesThatHaveOne()
+    {
+        var ports = new[] { Port(port: 0, mode: 26, speed: 0, direction: 0, brightness: 0, Rgb(1, 1, 1)) };
+
+        IReadOnlyList<LightingTransfer> slV2 = UniFanLightingEncoder.Encode(UniFanLightingProfiles.SlV2, ports, null, mergeOrder: new[] { 3, 2, 1, 0 });
+        IReadOnlyList<LightingTransfer> alV2 = UniFanLightingEncoder.Encode(UniFanLightingProfiles.AlV2, ports, null, mergeOrder: new[] { 1, 0, 3, 2 });
+        IReadOnlyList<LightingTransfer> sl = UniFanLightingEncoder.Encode(UniFanLightingProfiles.Sl, ports, null, mergeOrder: new[] { 3, 2, 1, 0 });
+        IReadOnlyList<LightingTransfer> al = UniFanLightingEncoder.Encode(UniFanLightingProfiles.Al, ports, null, mergeOrder: new[] { 3, 2, 1, 0 });
+
+        // After the one port's colour and effect and the frame, as setMergeOrder follows setFanQuantity.
+        AssertTransfer(slV2[7], feature: true, MergeOrder(3, 2, 1, 0));
+        AssertTransfer(alV2[7], feature: true, MergeOrder(1, 0, 3, 2));
+        // SL and AL have no merge-order register: the quantity is followed straight by the look.
+        Assert.Equal(7, sl.Count);
+        Assert.False(sl[4].IsFeature);
+        Assert.Equal(7, al.Count);
+        Assert.False(al[4].IsFeature);
+    }
+
+    [Theory]
+    [InlineData(new[] { 0, 1, 2, 5 })]  // a group index past L-Connect's bound of 4
+    [InlineData(new[] { 0, -1, 2, 3 })] // a negative index
+    [InlineData(new[] { 0, 1, 2 })]     // the wrong number of groups
+    public void MergeOrder_ThatFailsLConnectsValidation_FallsBackToItsDefault(int[] mergeOrder)
+    {
+        // SLV2FanController.setMergeOrder returns early on such an order, leaving the default it
+        // wrote at Init (0, 1, 2, 3) in place.
+        var ports = new[] { Port(port: 0, mode: 26, speed: 0, direction: 0, brightness: 0, Rgb(1, 1, 1)) };
+
+        IReadOnlyList<LightingTransfer> transfers = UniFanLightingEncoder.Encode(UniFanLightingProfiles.SlV2, ports, null, mergeOrder: mergeOrder);
+
+        AssertTransfer(transfers[7], feature: true, MergeOrder(0, 1, 2, 3));
+    }
+
+    [Fact]
+    public void MergeCommand_IsACopy_SoTheProfileCannotBeChangedThroughATransfer()
+    {
+        var ports = new[] { Port(port: 0, mode: 107, speed: 0, direction: 0, brightness: 0, Rgb(1, 1, 1)) };
+
+        IReadOnlyList<LightingTransfer> first = UniFanLightingEncoder.Encode(UniFanLightingProfiles.Sl, ports, null);
+        first[7].Report[3] = 0xFF;
+        IReadOnlyList<LightingTransfer> second = UniFanLightingEncoder.Encode(UniFanLightingProfiles.Sl, ports, null);
+
+        Assert.Equal(new byte[] { 0xE0, 0x10, 0x33, 0, 1, 2, 3, 8 }, second[7].Report);
+    }
+
+    // The merge-order report: {E0, 0x10, 0x63, o0, o1, o2, o3, 8}, 8 bytes.
+    private static byte[] MergeOrder(byte o0, byte o1, byte o2, byte o3) => new byte[] { 0xE0, 0x10, 0x63, o0, o1, o2, o3, 8 };
 
     private static LightingPortState Port(int port, int mode, int speed, int direction, int brightness, params RgbColor[] colors)
         => new LightingPortState(port, mode, speed, direction, brightness, colors);
@@ -459,19 +670,35 @@ public sealed class UniFanLightingEncoderTests
     {
         var modes = new Dictionary<int, byte>();
         System.Func<int, IReadOnlyList<RgbColor>, RgbColor[]> expand = (_, colors) => System.Array.Empty<RgbColor>();
+        int[] noMerge = System.Array.Empty<int>();
 
         Assert.Throws<System.ArgumentOutOfRangeException>(
-            () => new UniFanLightingProfile(false, 0, 0x10, true, 4, System.Array.Empty<int>(), 1, modes, expand));
+            () => new UniFanLightingProfile(false, 0, 0x10, true, 4, System.Array.Empty<int>(), 1, 97, modes, expand, noMerge, null, false, null));
         Assert.Throws<System.ArgumentOutOfRangeException>(
-            () => new UniFanLightingProfile(false, 1, 0x10, true, -1, new[] { 1 }, 1, modes, expand));
+            () => new UniFanLightingProfile(false, 1, 0x10, true, -1, new[] { 1 }, 1, 97, modes, expand, noMerge, null, false, null));
         Assert.Throws<System.ArgumentNullException>(
-            () => new UniFanLightingProfile(false, 1, 0x10, true, 4, null!, 1, modes, expand));
+            () => new UniFanLightingProfile(false, 1, 0x10, true, 4, null!, 1, 97, modes, expand, noMerge, null, false, null));
         Assert.Throws<System.ArgumentException>(
-            () => new UniFanLightingProfile(false, 2, 0x10, true, 4, new[] { 1 }, 1, modes, expand));
+            () => new UniFanLightingProfile(false, 2, 0x10, true, 4, new[] { 1 }, 1, 97, modes, expand, noMerge, null, false, null));
         Assert.Throws<System.ArgumentNullException>(
-            () => new UniFanLightingProfile(false, 1, 0x10, true, 4, new[] { 1 }, 1, null!, expand));
+            () => new UniFanLightingProfile(false, 1, 0x10, true, 4, new[] { 1 }, 1, 97, null!, expand, noMerge, null, false, null));
         Assert.Throws<System.ArgumentNullException>(
-            () => new UniFanLightingProfile(false, 1, 0x10, true, 4, new[] { 1 }, 1, modes, null!));
+            () => new UniFanLightingProfile(false, 1, 0x10, true, 4, new[] { 1 }, 1, 97, modes, null!, noMerge, null, false, null));
+        Assert.Throws<System.ArgumentNullException>(
+            () => new UniFanLightingProfile(false, 1, 0x10, true, 4, new[] { 1 }, 1, 97, modes, expand, null!, null, false, null));
+        // A merge mode the family cannot write is a contradiction: it would decide merge mode and then skip port 0.
+        Assert.Throws<System.ArgumentException>(
+            () => new UniFanLightingProfile(false, 1, 0x10, true, 4, new[] { 1 }, 1, 97, modes, expand, new[] { 107 }, null, false, null));
+    }
+
+    [Fact]
+    public void Profiles_ListOnlyMergeModesTheirFamilyCanWrite()
+    {
+        foreach (UniFanLightingProfile profile in new[] { UniFanLightingProfiles.Sl, UniFanLightingProfiles.Al, UniFanLightingProfiles.SlV2, UniFanLightingProfiles.AlV2 })
+        {
+            Assert.All(profile.MergeModes, mode => Assert.True(profile.ModeToWire.ContainsKey(mode)));
+            Assert.All(profile.ModeToWire.Keys, mode => Assert.Equal(mode >= 100, profile.MergeModes.Contains(mode)));
+        }
     }
 
     [Fact]

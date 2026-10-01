@@ -1,3 +1,4 @@
+#pragma warning disable CA1510, CA1512 // The released v1.1.34 source, kept verbatim as the oracle the current encoder is compared against (ReleasedLightingEncoderTests); it compiles here on net8.0, where the analyzer would have it use ThrowIfNull.
 #if ENABLE_LIGHTING
 using System;
 using System.Collections.Generic;
@@ -9,30 +10,20 @@ namespace FanControl.LianLi.Protocol;
 /// Pure encoder that turns a Uni fan controller's saved L-Connect look into the exact ordered
 /// HID transfers L-Connect itself sends to reproduce it. One encoder drives every Uni fan family
 /// (SL, AL, SL v2, AL v2, and the Redragon SL variant); the per-family differences - apply order,
-/// fan-quantity report layout, mode-to-wire table, frame-latch value, colour expansion and merge
-/// sequence - come in as a <see cref="UniFanLightingProfile"/>. No I/O and no state: same input
-/// always yields the same bytes, which is what makes the byte math testable in isolation.
+/// fan-quantity report layout, mode-to-wire table, frame-latch value, and colour expansion - come
+/// in as a <see cref="ReleasedUniFanLightingProfile"/>. No I/O and no state: same input always yields the
+/// same bytes, which is what makes the byte math testable in isolation.
 /// </summary>
 /// <remarks>
-/// The apply sequence matches L-Connect's <c>Init</c> and <c>ResumeSuspend</c>: set the per-group
-/// fan quantity (groups 0-3), then for each present port (in the family's apply order) write the
-/// colour output report followed by the effect feature report, then latch the frame, then on the
-/// families that have one the merge-order report (<c>setFanQuantity</c> writes the look and the
-/// frame itself, and <c>setMergeOrder</c> follows it). When port 0 holds one of the family's merge
-/// effects (one effect run across every fan group) the merge sequence follows, with no frame after
-/// it: the family's merge command if it has one, port 0's colour and effect again, and on the AL
-/// v2 an effect-only blank on ports 1 to 7. The whole look still precedes it, because these
-/// families' <c>setFanQuantity</c> applies every port whatever port 0 holds. When the controller's
-/// L-Connect "sync to motherboard" switch is on, only the fan quantity, the merge order and the
-/// family's ARGB-sync register are written, in that order, and the LEDs are left to the
-/// motherboard's ARGB header. The colour output report, effect feature report, ARGB-sync report
+/// The apply sequence matches L-Connect: set the per-group fan quantity (groups 0-3), then for
+/// each present port (in the family's apply order) write the colour output report followed by the
+/// effect feature report, then latch the frame. The colour output report, effect feature report,
 /// and frame latch share the SL-Infinity byte layout; only the values captured in the profile
 /// differ across families.
 /// </remarks>
-internal static class UniFanLightingEncoder
+internal static class ReleasedUniFanLightingEncoder
 {
-    // Every Uni report starts with report id 0xE0 (224). Feature reports are a fixed 7 bytes (the
-    // 8-byte merge-order and StartMerge reports excepted, which carry L-Connect's exact length) and
+    // Every Uni report starts with report id 0xE0 (224). Feature reports are a fixed 7 bytes and
     // the colour output report a fixed 353 bytes (header + per-LED data, zero-padded) - the same
     // fixed lengths the byte-verified SL-Infinity encoder uses, large enough for every family's
     // largest LED model (SL v2's 96-LED buffer is 2 + 96*3 = 290 <= 353).
@@ -54,41 +45,19 @@ internal static class UniFanLightingEncoder
     private const int OuterCorners = 4;
     private const int LedsPerCorner = 3;
 
-    // The blank L-Connect writes on ports 1 to 7 after a merge effect: an empty config of Rainbow
-    // (saved mode 16, looked up in the family table) at Normal speed (0), Right direction (0) and
-    // brightness Off, with no colour report because its empty colour list sends none.
-    private const int RainbowMode = 16;
-    private const int PortCount = 8;
-
-    // The merge order names the four fan groups in the order a merge effect chains them. L-Connect
-    // validates a saved order the way it validates a fan quantity (four entries, each 0 to 4) and
-    // keeps its default of 0, 1, 2, 3 otherwise; the report ends in a fixed 8.
-    private static readonly int[] DefaultMergeOrder = { 0, 1, 2, 3 };
-    private const int MergeOrderMax = 4;
-    private const byte MergeOrderTail = 8;
-
     /// <summary>
-    /// Encode the full apply sequence for one controller: fan-quantity for each group, then either
-    /// the merge-order report (on the families that have one) and the family's ARGB-sync register
-    /// (<paramref name="motherboardArgbSync"/>), or each present port (in the profile's apply
-    /// order) as a colour output report and an effect feature report, then the frame latch, then
-    /// the merge-order report on the families that have one, then the family's merge sequence when
-    /// port 0 holds a merge effect. Ports whose mode the family does not recognise are skipped,
-    /// exactly as L-Connect skips them.
+    /// Encode the full apply sequence for one controller: fan-quantity for each group, each present
+    /// port (in the profile's apply order) as a colour output report plus an effect feature report,
+    /// then the frame latch. Ports whose mode the family does not recognise are skipped, exactly as
+    /// L-Connect skips them.
     /// </summary>
     /// <param name="profile">The family parameters that drive the encoding.</param>
     /// <param name="ports">The saved per-port looks to replay.</param>
     /// <param name="quantity">The saved per-group fan quantity, or null to use the family default.</param>
-    /// <param name="motherboardArgbSync">True to hand the LEDs to the motherboard's ARGB header instead of replaying the look.</param>
-    /// <param name="mergeOrder">The saved merge order, or null for L-Connect's default; ignored on a family without a merge-order register.</param>
     /// <returns>The ordered transfers to write verbatim to the device.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="profile"/> or <paramref name="ports"/> is null.</exception>
     public static IReadOnlyList<LightingTransfer> Encode(
-        UniFanLightingProfile profile,
-        IReadOnlyList<LightingPortState> ports,
-        IReadOnlyList<int>? quantity,
-        bool motherboardArgbSync = false,
-        IReadOnlyList<int>? mergeOrder = null)
+        ReleasedUniFanLightingProfile profile, IReadOnlyList<LightingPortState> ports, IReadOnlyList<int>? quantity)
     {
         if (profile is null)
         {
@@ -108,13 +77,6 @@ internal static class UniFanLightingEncoder
             transfers.Add(Feature(EncodeQuantity(profile, group, fanQuantity[group])));
         }
 
-        if (motherboardArgbSync)
-        {
-            AppendMergeOrder(profile, transfers, mergeOrder);
-            transfers.Add(Feature(EncodeArgbSync(profile.ArgbSyncRegister)));
-            return transfers;
-        }
-
         IEnumerable<LightingPortState> ordered = profile.ReverseApplyOrder
             ? ports.OrderByDescending(p => p.Port)
             : ports.OrderBy(p => p.Port);
@@ -123,28 +85,9 @@ internal static class UniFanLightingEncoder
             AppendPort(profile, transfers, port);
         }
 
-        // The look and its frame precede the merge order, as setFanQuantity precedes setMergeOrder
-        // in Init and ResumeSuspend.
         transfers.Add(Feature(EncodeFrame(profile.FrameValue)));
-        AppendMergeOrder(profile, transfers, mergeOrder);
-
-        // Only port 0 decides merge mode, as L-Connect's isMergeMode reads only port 0's saved mode.
-        LightingPortState? merged = ports.FirstOrDefault(p => p.Port == 0 && profile.MergeModes.Contains(p.Mode));
-        if (merged != null)
-        {
-            AppendMergeSequence(profile, transfers, merged);
-        }
-
         return transfers;
     }
-
-    /// <summary>
-    /// The merge-order feature report <c>{E0, 0x10, register, o0, o1, o2, o3, 8}</c> (8 bytes),
-    /// shared with the SL-Infinity encoder, with a saved order that fails L-Connect's validation
-    /// replaced by its default of 0, 1, 2, 3.
-    /// </summary>
-    internal static byte[] EncodeMergeOrderReport(byte register, IReadOnlyList<int>? mergeOrder)
-        => EncodeMergeOrder(register, NormalizeMergeOrder(mergeOrder));
 
     // Fan i takes colours[i] across all its LEDs; fans past the supplied colours go black. Used by
     // the per-fan ring models (SL/SL v2 full, AL/AL v2 inner and outer).
@@ -211,17 +154,7 @@ internal static class UniFanLightingEncoder
         return leds;
     }
 
-    // Only on the families whose device has the register (SLV2FanDevice and ALV2FanDevice's
-    // SetMergeOrder; SLFanDevice's and ALFanDevice's are empty).
-    private static void AppendMergeOrder(UniFanLightingProfile profile, List<LightingTransfer> transfers, IReadOnlyList<int>? mergeOrder)
-    {
-        if (profile.MergeOrderRegister.HasValue)
-        {
-            transfers.Add(Feature(EncodeMergeOrder(profile.MergeOrderRegister.Value, NormalizeMergeOrder(mergeOrder))));
-        }
-    }
-
-    private static void AppendPort(UniFanLightingProfile profile, List<LightingTransfer> transfers, LightingPortState port)
+    private static void AppendPort(ReleasedUniFanLightingProfile profile, List<LightingTransfer> transfers, LightingPortState port)
     {
         // Only a port whose saved mode is in the family lookup is applied; an unrecognised mode
         // leaves that port untouched while the others still apply.
@@ -236,33 +169,12 @@ internal static class UniFanLightingEncoder
             port.Port, wireMode, port.Speed, port.Direction, NormalizeBrightness(port.Brightness))));
     }
 
-    // L-Connect's setMergeLighting for the family: its merge command (SL, AL), then port 0's colour
-    // and effect, then (AL v2) the blank on ports 1 to 7 ascending, and no frame latch.
-    private static void AppendMergeSequence(UniFanLightingProfile profile, List<LightingTransfer> transfers, LightingPortState merged)
-    {
-        if (profile.MergeCommand != null)
-        {
-            transfers.Add(Feature(profile.MergeCommand.ToArray()));
-        }
-
-        AppendPort(profile, transfers, merged);
-
-        if (profile.BlankOtherPortsInMerge)
-        {
-            byte blankWireMode = profile.ModeToWire[RainbowMode];
-            for (int port = 1; port < PortCount; port++)
-            {
-                transfers.Add(Feature(EncodeEffectSetting(port, blankWireMode, speed: 0, direction: 0, BrightnessOff)));
-            }
-        }
-    }
-
     private static byte NormalizeBrightness(int brightness)
     {
         return brightness == BrightnessLowest ? BrightnessOff : (byte)brightness;
     }
 
-    private static IReadOnlyList<int> NormalizeQuantity(UniFanLightingProfile profile, IReadOnlyList<int>? quantity)
+    private static IReadOnlyList<int> NormalizeQuantity(ReleasedUniFanLightingProfile profile, IReadOnlyList<int>? quantity)
     {
         if (quantity is null || quantity.Count != profile.QuantityGroupCount)
         {
@@ -278,24 +190,6 @@ internal static class UniFanLightingEncoder
         }
 
         return quantity;
-    }
-
-    private static IReadOnlyList<int> NormalizeMergeOrder(IReadOnlyList<int>? mergeOrder)
-    {
-        if (mergeOrder is null || mergeOrder.Count != DefaultMergeOrder.Length)
-        {
-            return DefaultMergeOrder;
-        }
-
-        foreach (int value in mergeOrder)
-        {
-            if (value < 0 || value > MergeOrderMax)
-            {
-                return DefaultMergeOrder;
-            }
-        }
-
-        return mergeOrder;
     }
 
     // Colour output report: {E0, 0x30|port} then each LED as R, B, G (the wire order swaps green
@@ -323,7 +217,7 @@ internal static class UniFanLightingEncoder
 
     // Fan-quantity feature report (7 bytes). Packed families put group in the high nibble and
     // quantity in the low nibble of byte[3]; the others send group+1 (1-based) then quantity.
-    private static byte[] EncodeQuantity(UniFanLightingProfile profile, int group, int quantity)
+    private static byte[] EncodeQuantity(ReleasedUniFanLightingProfile profile, int group, int quantity)
     {
         if (profile.PackQuantityNibbles)
         {
@@ -333,22 +227,15 @@ internal static class UniFanLightingEncoder
         return new byte[] { ReportId, LightingCommand, profile.QuantityRegister, (byte)(group + 1), (byte)quantity, 0, 0 };
     }
 
-    // Merge-order feature report: {E0, 0x10, register, o0, o1, o2, o3, 8} (8 bytes, L-Connect's own length).
-    private static byte[] EncodeMergeOrder(byte register, IReadOnlyList<int> order) =>
-        new byte[] { ReportId, LightingCommand, register, (byte)order[0], (byte)order[1], (byte)order[2], (byte)order[3], MergeOrderTail };
-
     // Frame-latch feature report: {E0, 0x60, hi, lo} latches the assembled frame to display it
     // (7 bytes). The latch value is 1 on every family except SL v2, which latches 4.
     private static byte[] EncodeFrame(byte frameValue) =>
         new byte[] { ReportId, FrameRegister, (byte)((frameValue >> 8) & 0xFF), (byte)(frameValue & 0xFF), 0, 0, 0 };
-
-    // ARGB-sync feature report: {E0, 0x10, register, 1} hands the LEDs to the motherboard's ARGB
-    // header (7 bytes), the same report the fan protocol's ArgbSync encodes for the ARGB build.
-    private static byte[] EncodeArgbSync(byte register) =>
-        new byte[] { ReportId, LightingCommand, register, 1, 0, 0, 0 };
 
     private static LightingTransfer Feature(byte[] report) => new LightingTransfer(true, report);
 
     private static LightingTransfer Output(byte[] report) => new LightingTransfer(false, report);
 }
 #endif
+
+#pragma warning restore CA1510, CA1512

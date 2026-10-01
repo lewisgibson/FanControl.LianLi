@@ -1,3 +1,4 @@
+#pragma warning disable CA1510, CA1512 // The released v1.1.34 source, kept verbatim as the oracle the current encoder is compared against (ReleasedLightingEncoderTests); it compiles here on net8.0, where the analyzer would have it use ThrowIfNull.
 #if ENABLE_LIGHTING
 using System;
 using System.Collections.Generic;
@@ -14,18 +15,10 @@ namespace FanControl.LianLi.Protocol;
 /// <remarks>
 /// The apply sequence is: set the per-group fan quantity (groups 0-3), then for each present
 /// port in reverse order (7-0) write the colour output report followed by the effect feature
-/// report, then latch the frame, then write the merge order (the saved one, or L-Connect's
-/// default 0, 1, 2, 3). When port 0 holds one of the merge effects (one effect run across every
-/// fan group) the controller shows port 0 alone: L-Connect's default look is written on every
-/// port and a frame latched, as its cold start writes them before it has read the saved look,
-/// then the merge order, then ports 7-1 are each blanked with an effect-only report, port 0 is
-/// written last, and no further frame is latched, which is L-Connect's own merge sequence after
-/// that start. When the controller's L-Connect "sync to motherboard" switch is on, only the fan
-/// quantity, the merge order and the ARGB-sync register are written and the LEDs are left to the
-/// motherboard's ARGB header. The saved mode integer, colours, and brightness are each translated
-/// to the controller's wire encoding before they are written.
+/// report, then latch the frame. The saved mode integer, colours, and brightness are each
+/// translated to the controller's wire encoding before they are written.
 /// </remarks>
-internal static class SlInfinityLightingEncoder
+internal static class ReleasedSlInfinityLightingEncoder
 {
     // Every Uni report starts with report id 0xE0 (224). Feature reports are a fixed 7 bytes
     // and the colour output report a fixed 353 bytes (header + per-LED data, zero-padded).
@@ -39,54 +32,9 @@ internal static class SlInfinityLightingEncoder
     private const int BrightnessLowest = 4;
     private const byte BrightnessOff = 8;
 
-    // SetQuantity defaults to three fans per group when the saved value is absent or out of
-    // range, which is L-Connect's own SLInfinityController default (fanQuantityList starts as
-    // four 3s, and a saved FanQuantity replaces it only when all four groups are 0-4).
-    private static readonly int[] DefaultQuantity = { 3, 3, 3, 3 };
-
-    // The config-command feature report {E0, 0x10, register, value}: 0x10 selects the command set.
-    // Register 0x63 is the merge order, the four fan groups in the order a merge effect chains
-    // them, which L-Connect's Init and ResumeSuspend write right after setFanQuantity's look and
-    // frame. The plugin writes the saved order there, at every start and reconnect, where
-    // L-Connect's resume writes its default and loses the saved one until a restart
-    // (docs/lighting.md). Register 97 is the ARGB-sync switch (1 hands the LEDs to the
-    // motherboard's ARGB header), the same register the fan protocol's ArgbSync report uses.
-    private const byte ConfigCommand = 0x10;
-    private const byte MergeOrderRegister = 0x63;
-    private const byte ArgbSyncRegister = 97;
-
-    // The merge effects run one effect across every fan group from port 0. L-Connect shows one by
-    // blanking ports 7..1 with an effect-only report - Rainbow (wire 0x32) at Normal speed (0),
-    // Right direction (0) and brightness Off (8), with no colour report because the empty colour
-    // list sends none - and then writing port 0 last. It latches no frame in that sequence.
-    private const byte BlankWireMode = 0x32;
-    private const int PortCount = 8;
-    private static readonly HashSet<int> MergeModes = new HashSet<int>
-    {
-        101, // Door_Merge
-        102, // ElectricCurrent_Merge
-        103, // HeartBeatRunway_Merge
-        105, // Mixing_Merge
-        106, // MopUp_Merge
-        107, // Runway_Merge
-        108, // Scan_Merge
-        110, // Stack_Merge
-        113, // Tide_Merge
-    };
-
-    // The look SLInfinityController.setupDefaultLightingConfig gives every port before any saved
-    // setting is read, which Init's setFanQuantity writes on all eight ports and latches with a
-    // frame (setAllLightingConfig, syncLightingFrame): StaticColor_Inner (62) on the even ports and
-    // StaticColor_Outer (92) on the odd, in red, blue, green and yellow (WPF's Colors: green is
-    // 0,128,0), brightness Highest (0), speed Normal (0), direction Right (0). The merge sequence
-    // never latches, so on a cold start this is the latched frame a merge effect starts from, and
-    // the plugin writes it in merge mode so the controller gets that latch too.
-    private const int DefaultLookInnerMode = 62;
-    private const int DefaultLookOuterMode = 92;
-    private static readonly RgbColor[] DefaultLookColors =
-    {
-        new RgbColor(255, 0, 0), new RgbColor(0, 0, 255), new RgbColor(0, 128, 0), new RgbColor(255, 255, 0),
-    };
+    // SetQuantity defaults to a full four fans per group when the saved value is absent or
+    // out of range; the four groups are validated together (each 0-4), matching L-Connect.
+    private static readonly int[] DefaultQuantity = { 4, 4, 4, 4 };
 
     // Modes whose colours expand to the full inner (4 fans x 8) or outer (4 fans x 12) ring
     // buffer. Every other mode - including the combined-mode halves L-Connect persists as
@@ -178,21 +126,12 @@ internal static class SlInfinityLightingEncoder
     };
 
     /// <summary>
-    /// Encode the full apply sequence for one controller, in the order L-Connect's
-    /// <c>SLInfinityController.Init</c> and <c>ResumeSuspend</c> reach the device: fan-quantity for
-    /// groups 0-3, then the look and its frame (each present port in reverse order as a colour
-    /// output report and an effect feature report, or in merge mode L-Connect's default look on
-    /// every port), then the merge order (<paramref name="mergeOrder"/>, or L-Connect's default),
-    /// then in merge mode the merge sequence (ports 7-1 blanked, then port 0, no frame). With the
-    /// sync switch on (<paramref name="motherboardArgbSync"/>) no look is written: the merge order
-    /// and then the ARGB-sync register. Ports whose mode L-Connect does not recognise are skipped,
-    /// exactly as L-Connect skips them.
+    /// Encode the full apply sequence for one controller: fan-quantity for groups 0-3, each
+    /// present port (in reverse order) as a colour output report plus an effect feature
+    /// report, then the frame latch. Ports whose mode L-Connect does not recognise are
+    /// skipped, exactly as L-Connect skips them.
     /// </summary>
-    public static IReadOnlyList<LightingTransfer> Encode(
-        IReadOnlyList<LightingPortState> ports,
-        IReadOnlyList<int>? quantity,
-        bool motherboardArgbSync = false,
-        IReadOnlyList<int>? mergeOrder = null)
+    public static IReadOnlyList<LightingTransfer> Encode(IReadOnlyList<LightingPortState> ports, IReadOnlyList<int>? quantity)
     {
         if (ports is null)
         {
@@ -207,52 +146,14 @@ internal static class SlInfinityLightingEncoder
             transfers.Add(Feature(EncodeQuantity(group, fanQuantity[group])));
         }
 
-        byte[] mergeOrderReport = UniFanLightingEncoder.EncodeMergeOrderReport(MergeOrderRegister, mergeOrder);
-        if (motherboardArgbSync)
-        {
-            transfers.Add(Feature(mergeOrderReport));
-            transfers.Add(Feature(EncodeArgbSync()));
-            return transfers;
-        }
-
-        // Only port 0 decides merge mode, as L-Connect's isMergeMode reads only port 0's saved mode.
-        LightingPortState? merged = ports.FirstOrDefault(p => p.Port == 0 && MergeModes.Contains(p.Mode));
-        if (merged != null)
-        {
-            // The default look on every port and its frame first, as L-Connect's cold start writes
-            // them (setFanQuantity's setAllLightingConfig, before setMergeOrder); then the merge
-            // order; then ports 7..1, whose saved looks are stale in merge mode, are blanked rather
-            // than replayed, port 0 is written last, and nothing latches a frame after it.
-            for (int port = PortCount - 1; port >= 0; port--)
-            {
-                AppendPort(transfers, DefaultLookPort(port));
-            }
-
-            transfers.Add(Feature(EncodeFrame()));
-            transfers.Add(Feature(mergeOrderReport));
-            for (int port = PortCount - 1; port >= 1; port--)
-            {
-                transfers.Add(Feature(EncodeEffectSetting(port, BlankWireMode, speed: 0, direction: 0, BrightnessOff)));
-            }
-
-            AppendPort(transfers, merged);
-            return transfers;
-        }
-
         foreach (LightingPortState port in ports.OrderByDescending(p => p.Port))
         {
             AppendPort(transfers, port);
         }
 
-        // The look and its frame precede the merge order, as setFanQuantity precedes setMergeOrder
-        // in Init and ResumeSuspend.
         transfers.Add(Feature(EncodeFrame()));
-        transfers.Add(Feature(mergeOrderReport));
         return transfers;
     }
-
-    private static LightingPortState DefaultLookPort(int port) => new LightingPortState(
-        port, (port & 1) == 0 ? DefaultLookInnerMode : DefaultLookOuterMode, speed: 0, direction: 0, brightness: 0, DefaultLookColors);
 
     private static void AppendPort(List<LightingTransfer> transfers, LightingPortState port)
     {
@@ -370,11 +271,10 @@ internal static class SlInfinityLightingEncoder
     // Frame-latch feature report: {E0, 96, 0, 1} latches the assembled frame to display it (7 bytes).
     private static byte[] EncodeFrame() => new byte[] { ReportId, 96, 0, 1, 0, 0, 0 };
 
-    // ARGB-sync feature report: {E0, 0x10, 97, 1} hands the LEDs to the motherboard's ARGB header (7 bytes).
-    private static byte[] EncodeArgbSync() => new byte[] { ReportId, ConfigCommand, ArgbSyncRegister, 1, 0, 0, 0 };
-
     private static LightingTransfer Feature(byte[] report) => new LightingTransfer(true, report);
 
     private static LightingTransfer Output(byte[] report) => new LightingTransfer(false, report);
 }
 #endif
+
+#pragma warning restore CA1510, CA1512

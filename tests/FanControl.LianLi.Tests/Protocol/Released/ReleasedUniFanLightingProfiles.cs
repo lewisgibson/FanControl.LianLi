@@ -1,39 +1,29 @@
+#pragma warning disable CA1510, CA1512 // The released v1.1.34 source, kept verbatim as the oracle the current encoder is compared against (ReleasedLightingEncoderTests); it compiles here on net8.0, where the analyzer would have it use ThrowIfNull.
 #if ENABLE_LIGHTING
 using System.Collections.Generic;
 
 namespace FanControl.LianLi.Protocol;
 
 /// <summary>
-/// The per-family <see cref="UniFanLightingProfile"/> data that drives
-/// <see cref="UniFanLightingEncoder"/>. Each profile captures one Uni fan family's apply order,
-/// fan-quantity report layout, mode-to-wire table, frame-latch value, colour-expansion rule and
-/// merge sequence, extracted from L-Connect. The default fan quantity is 3 per group for every
-/// family, matching L-Connect's own controller default when no saved value is present.
+/// The per-family <see cref="ReleasedUniFanLightingProfile"/> data that drives
+/// <see cref="ReleasedUniFanLightingEncoder"/>. Each profile captures one Uni fan family's apply order,
+/// fan-quantity report layout, mode-to-wire table, frame-latch value, and colour-expansion rule,
+/// extracted from L-Connect. The default fan quantity is 3 per group for every family, matching
+/// L-Connect's own controller default when no saved value is present.
 /// </summary>
-internal static class UniFanLightingProfiles
+internal static class ReleasedUniFanLightingProfiles
 {
     // Every Uni fan family has four fan-speed groups and defaults each to three fans when the
     // saved quantity is absent or out of range (L-Connect's controller default).
     private const int QuantityGroups = 4;
     private static readonly int[] DefaultQuantity = { 3, 3, 3, 3 };
 
-    // How each family enters merge mode, from its device class in L-Connect. The SL's StartMerge is
-    // an 8-byte report on register 0x33 whose tail names the four groups in order and ends in 8; the
-    // AL's merge command is register 0x43 written 1 (0 leaves merge mode). The v2 families have no
-    // such report: their merge effects are distinct effect bytes, and they carry a merge-order
-    // register (0x63) instead, written {group order, 8} on every start and resume.
-    private static readonly byte[] SlStartMerge = { 0xE0, 0x10, 0x33, 0, 1, 2, 3, 8 };
-    private static readonly byte[] AlMergeOn = { 0xE0, 0x10, 0x43, 1, 0, 0, 0 };
-    private const byte MergeOrderRegister = 0x63;
-
     /// <summary>
     /// Uni SL (PID 0xA100) and the Redragon OEM SL variant (PID 0xA106): 4 ports applied
     /// low-to-high, fan-quantity register 0x32 with group and quantity packed into one byte,
-    /// ARGB-sync register 48, a two-model colour expansion (full 4x16 for
-    /// Breathing/StaticColor, else 4x4 fan-group), and a merge sequence of the StartMerge report
-    /// then port 0.
+    /// and a two-model colour expansion (full 4x16 for Breathing/StaticColor, else 4x4 fan-group).
     /// </summary>
-    public static UniFanLightingProfile Sl { get; } = new UniFanLightingProfile(
+    public static ReleasedUniFanLightingProfile Sl { get; } = new ReleasedUniFanLightingProfile(
         reverseApplyOrder: false,
         quantityGroupCount: QuantityGroups,
         quantityRegister: 0x32,
@@ -41,7 +31,6 @@ internal static class UniFanLightingProfiles
         maxQuantity: 4,
         defaultQuantity: DefaultQuantity,
         frameValue: 1,
-        argbSyncRegister: 48,
         modeToWire: new Dictionary<int, byte>
         {
             { 1, 2 },    // Breathing
@@ -60,19 +49,14 @@ internal static class UniFanLightingProfiles
             { 104, 36 }, // Meteor_Merge
             { 107, 28 }, // Runway_Merge
         },
-        expandColors: ExpandSl,
-        mergeModes: new[] { 104, 107 }, // Meteor_Merge, Runway_Merge
-        mergeCommand: SlStartMerge,
-        blankOtherPortsInMerge: false,
-        mergeOrderRegister: null);
+        expandColors: ExpandSl);
 
     /// <summary>
     /// Uni AL (PID 0xA101): 8 ports applied high-to-low, fan-quantity register 0x40 with group+1
-    /// and quantity in separate bytes, ARGB-sync register 65, a four-model colour expansion
-    /// (16 fan-group, 32 inner, 48 outer, and a 48-LED outer-corner model for the colourful outer
-    /// modes), and a merge sequence of the merge command written on then port 0.
+    /// and quantity in separate bytes, and a four-model colour expansion (16 fan-group, 32 inner,
+    /// 48 outer, and a 48-LED outer-corner model for the colourful outer modes).
     /// </summary>
-    public static UniFanLightingProfile Al { get; } = new UniFanLightingProfile(
+    public static ReleasedUniFanLightingProfile Al { get; } = new ReleasedUniFanLightingProfile(
         reverseApplyOrder: true,
         quantityGroupCount: QuantityGroups,
         quantityRegister: 0x40,
@@ -80,7 +64,6 @@ internal static class UniFanLightingProfiles
         maxQuantity: 4,
         defaultQuantity: DefaultQuantity,
         frameValue: 1,
-        argbSyncRegister: 65,
         modeToWire: new Dictionary<int, byte>
         {
             { 1, 2 },    // Breathing
@@ -144,19 +127,14 @@ internal static class UniFanLightingProfiles
             { 100, 51 }, // Contest_Merge
             { 108, 50 }, // Scan_Merge
         },
-        expandColors: ExpandAl,
-        mergeModes: new[] { 100, 108 }, // Contest_Merge, Scan_Merge
-        mergeCommand: AlMergeOn,
-        blankOtherPortsInMerge: false,
-        mergeOrderRegister: null);
+        expandColors: ExpandAl);
 
     /// <summary>
     /// Uni SL v2 (PIDs 0xA103 and 0xA105): 4 ports applied low-to-high, fan-quantity register 0x60
-    /// with group and quantity packed into one byte, a frame latch of 4 (not 1), ARGB-sync register
-    /// 97, a two-model six-fan colour expansion (96-LED per-fan for Breathing/StaticColor, else
-    /// 24-slot fan-group), a merge-order report, and a merge sequence of port 0 alone.
+    /// with group and quantity packed into one byte, a frame latch of 4 (not 1), and a two-model
+    /// six-fan colour expansion (96-LED per-fan for Breathing/StaticColor, else 24-slot fan-group).
     /// </summary>
-    public static UniFanLightingProfile SlV2 { get; } = new UniFanLightingProfile(
+    public static ReleasedUniFanLightingProfile SlV2 { get; } = new ReleasedUniFanLightingProfile(
         reverseApplyOrder: false,
         quantityGroupCount: QuantityGroups,
         quantityRegister: 0x60,
@@ -164,7 +142,6 @@ internal static class UniFanLightingProfiles
         maxQuantity: 6,
         defaultQuantity: DefaultQuantity,
         frameValue: 4,
-        argbSyncRegister: 97,
         modeToWire: new Dictionary<int, byte>
         {
             { 1, 2 },    // Breathing
@@ -190,20 +167,14 @@ internal static class UniFanLightingProfiles
             { 111, 46 }, // StackMulti_Merge
             { 113, 44 }, // Tide_Merge
         },
-        expandColors: ExpandSlV2,
-        mergeModes: new[] { 104, 105, 107, 111, 113 }, // Meteor, Mixing, Runway, StackMulti, Tide (_Merge)
-        mergeCommand: null,
-        blankOtherPortsInMerge: false,
-        mergeOrderRegister: MergeOrderRegister);
+        expandColors: ExpandSlV2);
 
     /// <summary>
     /// Uni AL v2 (PID 0xA104): 8 ports applied high-to-low, fan-quantity register 0x60 with group+1
-    /// and quantity in separate bytes, ARGB-sync register 97, a six-fan colour expansion with
-    /// five variants (36 fan-group, a cycle-fill fan-group for the Meteor modes, 48 inner, 72 outer,
-    /// 72 outer-corner), a merge-order report, and a merge sequence of port 0 then ports 1 to 7
-    /// blanked.
+    /// and quantity in separate bytes, and a six-fan colour expansion with five variants (36
+    /// fan-group, a cycle-fill fan-group for the Meteor modes, 48 inner, 72 outer, 72 outer-corner).
     /// </summary>
-    public static UniFanLightingProfile AlV2 { get; } = new UniFanLightingProfile(
+    public static ReleasedUniFanLightingProfile AlV2 { get; } = new ReleasedUniFanLightingProfile(
         reverseApplyOrder: true,
         quantityGroupCount: QuantityGroups,
         quantityRegister: 0x60,
@@ -211,7 +182,6 @@ internal static class UniFanLightingProfiles
         maxQuantity: 6,
         defaultQuantity: DefaultQuantity,
         frameValue: 1,
-        argbSyncRegister: 97,
         modeToWire: new Dictionary<int, byte>
         {
             { 1, 2 },    // Breathing
@@ -300,11 +270,7 @@ internal static class UniFanLightingProfiles
             { 113, 72 }, // Tide_Merge
             { 114, 73 }, // Wave_Merge
         },
-        expandColors: ExpandAlV2,
-        mergeModes: new[] { 100, 102, 105, 106, 107, 108, 109, 112, 113, 114 }, // every _Merge mode in the AL v2 table
-        mergeCommand: null,
-        blankOtherPortsInMerge: true,
-        mergeOrderRegister: MergeOrderRegister);
+        expandColors: ExpandAlV2);
 
     // SL: Breathing (1) and StaticColor (26) fill 4 fans x 16 LEDs, one saved colour per fan;
     // every other mode uses the 16-slot fan-group palette (4 fans x 4 slots).
@@ -312,10 +278,10 @@ internal static class UniFanLightingProfiles
     {
         if (mode == 1 || mode == 26)
         {
-            return UniFanLightingEncoder.ExpandPerFan(fanCount: 4, ledsPerFan: 16, colors);
+            return ReleasedUniFanLightingEncoder.ExpandPerFan(fanCount: 4, ledsPerFan: 16, colors);
         }
 
-        return UniFanLightingEncoder.ExpandFanGroup(fanCount: 4, slots: 4, colors, cycleFill: false);
+        return ReleasedUniFanLightingEncoder.ExpandFanGroup(fanCount: 4, slots: 4, colors, cycleFill: false);
     }
 
     // AL: inner (32) and outer (48) rings fill one colour per fan; the colourful outer modes use
@@ -327,15 +293,15 @@ internal static class UniFanLightingProfiles
         {
             case 36: // Breathing_Inner
             case 62: // StaticColor_Inner
-                return UniFanLightingEncoder.ExpandPerFan(fanCount: 4, ledsPerFan: 8, colors);
+                return ReleasedUniFanLightingEncoder.ExpandPerFan(fanCount: 4, ledsPerFan: 8, colors);
             case 70: // Breathing_Outer
             case 92: // StaticColor_Outer
-                return UniFanLightingEncoder.ExpandPerFan(fanCount: 4, ledsPerFan: 12, colors);
+                return ReleasedUniFanLightingEncoder.ExpandPerFan(fanCount: 4, ledsPerFan: 12, colors);
             case 71: // BreathingColorful_Outer
             case 93: // StaticColorful_Outer
-                return UniFanLightingEncoder.ExpandOuterCorner(fanCount: 4, colors);
+                return ReleasedUniFanLightingEncoder.ExpandOuterCorner(fanCount: 4, colors);
             default:
-                return UniFanLightingEncoder.ExpandFanGroup(fanCount: 4, slots: 4, colors, cycleFill: false);
+                return ReleasedUniFanLightingEncoder.ExpandFanGroup(fanCount: 4, slots: 4, colors, cycleFill: false);
         }
     }
 
@@ -345,10 +311,10 @@ internal static class UniFanLightingProfiles
     {
         if (mode == 1 || mode == 26)
         {
-            return UniFanLightingEncoder.ExpandPerFan(fanCount: 6, ledsPerFan: 16, colors);
+            return ReleasedUniFanLightingEncoder.ExpandPerFan(fanCount: 6, ledsPerFan: 16, colors);
         }
 
-        return UniFanLightingEncoder.ExpandFanGroup(fanCount: 6, slots: 4, colors, cycleFill: false);
+        return ReleasedUniFanLightingEncoder.ExpandFanGroup(fanCount: 6, slots: 4, colors, cycleFill: false);
     }
 
     // AL v2: the Meteor modes cycle-fill the 6 fans x 6 fan-group palette; inner (48) and outer
@@ -361,19 +327,21 @@ internal static class UniFanLightingProfiles
             case 12: // Meteor
             case 47: // Meteor_Inner
             case 80: // Meteor_Outer
-                return UniFanLightingEncoder.ExpandFanGroup(fanCount: 6, slots: 6, colors, cycleFill: true);
+                return ReleasedUniFanLightingEncoder.ExpandFanGroup(fanCount: 6, slots: 6, colors, cycleFill: true);
             case 36: // Breathing_Inner
             case 62: // StaticColor_Inner
-                return UniFanLightingEncoder.ExpandPerFan(fanCount: 6, ledsPerFan: 8, colors);
+                return ReleasedUniFanLightingEncoder.ExpandPerFan(fanCount: 6, ledsPerFan: 8, colors);
             case 70: // Breathing_Outer
             case 92: // StaticColor_Outer
-                return UniFanLightingEncoder.ExpandPerFan(fanCount: 6, ledsPerFan: 12, colors);
+                return ReleasedUniFanLightingEncoder.ExpandPerFan(fanCount: 6, ledsPerFan: 12, colors);
             case 71: // BreathingColorful_Outer
             case 93: // StaticColorful_Outer
-                return UniFanLightingEncoder.ExpandOuterCorner(fanCount: 6, colors);
+                return ReleasedUniFanLightingEncoder.ExpandOuterCorner(fanCount: 6, colors);
             default:
-                return UniFanLightingEncoder.ExpandFanGroup(fanCount: 6, slots: 6, colors, cycleFill: false);
+                return ReleasedUniFanLightingEncoder.ExpandFanGroup(fanCount: 6, slots: 6, colors, cycleFill: false);
         }
     }
 }
 #endif
+
+#pragma warning restore CA1510, CA1512

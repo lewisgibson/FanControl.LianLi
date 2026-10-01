@@ -973,8 +973,8 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
 #if ENABLE_LIGHTING
     // The product ids this build drives lighting for: the Uni fan families (SL, AL, SL-Infinity,
     // SL v2, AL v2, and the Redragon SL variant), the lighting-only Strimer Plus, and the 0x0416
-    // controllers (Uni Fan TL, Galahad II). A located device of any other family is left untouched
-    // rather than driven with unverified bytes.
+    // controllers (Uni Fan TL, Galahad II Trinity and Vision, HydroShift LCD). A located device of
+    // any other family is left untouched rather than driven with unverified bytes.
     private const int SlProductId = 0xA100;
     private const int AlProductId = 0xA101;
     private const int SlInfinityProductId = 0xA102;
@@ -986,6 +986,11 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     private const int TlFanProductId = 0x7372;
     private const int Galahad2PerformanceProductId = 0x7371;
     private const int Galahad2RegularProductId = 0x7373;
+    private const int Galahad2VisionProductId = 0x7391;
+    private const int Galahad2VisionAlternateProductId = 0x7395;
+    private const int HydroShiftLcdProductId = 0x7398;
+    private const int HydroShiftLcdSecondProductId = 0x7399;
+    private const int HydroShiftLcdThirdProductId = 0x739A;
 
     // Read L-Connect's saved look directly from its own config directory. Opt-in and
     // best-effort: if L-Connect is not installed the directory is absent and no lighting is
@@ -1016,10 +1021,17 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
 
     // Re-apply the saved look for one located controller, matched to its L-Connect config by
     // instance token. No match -> no lighting. A matched controller of an unsupported family
-    // is logged and skipped (its lighting is left as-is), never driven with guessed bytes. The
-    // same runs on every reconnect, as L-Connect's resume does. Returns true once the device's
-    // lighting is settled - applied, or nothing to apply - and false when the writes failed, so
-    // the controller's reconnect replay keeps the look owed and tries it again.
+    // is logged and skipped (its lighting is left as-is), never driven with guessed bytes. A
+    // controller whose L-Connect "sync to motherboard" switch is on gets what L-Connect gives it
+    // instead of its look: the Uni families and the Strimer Plus their ARGB-sync register (the
+    // report the ARGB build sends every Uni controller), the Galahad II Trinity its look with the
+    // motherboard as the signal source, and the TL nothing at all, since L-Connect writes a TL no
+    // lighting then. The Galahad II Vision and the HydroShift LCD have no such switch in L-Connect
+    // and get whichever halves of their look were saved; a Vision screen ring that follows a live
+    // sensor in L-Connect is left as found, since the plugin has no sensor reading to colour it
+    // from. The same runs on every reconnect, as L-Connect's resume does. Returns true once the
+    // device's lighting is settled - applied, or nothing to apply - and false when the writes
+    // failed, so the controller's reconnect replay keeps the look owed and tries it again.
     private bool ApplyLighting(
         IDeviceTransport transport, LocatedDevice info, IReadOnlyList<LConnectControllerConfiguration> configurations)
     {
@@ -1044,26 +1056,33 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
         switch (info.ProductId)
         {
             case SlInfinityProductId:
-                transfers = SlInfinityLightingEncoder.Encode(match.Ports, match.Quantity);
+                transfers = SlInfinityLightingEncoder.Encode(match.Ports, match.Quantity, match.MotherboardArgbSync, match.MergeOrder);
                 break;
             case SlProductId:
             case SlRedragonProductId:
-                transfers = UniFanLightingEncoder.Encode(UniFanLightingProfiles.Sl, match.Ports, match.Quantity);
+                transfers = EncodeUniLook(UniFanLightingProfiles.Sl, match);
                 break;
             case AlProductId:
-                transfers = UniFanLightingEncoder.Encode(UniFanLightingProfiles.Al, match.Ports, match.Quantity);
+                transfers = EncodeUniLook(UniFanLightingProfiles.Al, match);
                 break;
             case SlV2ProductId:
             case SlV2AlternateProductId:
-                transfers = UniFanLightingEncoder.Encode(UniFanLightingProfiles.SlV2, match.Ports, match.Quantity);
+                transfers = EncodeUniLook(UniFanLightingProfiles.SlV2, match);
                 break;
             case AlV2ProductId:
-                transfers = UniFanLightingEncoder.Encode(UniFanLightingProfiles.AlV2, match.Ports, match.Quantity);
+                transfers = EncodeUniLook(UniFanLightingProfiles.AlV2, match);
                 break;
             case StrimerPlusProductId:
-                transfers = StrimerPlusLightingEncoder.Encode(match.Ports);
+                transfers = StrimerPlusLightingEncoder.Encode(match.Ports, match.MotherboardArgbSync);
                 break;
             case TlFanProductId:
+                if (match.MotherboardArgbSync)
+                {
+                    _log.Write(string.Format(
+                        CultureInfo.InvariantCulture, "  lighting left to the motherboard for {0}: L-Connect writes a TL hub nothing when its sync switch is on", match.InstanceToken));
+                    return true;
+                }
+
                 if (match.TlFans is null || match.TlFans.Count == 0)
                 {
                     // Only per-fan TL looks replay; a purely grouped/merged saved look carries no
@@ -1077,14 +1096,67 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
                 break;
             case Galahad2PerformanceProductId:
             case Galahad2RegularProductId:
-                if (match.GalahadFan is null || match.GalahadPump is null)
+                if (match.MotherboardArgbSync)
+                {
+                    // With the switch on the look is not what shows, only the source byte on each
+                    // light is: L-Connect writes whatever it holds for a half that was never saved,
+                    // its own default look, so the handover does not depend on a saved look.
+                    Galahad2FanLightingState fan = match.GalahadFan ?? Galahad2FanLightingState.LConnectDefault;
+                    IReadOnlyList<Galahad2PumpLightingState> pumps = match.GalahadPumps ?? new[] { Galahad2PumpLightingState.LConnectDefault };
+                    if (match.GalahadFan is null || match.GalahadPumps is null)
+                    {
+                        _log.Write(string.Format(
+                            CultureInfo.InvariantCulture,
+                            "  lighting handed to the motherboard for {0} with L-Connect's default {1} light, since none was saved",
+                            match.InstanceToken,
+                            match.GalahadFan is null ? (match.GalahadPumps is null ? "fan and pump" : "fan") : "pump"));
+                    }
+
+                    transfers = Galahad2LightingEncoder.Encode(fan, pumps, motherboardArgbSync: true);
+                    break;
+                }
+
+                if (match.GalahadFan is null || match.GalahadPumps is null)
                 {
                     _log.Write(string.Format(
                         CultureInfo.InvariantCulture, "  lighting skipped for {0}: incomplete Galahad look saved", match.InstanceToken));
                     return true;
                 }
 
-                transfers = Galahad2LightingEncoder.Encode(match.GalahadFan, match.GalahadPump);
+                transfers = Galahad2LightingEncoder.Encode(match.GalahadFan, match.GalahadPumps);
+                break;
+            case Galahad2VisionProductId:
+            case Galahad2VisionAlternateProductId:
+                Galahad2ScreenLightingState? screen = match.GalahadScreen;
+                if (screen != null && screen.IsDynamicMode)
+                {
+                    // L-Connect recolours a dynamic ring every second from a CPU, GPU, pump or
+                    // coolant reading; with none to hand, the ring keeps whatever it shows.
+                    _log.Write(string.Format(
+                        CultureInfo.InvariantCulture, "  screen ring left as found for {0}: its saved look follows a live sensor in L-Connect", match.InstanceToken));
+                    screen = null;
+                }
+
+                if (match.GalahadFan is null && screen is null)
+                {
+                    _log.Write(string.Format(
+                        CultureInfo.InvariantCulture, "  lighting skipped for {0}: no Vision look saved", match.InstanceToken));
+                    return true;
+                }
+
+                transfers = Galahad2LightingEncoder.EncodeVision(match.GalahadFan, screen);
+                break;
+            case HydroShiftLcdProductId:
+            case HydroShiftLcdSecondProductId:
+            case HydroShiftLcdThirdProductId:
+                if (match.GalahadFan is null)
+                {
+                    _log.Write(string.Format(
+                        CultureInfo.InvariantCulture, "  lighting skipped for {0}: no HydroShift LCD fan look saved", match.InstanceToken));
+                    return true;
+                }
+
+                transfers = Galahad2LightingEncoder.EncodeHydroShiftLcd(match.GalahadFan);
                 break;
             default:
                 _log.Write(string.Format(
@@ -1102,7 +1174,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
             LightingReplay.Apply(transport, transfers);
             _log.Write(string.Format(
                 CultureInfo.InvariantCulture,
-                "  lighting applied for {0} ({1} writes)",
+                match.MotherboardArgbSync ? "  lighting left to the motherboard for {0} ({1} writes)" : "  lighting applied for {0} ({1} writes)",
                 match.InstanceToken,
                 transfers.Count));
             return true;
@@ -1119,6 +1191,10 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
         }
 #pragma warning restore CA1031
     }
+
+    // The Uni families share one encoder; the profile is the only thing that differs by product id.
+    private static IReadOnlyList<LightingTransfer> EncodeUniLook(UniFanLightingProfile profile, LConnectControllerConfiguration match)
+        => UniFanLightingEncoder.Encode(profile, match.Ports, match.Quantity, match.MotherboardArgbSync, match.MergeOrder);
 
     // Drive a lighting-only device (no fan protocol, e.g. Strimer Plus): open it, apply the saved
     // look, then dispose - nothing owns it afterwards since there is no fan control to keep alive.

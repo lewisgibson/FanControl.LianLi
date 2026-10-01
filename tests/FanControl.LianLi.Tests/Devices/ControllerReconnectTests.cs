@@ -55,9 +55,9 @@ public sealed class ControllerReconnectTests {
         }
     }
 
-    // An SL-Infinity look (port 0 mode 46 with one colour, FanQuantity [4,4,4,4]): the four
-    // quantity reports, the colour output report, the effect and the frame. In the Lighting build
-    // the literal bytes are checked against the encoder's.
+    // An SL-Infinity look (port 0 mode 46 with one colour, FanQuantity [4,4,4,4], MergeOrder
+    // [0,1,2,3]): the four quantity reports, the colour output report, the effect, the frame, and
+    // the merge order. In the Lighting build the literal bytes are checked against the encoder's.
     private static List<KeyValuePair<bool, byte[]>> SlInfinityLook() {
         var look = new List<KeyValuePair<bool, byte[]>>();
         for (int group = 1; group <= 4; group++) {
@@ -76,9 +76,10 @@ public sealed class ControllerReconnectTests {
         look.Add(new KeyValuePair<bool, byte[]>(false, colours));
         look.Add(Feature(0xE0, 0x10, 0x26, 1, 0, 2, 0));
         look.Add(Feature(0xE0, 0x60, 0, 1, 0, 0, 0));
+        look.Add(Feature(0xE0, 0x10, 0x63, 0, 1, 2, 3, 8));
 #if ENABLE_LIGHTING
         IReadOnlyList<LightingTransfer> encoded = SlInfinityLightingEncoder.Encode(
-            new[] { new LightingPortState(0, 46, 1, 0, 2, new[] { new RgbColor(1, 7, 9) }) }, new[] { 4, 4, 4, 4 });
+            new[] { new LightingPortState(0, 46, 1, 0, 2, new[] { new RgbColor(1, 7, 9) }) }, new[] { 4, 4, 4, 4 }, false, new[] { 0, 1, 2, 3 });
         Assert.Equal(encoded.Count, look.Count);
         for (int i = 0; i < encoded.Count; i++) {
             Assert.Equal(encoded[i].IsFeature, look[i].Key);
@@ -89,6 +90,8 @@ public sealed class ControllerReconnectTests {
     }
 
     private static KeyValuePair<bool, byte[]> Feature(params byte[] report) => new KeyValuePair<bool, byte[]>(true, report);
+
+    private static bool IsMergeOrder(byte[] report) => report.Length >= 3 && report[0] == 0xE0 && report[1] == 0x10 && report[2] == 0x63;
 
     private static bool IsColourReport(byte[] report) => report.Length == 353 && report[0] == 0xE0 && report[1] == 0x30;
 
@@ -145,6 +148,7 @@ public sealed class ControllerReconnectTests {
         List<byte[]> featuresAfter = hid.Features.Skip(featuresAtReopen).ToList();
         List<byte[]> writesAfter = hid.Written.Skip(writesAtReopen).ToList();
         Assert.Single(writesAfter, IsColourReport);
+        Assert.Single(featuresAfter, IsMergeOrder);
         Assert.Contains(featuresAfter, f => f[0] == 0xE0 && f[1] == 0x20 && f[3] == (faultOnSpeedWrite ? 60 : 50)); // the duty, re-sent
         Assert.Contains(_log.Messages, m => m == "C0 reconnected: setup replayed (transport generation 1)");
         Assert.Contains(_log.Messages, m => m.StartsWith("  reopened " + UniPath + " after ", StringComparison.Ordinal));

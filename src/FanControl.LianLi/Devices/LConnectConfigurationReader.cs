@@ -14,10 +14,11 @@ namespace FanControl.LianLi.Devices;
 /// groups it into a per-controller <see cref="LConnectControllerConfiguration"/>. There is no
 /// intermediary export file: the Lighting plugin reproduces whatever look L-Connect last
 /// saved. Each setting is a gzipped JSON file holding <c>{ DeviceID, Type, Data }</c>; the
-/// reader keeps the <c>LightingPort*</c> and <c>FanQuantity</c> settings and ignores the rest
-/// (fan curves, merge order, motherboard sync). Files that are not device settings are
-/// skipped by content; a genuinely unreadable file throws and lets the caller disable
-/// lighting rather than apply a partial look.
+/// reader keeps the look settings (<c>LightingPort*</c>, <c>FanQuantity</c>, <c>MergeOrder</c> and
+/// the other families' equivalents) and the per-controller <c>MotherboardARGBSync</c> switch, and
+/// ignores the rest (fan curves, screen settings). Files that are not device settings are skipped by
+/// content; a genuinely unreadable file throws and lets the caller disable lighting rather than
+/// apply a partial look.
 /// </summary>
 internal static class LConnectConfigurationReader
 {
@@ -84,20 +85,40 @@ internal static class LConnectConfigurationReader
                 {
                     builder.SetQuantity(ReadIntArray(data));
                 }
+                else if (type == "MergeOrder")
+                {
+                    // Uni SL-Infinity, SL v2 and AL v2: the order the four fan groups chain in a
+                    // merge effect, written to the controller on every start.
+                    builder.SetMergeOrder(ReadIntArray(data));
+                }
                 else if (type == "FanLEDLighting")
                 {
-                    // Galahad II fan ring: a single FanLightingSetting object.
+                    // Galahad II Trinity and Vision, HydroShift LCD: a single FanLightingSetting object.
                     builder.SetGalahadFan(ReadGalahadFan(data));
+                }
+                else if (type == "ScreenLEDLighting")
+                {
+                    // Galahad II Vision: the ring of LEDs around its screen, a ScreenLEDLightingSetting.
+                    builder.SetGalahadScreen(ReadGalahadScreen(data));
                 }
                 else if (type == "PumpLEDLighting")
                 {
-                    // Galahad II pump: an array of PumpLightingSetting (normally one).
-                    builder.SetGalahadPump(ReadGalahadPump(data));
+                    // Galahad II pump: an array of PumpLightingSetting, one for the whole cap or,
+                    // in L-Connect's individual mode, one each for the Inner and Outer scopes.
+                    builder.SetGalahadPumps(ReadGalahadPumps(data));
                 }
                 else if (type == "Lighting")
                 {
                     // Uni Fan TL: a nested LightingConfigCollection of per-fan looks.
                     builder.AddTlFans(ReadTlFans(data));
+                }
+                else if (type == "MotherboardARGBSync")
+                {
+                    // L-Connect keeps its "sync to motherboard" switch per controller, as a
+                    // bare JSON bool saved beside that controller's look (the Uni families, TL,
+                    // Galahad II Trinity and Strimer Plus write it). A value that is not a bool
+                    // is read as off, which is what L-Connect's own TryParseData falls back to.
+                    builder.SetMotherboardArgbSync(data.AsBool() ?? false);
                 }
             }
         }
@@ -139,14 +160,19 @@ internal static class LConnectConfigurationReader
         {
             foreach (JsonValue color in colorArray.Elements)
             {
-                int r = color.Member("R")?.AsInt() ?? 0;
-                int g = color.Member("G")?.AsInt() ?? 0;
-                int b = color.Member("B")?.AsInt() ?? 0;
-                colors.Add(new RgbColor((byte)r, (byte)g, (byte)b));
+                colors.Add(ReadColor(color));
             }
         }
 
         return colors;
+    }
+
+    private static RgbColor ReadColor(JsonValue color)
+    {
+        int r = color.Member("R")?.AsInt() ?? 0;
+        int g = color.Member("G")?.AsInt() ?? 0;
+        int b = color.Member("B")?.AsInt() ?? 0;
+        return new RgbColor((byte)r, (byte)g, (byte)b);
     }
 
     private static Galahad2FanLightingState ReadGalahadFan(JsonValue data)
@@ -157,12 +183,55 @@ internal static class LConnectConfigurationReader
         int direction = data.Member("Direction")?.AsInt() ?? 0;
         int numberOfLed = data.Member("NumberOfLED")?.AsInt() ?? 24; // L-Connect's default ring size
         bool syncToPump = data.Member("SyncToPump")?.AsBool() ?? false;
-        return new Galahad2FanLightingState(mode, speed, direction, brightness, numberOfLed, syncToPump, ReadColors(data.Member("Colors")));
+        return new Galahad2FanLightingState(mode, speed, direction, brightness, numberOfLed, syncToPump, ReadFanColors(data));
     }
 
-    private static Galahad2PumpLightingState? ReadGalahadPump(JsonValue data)
+    // The Trinity and the HydroShift LCD save the fan colours as a Colors array; the Vision's
+    // FanLightingSetting has four named members, Color1 to Color4, instead. Either way the encoder
+    // writes them in order, so the named ones are read into the same list.
+    private static List<RgbColor> ReadFanColors(JsonValue data)
     {
-        // The pump look is saved as an array of settings (normally one); replay the first.
+        JsonValue? colorArray = data.Member("Colors");
+        if (colorArray != null)
+        {
+            return ReadColors(colorArray);
+        }
+
+        var colors = new List<RgbColor>();
+        for (int i = 1; i <= 4; i++)
+        {
+            JsonValue? color = data.Member("Color" + i.ToString(CultureInfo.InvariantCulture));
+            if (color is null)
+            {
+                break;
+            }
+
+            colors.Add(ReadColor(color));
+        }
+
+        return colors;
+    }
+
+    // The Vision's ScreenLEDLightingSetting: the ring mode, whether it follows a live sensor
+    // (IsDynamicMode, with the DynamicHigh/DynamicLow looks the plugin cannot drive), and the
+    // static look's colours and 0 to 100 sliders. A missing slider is read as L-Connect's own
+    // "unset" (int.MinValue), which the encoder writes as 0.
+    private static Galahad2ScreenLightingState ReadGalahadScreen(JsonValue data)
+    {
+        int mode = data.Member("Mode")?.AsInt() ?? 0;
+        bool isDynamicMode = data.Member("IsDynamicMode")?.AsBool() ?? false;
+        JsonValue? staticLook = data.Member("Static");
+        int speed = staticLook?.Member("Speed")?.AsInt() ?? int.MinValue;
+        int brightness = staticLook?.Member("Brightness")?.AsInt() ?? int.MinValue;
+        int direction = staticLook?.Member("Direction")?.AsInt() ?? 0;
+        return new Galahad2ScreenLightingState(mode, isDynamicMode, speed, brightness, direction, ReadColors(staticLook?.Member("Colors")));
+    }
+
+    // Every saved pump setting, in its saved order: Galahad2TrinityController.setPumpLEDLighting
+    // writes each one, so an individual-mode look (Inner then Outer) needs both replayed.
+    private static List<Galahad2PumpLightingState> ReadGalahadPumps(JsonValue data)
+    {
+        var pumps = new List<Galahad2PumpLightingState>();
         foreach (JsonValue element in data.Elements)
         {
             int scope = element.Member("Scope")?.AsInt() ?? 0;
@@ -170,10 +239,10 @@ internal static class LConnectConfigurationReader
             int brightness = element.Member("Brightness")?.AsInt() ?? 0;
             int speed = element.Member("Speed")?.AsInt() ?? 0;
             int direction = element.Member("Direction")?.AsInt() ?? 0;
-            return new Galahad2PumpLightingState(scope, mode, speed, direction, brightness, ReadColors(element.Member("Colors")));
+            pumps.Add(new Galahad2PumpLightingState(scope, mode, speed, direction, brightness, ReadColors(element.Member("Colors"))));
         }
 
-        return null;
+        return pumps;
     }
 
     // Parse a TL LightingConfigCollection into per-fan looks. The structure is
@@ -256,8 +325,11 @@ internal static class LConnectConfigurationReader
         private readonly List<LightingPortState> _ports = new List<LightingPortState>();
         private readonly List<TlFanLightingState> _tlFans = new List<TlFanLightingState>();
         private IReadOnlyList<int>? _quantity;
+        private IReadOnlyList<int>? _mergeOrder;
         private Galahad2FanLightingState? _galahadFan;
-        private Galahad2PumpLightingState? _galahadPump;
+        private IReadOnlyList<Galahad2PumpLightingState>? _galahadPumps;
+        private Galahad2ScreenLightingState? _galahadScreen;
+        private bool _motherboardArgbSync;
 
         public Builder(string token)
         {
@@ -277,17 +349,28 @@ internal static class LConnectConfigurationReader
             _quantity = quantity;
         }
 
+        public void SetMergeOrder(IReadOnlyList<int> mergeOrder)
+        {
+            _mergeOrder = mergeOrder;
+        }
+
         public void SetGalahadFan(Galahad2FanLightingState fan)
         {
             _galahadFan = fan;
         }
 
-        public void SetGalahadPump(Galahad2PumpLightingState? pump)
+        // An empty array is no pump look: L-Connect's own handler keeps its current settings then.
+        public void SetGalahadPumps(List<Galahad2PumpLightingState> pumps)
         {
-            if (pump != null)
+            if (pumps.Count > 0)
             {
-                _galahadPump = pump;
+                _galahadPumps = pumps;
             }
+        }
+
+        public void SetGalahadScreen(Galahad2ScreenLightingState screen)
+        {
+            _galahadScreen = screen;
         }
 
         public void AddTlFans(IEnumerable<TlFanLightingState> fans)
@@ -295,10 +378,17 @@ internal static class LConnectConfigurationReader
             _tlFans.AddRange(fans);
         }
 
+        public void SetMotherboardArgbSync(bool motherboardArgbSync)
+        {
+            _motherboardArgbSync = motherboardArgbSync;
+        }
+
+        // A controller with the switch on is a configuration even with no look saved: L-Connect
+        // hands its LEDs to the motherboard whether or not a look was ever applied to it.
         public LConnectControllerConfiguration? Build()
         {
-            bool hasLook = _ports.Count > 0 || _tlFans.Count > 0 || _galahadFan != null || _galahadPump != null;
-            if (!hasLook)
+            bool hasLook = _ports.Count > 0 || _tlFans.Count > 0 || _galahadFan != null || _galahadPumps != null || _galahadScreen != null;
+            if (!hasLook && !_motherboardArgbSync)
             {
                 return null;
             }
@@ -309,7 +399,10 @@ internal static class LConnectConfigurationReader
                 _quantity,
                 _tlFans.Count > 0 ? _tlFans : null,
                 _galahadFan,
-                _galahadPump);
+                _galahadPumps,
+                _motherboardArgbSync,
+                _galahadScreen,
+                _mergeOrder);
         }
     }
 }

@@ -64,6 +64,25 @@ public sealed class StartStopConfigReaderTests : IDisposable {
     }
 
     [Fact]
+    public void Read_MatchesTheModeNumbersWithinTheFile_WhateverLConnectNumberedThem() {
+        // L-Connect 2.1.29 inserted Turbo at 8 and moved FixRPM from 8 to 9. A profile it saved with
+        // FixRPM active carries 9 in both places, and one 2.1.11 saved carries 8 in both, so the
+        // within-file match reads either right; a fixed number for FixRPM would not.
+        WriteProfile(@"{""SubProfiles"":[
+            {""GroupIndex"":0,""RPMSetting"":{""Mode"":9,""Profiles"":{
+                ""Turbo"":{""Mode"":8,""IsStartStop"":false},
+                ""FixRPM"":{""Mode"":9,""IsStartStop"":true}}}},
+            {""GroupIndex"":1,""RPMSetting"":{""Mode"":8,""Profiles"":{
+                ""FixRPM"":{""Mode"":8,""IsStartStop"":true},
+                ""PWM"":{""Mode"":9,""IsStartStop"":false}}}}
+        ]}");
+
+        bool[] flags = StartStopConfigurationReader.Read(_dir, DevicePath, 4);
+
+        Assert.Equal(new[] { true, true, false, false }, flags);
+    }
+
+    [Fact]
     public void Read_MissingDirectory_ReturnsAllOff() {
         bool[] flags = StartStopConfigurationReader.Read(
             Path.Combine(_dir, "does-not-exist"), DevicePath, 4);

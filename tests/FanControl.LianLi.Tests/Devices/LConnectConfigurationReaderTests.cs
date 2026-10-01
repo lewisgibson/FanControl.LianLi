@@ -51,14 +51,14 @@ public sealed class LConnectConfigReaderTests : IDisposable
         WriteGzip(folder, "quantity", Setting("FanQuantity", "[4,4,4,4]"));
         WriteGzip(folder, "speed", Setting("FanGroupSpeed1", "{\"MaxSpeed\":2100}")); // unrelated setting, ignored
 
-        IReadOnlyList<LConnectControllerConfiguration> configs = LConnectConfigurationReader.Read(_root);
+        IReadOnlyList<LConnectControllerConfiguration> configurations = LConnectConfigurationReader.Read(_root);
 
-        LConnectControllerConfiguration config = Assert.Single(configs);
-        Assert.Equal("71d6ab5", config.InstanceToken);
-        Assert.Equal(new[] { 4, 4, 4, 4 }, config.Quantity);
-        Assert.Equal(2, config.Ports.Count);
+        LConnectControllerConfiguration configuration = Assert.Single(configurations);
+        Assert.Equal("71d6ab5", configuration.InstanceToken);
+        Assert.Equal(new[] { 4, 4, 4, 4 }, configuration.Quantity);
+        Assert.Equal(2, configuration.Ports.Count);
 
-        LightingPortState port2 = config.Ports.Single(p => p.Port == 2);
+        LightingPortState port2 = configuration.Ports.Single(p => p.Port == 2);
         Assert.Equal(46, port2.Mode);
         Assert.Equal(1, port2.Speed);
         Assert.Equal(2, port2.Colors.Count);
@@ -109,18 +109,123 @@ public sealed class LConnectConfigReaderTests : IDisposable
         WriteGzip(folder, "pump", Setting("PumpLEDLighting",
             "[{\"Scope\":2,\"Mode\":2001,\"Brightness\":2,\"Speed\":3,\"Colors\":[{\"R\":0,\"G\":0,\"B\":255}],\"Direction\":5}]"));
 
-        LConnectControllerConfiguration config = Assert.Single(LConnectConfigurationReader.Read(_root));
+        LConnectControllerConfiguration configuration = Assert.Single(LConnectConfigurationReader.Read(_root));
 
-        Assert.NotNull(config.GalahadFan);
-        Assert.Equal(3, config.GalahadFan!.Mode);
-        Assert.Equal(24, config.GalahadFan.NumberOfLed);
-        Assert.True(config.GalahadFan.SyncToPump);
-        Assert.Equal(255, Assert.Single(config.GalahadFan.Colors).R);
+        Assert.NotNull(configuration.GalahadFan);
+        Assert.Equal(3, configuration.GalahadFan!.Mode);
+        Assert.Equal(24, configuration.GalahadFan.NumberOfLed);
+        Assert.True(configuration.GalahadFan.SyncToPump);
+        Assert.Equal(255, Assert.Single(configuration.GalahadFan.Colors).R);
 
-        Assert.NotNull(config.GalahadPump);
-        Assert.Equal(2, config.GalahadPump!.Scope);  // all
-        Assert.Equal(2001, config.GalahadPump.Mode); // raw; encoder applies %1000
-        Assert.Equal(255, config.GalahadPump.Colors[0].B);
+        Galahad2PumpLightingState pump = Assert.Single(configuration.GalahadPumps!);
+        Assert.Equal(2, pump.Scope);  // all
+        Assert.Equal(2001, pump.Mode); // raw; encoder applies %1000
+        Assert.Equal(255, pump.Colors[0].B);
+    }
+
+    // Galahad2TrinityController.SendPumpLEDLightingSettingRequest saves two settings in the app's
+    // individual mode, Inner (0) then Outer (1), and the service writes every one: both are kept.
+    [Fact]
+    public void Read_KeepsEverySavedPumpScope_InOrder()
+    {
+        string folder = CreateFolder("galahad0");
+        WriteGzip(folder, "pump", Setting("PumpLEDLighting", "[{\"Scope\":0,\"Mode\":1},{\"Scope\":1,\"Mode\":1002}]"));
+
+        LConnectControllerConfiguration configuration = Assert.Single(LConnectConfigurationReader.Read(_root));
+
+        Assert.Equal(new[] { 0, 1 }, configuration.GalahadPumps!.Select(p => p.Scope));
+        Assert.Equal(new[] { 1, 1002 }, configuration.GalahadPumps!.Select(p => p.Mode));
+    }
+
+    [Fact]
+    public void Read_AnEmptyPumpArray_IsNoPumpLook()
+    {
+        string folder = CreateFolder("galahad0");
+        WriteGzip(folder, "pump", Setting("PumpLEDLighting", "[]"));
+
+        Assert.Empty(LConnectConfigurationReader.Read(_root));
+    }
+
+    [Fact]
+    public void Read_ParsesAVisionFanLookWithNamedColoursAndItsScreenRing()
+    {
+        string folder = CreateFolder("vision0");
+        // Galahad2Vision.FanLightingSetting has Color1..Color4 rather than a Colors array, and its
+        // ScreenLEDLightingSetting carries the static look under Static beside the dynamic ones.
+        WriteGzip(folder, "fan", Setting("FanLEDLighting",
+            "{\"Mode\":5,\"Brightness\":3,\"Speed\":2,\"Color1\":{\"A\":255,\"R\":1,\"G\":2,\"B\":3},\"Color2\":{\"R\":4,\"G\":5,\"B\":6},"
+            + "\"Color3\":{\"R\":7,\"G\":8,\"B\":9},\"Color4\":{\"R\":10,\"G\":11,\"B\":12},\"Direction\":1,\"Disabled\":false,\"Source\":0,\"SyncToPump\":false,\"NumberOfLED\":24}"));
+        WriteGzip(folder, "screen", Setting("ScreenLEDLighting",
+            "{\"Mode\":12,\"IsDynamicMode\":false,\"SensorType\":1,\"Range\":{\"HighValue\":80,\"LowValue\":40,\"MaxValue\":100,\"MinValue\":0},"
+            + "\"Static\":{\"Colors\":[{\"R\":255,\"G\":0,\"B\":0},{\"R\":0,\"G\":255,\"B\":0}],\"Speed\":50,\"Brightness\":100,\"Direction\":1},"
+            + "\"DynamicHigh\":{\"Colors\":[{\"R\":255,\"G\":0,\"B\":0}],\"Speed\":-2147483648,\"Brightness\":-2147483648,\"Direction\":0},"
+            + "\"DynamicLow\":{\"Colors\":[{\"R\":0,\"G\":0,\"B\":255}],\"Speed\":-2147483648,\"Brightness\":-2147483648,\"Direction\":0}}"));
+
+        LConnectControllerConfiguration configuration = Assert.Single(LConnectConfigurationReader.Read(_root));
+
+        Assert.Equal(5, configuration.GalahadFan!.Mode);
+        Assert.Equal(4, configuration.GalahadFan.Colors.Count);
+        Assert.Equal(new RgbColor(1, 2, 3), configuration.GalahadFan.Colors[0]);
+        Assert.Equal(new RgbColor(10, 11, 12), configuration.GalahadFan.Colors[3]);
+
+        Galahad2ScreenLightingState screen = configuration.GalahadScreen!;
+        Assert.Equal(12, screen.Mode);
+        Assert.False(screen.IsDynamicMode);
+        Assert.Equal((50, 100, 1), (screen.Speed, screen.Brightness, screen.Direction));
+        Assert.Equal(2, screen.Colors.Count);
+        Assert.Equal(255, screen.Colors[1].G);
+    }
+
+    [Fact]
+    public void Read_ADynamicScreenRing_KeepsTheFlag_AndAMissingStaticLookReadsAsUnset()
+    {
+        string folder = CreateFolder("vision1");
+        WriteGzip(folder, "screen", Setting("ScreenLEDLighting", "{\"Mode\":3,\"IsDynamicMode\":true}"));
+
+        LConnectControllerConfiguration configuration = Assert.Single(LConnectConfigurationReader.Read(_root));
+
+        Galahad2ScreenLightingState screen = configuration.GalahadScreen!;
+        Assert.True(screen.IsDynamicMode);
+        Assert.Equal((int.MinValue, int.MinValue, 0), (screen.Speed, screen.Brightness, screen.Direction));
+        Assert.Empty(screen.Colors);
+        Assert.Null(configuration.GalahadFan); // the ring alone is a look
+    }
+
+    [Fact]
+    public void Read_AScreenRingWithNothingButItsShape_DefaultsEveryMember()
+    {
+        string folder = CreateFolder("vision3");
+        WriteGzip(folder, "screen", Setting("ScreenLEDLighting", "{\"Static\":{}}"));
+
+        Galahad2ScreenLightingState screen = Assert.Single(LConnectConfigurationReader.Read(_root)).GalahadScreen!;
+
+        Assert.Equal(0, screen.Mode);
+        Assert.False(screen.IsDynamicMode);
+        Assert.Equal((int.MinValue, int.MinValue, 0), (screen.Speed, screen.Brightness, screen.Direction));
+        Assert.Empty(screen.Colors);
+    }
+
+    [Fact]
+    public void Read_NamedFanColours_StopAtTheFirstMissingOne()
+    {
+        string folder = CreateFolder("vision2");
+        WriteGzip(folder, "fan", Setting("FanLEDLighting", "{\"Mode\":1,\"Color1\":{\"R\":1,\"G\":1,\"B\":1},\"Color3\":{\"R\":3,\"G\":3,\"B\":3}}"));
+
+        LConnectControllerConfiguration configuration = Assert.Single(LConnectConfigurationReader.Read(_root));
+
+        Assert.Equal(new RgbColor(1, 1, 1), Assert.Single(configuration.GalahadFan!.Colors));
+    }
+
+    [Fact]
+    public void Read_ParsesTheMergeOrderBesideTheLook()
+    {
+        string folder = CreateFolder("merged");
+        WriteGzip(folder, "p0", PortJson(0, mode: 107, speed: 0, direction: 0, brightness: 0, "{\"R\":255,\"G\":0,\"B\":0}"));
+        WriteGzip(folder, "order", Setting("MergeOrder", "[3,2,1,0]"));
+
+        LConnectControllerConfiguration configuration = Assert.Single(LConnectConfigurationReader.Read(_root));
+
+        Assert.Equal(new[] { 3, 2, 1, 0 }, configuration.MergeOrder);
     }
 
     [Fact]
@@ -136,15 +241,15 @@ public sealed class LConnectConfigReaderTests : IDisposable
             + "]}]}]}";
         WriteGzip(folder, "lighting", Setting("Lighting", collection));
 
-        LConnectControllerConfiguration config = Assert.Single(LConnectConfigurationReader.Read(_root));
+        LConnectControllerConfiguration configuration = Assert.Single(LConnectConfigurationReader.Read(_root));
 
-        Assert.NotNull(config.TlFans);
-        Assert.Equal(2, config.TlFans!.Count);
-        Assert.Equal((0, 0), (config.TlFans[0].Port, config.TlFans[0].FanIndex));
-        Assert.Equal(255, config.TlFans[0].Colors[0].R);
-        Assert.Equal((0, 1), (config.TlFans[1].Port, config.TlFans[1].FanIndex));
-        Assert.Equal(1003, config.TlFans[1].Mode); // raw mode; encoder applies %1000
-        Assert.Equal(255, config.TlFans[1].Colors[0].G);
+        Assert.NotNull(configuration.TlFans);
+        Assert.Equal(2, configuration.TlFans!.Count);
+        Assert.Equal((0, 0), (configuration.TlFans[0].Port, configuration.TlFans[0].FanIndex));
+        Assert.Equal(255, configuration.TlFans[0].Colors[0].R);
+        Assert.Equal((0, 1), (configuration.TlFans[1].Port, configuration.TlFans[1].FanIndex));
+        Assert.Equal(1003, configuration.TlFans[1].Mode); // raw mode; encoder applies %1000
+        Assert.Equal(255, configuration.TlFans[1].Colors[0].G);
     }
 
     [Fact]
@@ -166,19 +271,19 @@ public sealed class LConnectConfigReaderTests : IDisposable
     public void Read_SkipsIncompleteSettings_AndKeepsTheRest()
     {
         string folder = CreateFolder("partial");
-        // A port with no Mode, a pump saved as an empty list and a TL collection with no configs
+        // A port with no Mode, a pump saved as an empty list and a TL collection with no configurations
         // each contribute nothing; the one complete port still makes a look.
         WriteGzip(folder, "p0", Setting("LightingPort0", "{\"Port\":0}"));
         WriteGzip(folder, "pump", Setting("PumpLEDLighting", "[]"));
         WriteGzip(folder, "tl", Setting("Lighting", "{\"IsMerged\":false}"));
         WriteGzip(folder, "p1", PortJson(1, mode: 46, speed: 1, direction: 0, brightness: 0));
 
-        LConnectControllerConfiguration config = Assert.Single(LConnectConfigurationReader.Read(_root));
+        LConnectControllerConfiguration configuration = Assert.Single(LConnectConfigurationReader.Read(_root));
 
-        LightingPortState port = Assert.Single(config.Ports);
+        LightingPortState port = Assert.Single(configuration.Ports);
         Assert.Equal(1, port.Port);
-        Assert.Null(config.GalahadPump);
-        Assert.Null(config.TlFans);
+        Assert.Null(configuration.GalahadPumps);
+        Assert.Null(configuration.TlFans);
     }
 
     [Fact]
@@ -250,18 +355,72 @@ public sealed class LConnectConfigReaderTests : IDisposable
         WriteGzip(folder, "tl", Setting("Lighting", "{\"LightingConfigs\":[{\"1\":[{\"Configs\":[{}]}]},{}]}"));
         WriteGzip(folder, "quantity", Setting("FanQuantity", "[4,\"x\"]"));
 
-        LConnectControllerConfiguration config = Assert.Single(LConnectConfigurationReader.Read(_root));
+        LConnectControllerConfiguration configuration = Assert.Single(LConnectConfigurationReader.Read(_root));
 
-        LightingPortState port = Assert.Single(config.Ports);
+        LightingPortState port = Assert.Single(configuration.Ports);
         Assert.Equal((0, 0, 0), (port.Speed, port.Direction, port.Brightness));
         Assert.Equal(new RgbColor(0, 0, 0), Assert.Single(port.Colors));
-        Assert.Equal(0, config.GalahadFan!.Mode);
-        Assert.Equal(24, config.GalahadFan.NumberOfLed);
-        Assert.False(config.GalahadFan.SyncToPump);
-        Assert.Equal(0, config.GalahadPump!.Scope);
-        TlFanLightingState fan = Assert.Single(config.TlFans!);
+        Assert.Equal(0, configuration.GalahadFan!.Mode);
+        Assert.Equal(24, configuration.GalahadFan.NumberOfLed);
+        Assert.False(configuration.GalahadFan.SyncToPump);
+        Assert.Equal(0, Assert.Single(configuration.GalahadPumps!).Scope);
+        Assert.Null(configuration.MergeOrder);
+        Assert.Null(configuration.GalahadScreen);
+        TlFanLightingState fan = Assert.Single(configuration.TlFans!);
         Assert.Equal((0, 0, 0, 0), (fan.Mode, fan.Speed, fan.Direction, fan.Brightness));
-        Assert.Equal(new[] { 4, 0 }, config.Quantity);
+        Assert.Equal(new[] { 4, 0 }, configuration.Quantity);
+    }
+
+    [Fact]
+    public void Read_MotherboardArgbSync_IsReadBesideTheLook()
+    {
+        string folder = CreateFolder("synced");
+        WriteGzip(folder, "p0", PortJson(0, mode: 26, speed: 0, direction: 0, brightness: 0, "{\"R\":255,\"G\":0,\"B\":0}"));
+        WriteGzip(folder, "sync", Setting("MotherboardARGBSync", "true"));
+
+        LConnectControllerConfiguration configuration = Assert.Single(LConnectConfigurationReader.Read(_root));
+
+        Assert.True(configuration.MotherboardArgbSync);
+        Assert.Single(configuration.Ports); // the look is still read, for when the switch is turned off again
+    }
+
+    [Fact]
+    public void Read_MotherboardArgbSyncAlone_IsAConfiguration()
+    {
+        // L-Connect hands a controller's LEDs to the motherboard whether or not a look was ever
+        // saved for it, so the switch on its own is a configuration to act on.
+        string folder = CreateFolder("synconly");
+        WriteGzip(folder, "sync", Setting("MotherboardARGBSync", "true"));
+
+        LConnectControllerConfiguration configuration = Assert.Single(LConnectConfigurationReader.Read(_root));
+
+        Assert.True(configuration.MotherboardArgbSync);
+        Assert.Empty(configuration.Ports);
+        Assert.Equal("71d6ab5", configuration.InstanceToken);
+    }
+
+    [Theory]
+    [InlineData("false")]  // switched off again
+    [InlineData("1")]      // not a bool: L-Connect's own parse fails and it reads the switch as off
+    [InlineData("\"on\"")]
+    public void Read_MotherboardArgbSyncThatIsOffOrMalformed_ReadsAsOff(string data)
+    {
+        string folder = CreateFolder("unsynced");
+        WriteGzip(folder, "p0", PortJson(0, mode: 26, speed: 0, direction: 0, brightness: 0));
+        WriteGzip(folder, "sync", Setting("MotherboardARGBSync", data));
+
+        LConnectControllerConfiguration configuration = Assert.Single(LConnectConfigurationReader.Read(_root));
+
+        Assert.False(configuration.MotherboardArgbSync);
+    }
+
+    [Fact]
+    public void Read_MotherboardArgbSyncOffAlone_IsNotAConfiguration()
+    {
+        string folder = CreateFolder("offonly");
+        WriteGzip(folder, "sync", Setting("MotherboardARGBSync", "false"));
+
+        Assert.Empty(LConnectConfigurationReader.Read(_root));
     }
 
     [Fact]

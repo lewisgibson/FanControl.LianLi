@@ -24,6 +24,14 @@ internal sealed class Galahad2FanLightingState
         Colors = colors ?? throw new ArgumentNullException(nameof(colors));
     }
 
+    /// <summary>
+    /// The look L-Connect's <c>Galahad2TrinityController</c> starts with and writes when no fan light
+    /// was ever saved (<c>new FanLightingSetting()</c>): Rainbow (1), brightness 2, speed 2, clockwise
+    /// (0), 24 LEDs, not synced to the pump, no colours.
+    /// </summary>
+    public static Galahad2FanLightingState LConnectDefault { get; } = new Galahad2FanLightingState(
+        mode: 1, speed: 2, direction: 0, brightness: 2, numberOfLed: 24, syncToPump: false, Array.Empty<RgbColor>());
+
     /// <summary>Raw L-Connect fan lighting-mode value, used as the wire byte directly.</summary>
     public int Mode { get; }
 

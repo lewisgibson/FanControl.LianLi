@@ -9,10 +9,12 @@ namespace FanControl.LianLi.Devices;
 /// One controller's lighting look as read from L-Connect's saved configuration, matched to a
 /// located device by its USB instance token. A controller carries whichever family's look was
 /// saved under its token: the Uni family's per-port looks (<see cref="Ports"/> + optional
-/// <see cref="Quantity"/>, consumed by <see cref="SlInfinityLightingEncoder"/> /
-/// <see cref="StrimerPlusLightingEncoder"/>), the Uni Fan TL's per-fan looks (<see cref="TlFans"/>),
-/// or the Galahad II's fan and pump looks (<see cref="GalahadFan"/> / <see cref="GalahadPump"/>).
-/// The encoder is chosen later by the located device's product id.
+/// <see cref="Quantity"/> and <see cref="MergeOrder"/>, consumed by <see cref="SlInfinityLightingEncoder"/> /
+/// <see cref="UniFanLightingEncoder"/> / <see cref="StrimerPlusLightingEncoder"/>), the Uni Fan TL's
+/// per-fan looks (<see cref="TlFans"/>), or the 0x0416 coolers' fan, pump and screen-ring looks
+/// (<see cref="GalahadFan"/> / <see cref="GalahadPumps"/> / <see cref="GalahadScreen"/>), and whether
+/// the user handed that controller's LEDs to the motherboard's ARGB header
+/// (<see cref="MotherboardArgbSync"/>). The encoder is chosen later by the located device's product id.
 /// </summary>
 internal sealed class LConnectControllerConfiguration
 {
@@ -23,7 +25,10 @@ internal sealed class LConnectControllerConfiguration
         IReadOnlyList<int>? quantity,
         IReadOnlyList<TlFanLightingState>? tlFans = null,
         Galahad2FanLightingState? galahadFan = null,
-        Galahad2PumpLightingState? galahadPump = null)
+        IReadOnlyList<Galahad2PumpLightingState>? galahadPumps = null,
+        bool motherboardArgbSync = false,
+        Galahad2ScreenLightingState? galahadScreen = null,
+        IReadOnlyList<int>? mergeOrder = null)
     {
         if (string.IsNullOrEmpty(instanceToken))
         {
@@ -35,7 +40,10 @@ internal sealed class LConnectControllerConfiguration
         Quantity = quantity;
         TlFans = tlFans;
         GalahadFan = galahadFan;
-        GalahadPump = galahadPump;
+        GalahadPumps = galahadPumps;
+        MotherboardArgbSync = motherboardArgbSync;
+        GalahadScreen = galahadScreen;
+        MergeOrder = mergeOrder;
     }
 
     /// <summary>
@@ -50,13 +58,30 @@ internal sealed class LConnectControllerConfiguration
     /// <summary>The Uni-family saved fan quantity per group, or null when L-Connect saved none.</summary>
     public IReadOnlyList<int>? Quantity { get; }
 
+    /// <summary>The order the fan groups chain in a merge effect (SL-Infinity, SL v2, AL v2), or null when L-Connect saved none.</summary>
+    public IReadOnlyList<int>? MergeOrder { get; }
+
     /// <summary>The Uni Fan TL per-fan looks, or null when this is not a TL controller.</summary>
     public IReadOnlyList<TlFanLightingState>? TlFans { get; }
 
-    /// <summary>The Galahad II fan-ring look, or null when this is not a Galahad controller.</summary>
+    /// <summary>The fan-ring look of a Galahad II Trinity or Vision or a HydroShift LCD, or null when this is none of those.</summary>
     public Galahad2FanLightingState? GalahadFan { get; }
 
-    /// <summary>The Galahad II pump look, or null when this is not a Galahad controller.</summary>
-    public Galahad2PumpLightingState? GalahadPump { get; }
+    /// <summary>
+    /// The Galahad II Trinity pump looks in their saved order - one for the whole cap, or one each
+    /// for the inner and outer ring in L-Connect's individual mode - or null when none was saved.
+    /// </summary>
+    public IReadOnlyList<Galahad2PumpLightingState>? GalahadPumps { get; }
+
+    /// <summary>The Galahad II Vision screen-ring look, or null when this is not a Vision.</summary>
+    public Galahad2ScreenLightingState? GalahadScreen { get; }
+
+    /// <summary>
+    /// True when L-Connect's per-controller "sync to motherboard" switch is on: the saved look is
+    /// then not driven, and the LEDs are handed to the motherboard's ARGB header the way L-Connect
+    /// hands them over. False when the setting was never saved (older releases kept one global
+    /// switch instead) or does not parse.
+    /// </summary>
+    public bool MotherboardArgbSync { get; }
 }
 #endif

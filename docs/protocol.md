@@ -63,9 +63,9 @@ The Uni controllers are request-response: a `HidD_GetInputReport` returns a stal
 
 `0x50` (80) is the device's "prepare an input report" command (`0x00` selects RPM; `0x01` selects firmware version). L-Connect's `GetFanSpeed` sends this before every read for the whole family. Some SL-Infinity revisions return live RPM without it; others return 0/garbage until primed, so it is always sent.
 
-## ARGB-sync report (ARGB build only)
+## ARGB-sync report (ARGB build, and a synced controller on the Lighting build)
 
-ARGB sync is compiled in only when the plugin is built with the `ENABLE_ARGB` symbol (`-p:EnableArgb=true`), which ships as the separate `FanControl.LianLi.Argb.dll`. The standard build never emits it. When present, the controller is told once at startup to take its LED lighting from the motherboard's ARGB header. It is asserted with the feature report:
+ARGB sync is compiled in when the plugin is built with the `ENABLE_ARGB` symbol (`-p:EnableArgb=true`), which ships as the separate `FanControl.LianLi.Argb.dll`, where every Uni controller is told once at startup (and again after a reconnect) to take its LED lighting from the motherboard's ARGB header. The Lighting build sends the same report to a Uni controller whose per-controller L-Connect "sync to motherboard" switch is on, in place of that controller's saved look, as L-Connect 2.1.29 does at its start and after a resume (see [lighting.md](lighting.md#motherboard-argb-sync-the-l-connect-switch)). The standard build never emits it. It is asserted with the feature report:
 
 ```
 { 224, 16, argbReg, 1, 0, 0, 0 }
@@ -77,7 +77,16 @@ with the per-family ARGB register byte `argbReg`:
 - AL: `65`
 - SLI / SLV2 / ALV2: `97`
 
-Caveat: on controllers that do not persist lighting to hardware (e.g. UNI FAN SL-Infinity 120 V1), asserting this at every startup resets their lighting to factory defaults. That is why it is a separate, opt-in build rather than always on.
+Caveat: on controllers that do not persist lighting to hardware (e.g. UNI FAN SL-Infinity 120 V1), asserting this at every startup resets their lighting to factory defaults. That is why it is a separate, opt-in build rather than always on, and why the Lighting build sends it only for a controller the user has switched to the motherboard in L-Connect.
+
+## Merge-mode and merge-order reports (Lighting build)
+
+The Lighting build sends these when it replays a saved look (see [lighting.md](lighting.md#merge-effects-on-the-other-uni-families)); the standard and ARGB builds never do. They are feature reports like every other Uni write. Each family's merge effects are distinct effect bytes in its own table; these reports are what surrounds them:
+
+- SL / Redragon `StartMerge`, sent before port 0 in merge mode: `{ 224, 16, 51, 0, 1, 2, 3, 8 }` (8 bytes, `SLFanDevice.StartMerge`). Its `StopMerge` is `{ 224, 16, 52, 0, 0, 0 }` and is never sent at a start or a resume.
+- AL merge command, sent before port 0 in merge mode: `{ 224, 16, 67, 1, 0, 0 }` (`ALFanDevice.SendMergeCommand(true)`; `0` in byte 3 leaves merge mode).
+- SLI / SLV2 / ALV2 merge order, sent after the look and its frame at every start and reconnect: `{ 224, 16, 99, o0, o1, o2, o3, 8 }` (8 bytes, `SetMergeOrder`), the saved `MergeOrder` when its four entries are each 0 to 4, else `0, 1, 2, 3`. L-Connect's `Init` and `ResumeSuspend` write the default `0, 1, 2, 3` after the fan quantity, and the saved order reaches the register only at its startup, written inside `ApplyAll`'s loop over the saved settings (in the settings files' hash order, with the saved look written once more after the loop), and on a user change; the plugin sends the saved order, where it goes, and why it keeps it on a reconnect where L-Connect's resume resets it, are in [lighting.md](lighting.md#merge-effects-on-the-other-uni-families).
+- The effect-only blank the SLI (ports 7 to 1, before port 0) and the ALV2 (ports 1 to 7, after port 0) write in merge mode: `{ 224, 16 + port, rainbow, 0, 0, 8 }`, where `rainbow` is the family's own Rainbow byte (`0x32` on the SLI, `43` on the ALV2) and `8` is brightness Off. No colour report accompanies it.
 
 ## RPM decode
 
@@ -115,6 +124,7 @@ The Galahad II Trinity (vendor `0x0416`, pid `0x7371` Performance / `0x7373` Reg
 What the hardware confirmation added, and what the plugin does with it:
 
 - The `sync` byte on the **fan** command is inert on the `0x7373`: the fans stay on the commanded duty whatever the motherboard PWM does. On the **pump** it works, handing the pump to the CPU_FAN header's PWM. The plugin never sets it on either channel, so this changes nothing today - it is recorded so nobody later exposes the fan channel as a motherboard-curve mode.
+- Lighting (Lighting build only) rides on the same packets: **set fan light `0x85`** with a 20-byte payload (mode, brightness, speed, four R,G,B colours, direction, disabled, ARGB source, sync-to-pump, LED count) and **set pump light `0x83`** with a 19-byte payload (scope, mode, brightness, speed, four colours, direction, disabled, ARGB source), verified against `FanLightingSetting.ToBytes` and `PumpLightingSetting.ToBytes`. The Galahad II Vision (`0x7391`/`0x7395`) and the HydroShift LCD (`0x7398`/`0x7399`/`0x739A`) use the same two commands with the same layout: the HydroShift LCD takes only the fan light, and the Vision's `0x83` drives the ring of LEDs around its screen rather than a pump cap (its scope byte is always 0). What each build writes, and from which saved setting, is in [lighting.md](lighting.md#galahad-ii-vision-and-hydroshift-lcd).
 - The pump's real range on the Regular is about 2200-3200 rpm (L-Connect's own `PumpRPMMinRegular`/`PumpRPMMaxRegular`; the Performance is 2200-4200). The firmware accepts duty down to 0 (L-Connect's `PumpPWMMin`) and floors the speed at its minimum, so the plugin's `PumpDutyFloor = 50` (about 2600 rpm) is deliberately conservative rather than a hardware limit.
 - L-Connect's fan slider floors at 10% (`FanPWMMin`), and the plugin does not: a 0% curve point sends duty 0, which spins the radiator fans down to roughly 250-350 rpm rather than stopping them.
 - Commanded fan and pump duty **persist in the controller across a full power cut**, and there is no autonomous thermal failsafe: with nothing driving it, the cooler holds whatever duty it was last given, however hot the CPU gets. That is why the plugin keeps re-asserting the duty on the keepalive cadence rather than writing once.
@@ -170,6 +180,6 @@ The byte-level facts above were learned and cross-checked against Lian Li L-Conn
 These Lian Li products are intentionally NOT in this plugin's catalog, confirmed against a full decompile of L-Connect 3. They are unreachable or have no fan/pump/RGB surface over plain USB HID:
 
 - **The wireless screens and the configuration surface** - an AIO's screen images, themes and carousels, and binding, unbinding or moving a device between RF channels. The wireless fans, pumps, case fans and lighting replay are driven through the dongles (see above); pairing and screen content stay L-Connect's job.
-- **LCD screen render** - the screens on the Uni Fan TL LCD (`0x7393`), the Universal 8.8-inch panel (a WinUSB device, not HID), and the HydroShift II / Lancool 207 displays, including the HydroShift II OLED Curve's OLED, its display-mode interface and its screen motor. On the coolers that also have a screen (Galahad II Vision, HydroShift LCD, HydroShift II OLED Curve) the plugin drives the fans and pump it can reach, and the RGB, and simply leaves the screen alone.
+- **LCD screen render** - the screens on the Uni Fan TL LCD (`0x7393`), the Universal 8.8-inch panel (a WinUSB device, not HID), and the HydroShift II / Lancool 207 displays, including the HydroShift II OLED Curve's OLED, its display-mode interface and its screen motor. On the coolers that also have a screen (Galahad II Vision, HydroShift LCD, HydroShift II OLED Curve) the plugin drives the fans and pump it can reach, and the RGB where it is a saved look (the Vision's screen ring included, in its static modes), and simply leaves the screen alone.
 
 Note: the Strimer Plus (`0xA200`) and the 0x0416 fan/pump coolers (Uni Fan TL, Galahad II Trinity/Vision, HydroShift LCD, the HydroShift II OLED Curve's pump) **are** supported - see [the supported-devices list](../README.md#supported-devices).

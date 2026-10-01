@@ -38,7 +38,7 @@ The plugin finds your Lian Li gear automatically - you don't need to know any mo
 | HydroShift II (wireless AIO cooler)                                           | ✅ fan + pump | ✅  |    ✅    |
 | Lancool 217 Infinity case fans (wireless)                                     |      ✅       | ✅  |    ✅    |
 
-Extra touches: if you turned on L-Connect's **start/stop (zero-RPM)** switch, the plugin honours it - the fans that support it stop at 0%. On the LCD coolers the plugin drives the fans, pump, and RGB; it does **not** touch the screen. On the **HydroShift II OLED Curve** the plugin drives the pump (0% is 1600 rpm, 100% is 2400 rpm, the range L-Connect's own pump curves use), reports the pump speed and gives you the coolant temperature as a curve source; its fans are on a motherboard header rather than on the cooler, and its screen, screen motor and lighting are left alone (L-Connect streams that lighting from the PC frame by frame, so there is no saved look to replay). On the UNI FAN controllers the plugin **only shows the channels that actually have a fan plugged in** - it checks each channel at startup and hides the empty ones, so you get one control per real fan instead of four slots with three dead ones. (If a channel is genuinely in use but happens to be stopped at that moment, it may be hidden until it next spins; if detection is inconclusive the plugin shows all four rather than hide anything.)
+Extra touches: if you turned on L-Connect's **start/stop (zero-RPM)** switch, the plugin honours it - the fans that support it stop at 0%. On the LCD coolers the plugin drives the fans, pump, and RGB; it does **not** touch the screen. On the GALAHAD II Vision the Lighting build replays the fan lighting and the ring of lights around the screen in its fixed-colour modes; a ring effect that follows a CPU, GPU, pump or coolant reading in L-Connect is left as it is, because the plugin has no such readings to colour it from. On the HydroShift LCD the fans are the only lights, and they are replayed. On the **HydroShift II OLED Curve** the plugin drives the pump (0% is 1600 rpm, 100% is 2400 rpm, the range L-Connect's own pump curves use), reports the pump speed and gives you the coolant temperature as a curve source; its fans are on a motherboard header rather than on the cooler, and its screen, screen motor and lighting are left alone (L-Connect streams that lighting from the PC frame by frame, so there is no saved look to replay). On the UNI FAN controllers the plugin **only shows the channels that actually have a fan plugged in** - it checks each channel at startup and hides the empty ones, so you get one control per real fan instead of four slots with three dead ones. (If a channel is genuinely in use but happens to be stopped at that moment, it may be hidden until it next spins; if detection is inconclusive the plugin shows all four rather than hide anything.)
 
 ### The wireless range
 
@@ -127,6 +127,8 @@ This is useful because the Uni controllers do **not** store their lighting in th
 
 From then on, the plugin reads L-Connect's saved look and re-applies it every time it starts - including after every reboot - with no Lian Li software running. Change the look in L-Connect (then stop it again) any time; the plugin picks up the new look on its next start.
 
+L-Connect 2.1.29 or newer also lets you switch a single controller's lighting over to your motherboard's ARGB header ("sync to motherboard"). The Lighting build honours that switch per controller: a controller you switched over is handed to the motherboard the way L-Connect hands it over, and the others still get their saved look. Users of older L-Connect versions are unaffected; there is nothing to switch.
+
 ### Opt-in and fail-safe
 
 The Lighting build only drives lighting when it can do so **exactly**:
@@ -139,7 +141,7 @@ The Lighting build only drives lighting when it can do so **exactly**:
 
 - **You design lighting in L-Connect and want to keep it without running L-Connect** -> **Lighting** build (this feature).
 - **You use OpenRGB, SignalRGB, or another tool that drives the fan LEDs directly over USB** -> **standard** build. The standard build never touches lighting, so it stays out of the way of whatever you use. Do **not** use the Lighting build alongside another lighting tool - both would try to own the LEDs and fight, exactly like running L-Connect.
-- **You want the motherboard's ARGB header to drive the fan LEDs** -> **ARGB** build.
+- **You want the motherboard's ARGB header to drive the fan LEDs** -> **ARGB** build. (If you want it for only some of your controllers and keep an L-Connect look on the rest, switch those controllers to the motherboard in L-Connect 2.1.29 and use the **Lighting** build.)
 
 Lighting replay is implemented for every device in the [supported list](#supported-devices). The **UNI FAN SL-Infinity** is verified on real hardware; the other families and the AIO coolers are reproduced byte-for-byte from L-Connect's own configuration and are being confirmed by the community. Anything not on that list is left untouched. See [docs/lighting.md](docs/lighting.md) for the wire protocol and how it works.
 

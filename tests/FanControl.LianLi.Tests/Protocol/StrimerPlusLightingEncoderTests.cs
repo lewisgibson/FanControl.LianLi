@@ -40,6 +40,20 @@ public sealed class StrimerPlusLightingEncoderTests
     }
 
     [Fact]
+    public void Encode_MotherboardArgbSync_WritesTheSyncRegisterAndEnablesPortZero_AndNoEffect()
+    {
+        // L-Connect's setMotherboardARGBSync: SetEffectSetting(0, 64, 1, 0, 0) then
+        // SetEffectEnable(0, 0), and none of the saved effects.
+        var ports = new[] { Port(port: 0, mode: 1, speed: 0, direction: 0, brightness: 0, Rgb(255, 0, 0)) };
+
+        IReadOnlyList<LightingTransfer> transfers = StrimerPlusLightingEncoder.Encode(ports, motherboardArgbSync: true);
+
+        Assert.Equal(2, transfers.Count);
+        AssertTransfer(transfers[0], feature: true, new byte[] { 0xE0, 0x10, 64, 1, 0, 0 });
+        AssertTransfer(transfers[1], feature: true, new byte[] { 0xE0, 0x20, 0, 0 });
+    }
+
+    [Fact]
     public void Encode_StaticColor_RepeatsTheColourAcross27Leds_ThenSinglePortEnable()
     {
         var ports = new[] { Port(port: 0, mode: 1, speed: 0, direction: 0, brightness: 0, Rgb(255, 0, 0)) };
