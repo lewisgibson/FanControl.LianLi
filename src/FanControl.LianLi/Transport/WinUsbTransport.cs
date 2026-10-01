@@ -9,46 +9,40 @@ using FanControl.LianLi.Protocol;
 namespace FanControl.LianLi.Transport;
 
 /// <summary>
-/// The <see cref="IDeviceTransport"/> over a WinUSB device: one of the two L-Wireless dongles. Each
-/// dongle is a plain USB device with one interrupt endpoint pair carrying 64-byte packets, so
-/// <see cref="Write"/> is one OUT transfer and <see cref="Read"/> gathers IN transfers until the
-/// dongle stops sending, as L-Connect's <c>WinUsb.ReadAll</c> does; there are no HID reports, so the
-/// feature and input-report calls are not supported. Every call that reaches the device - transfer, reopen, close - is bounded. A dongle
-/// that stops taking writes or stops answering requests is marked faulted and reopened on the same
-/// path on the <see cref="DoublingBackoff"/> schedule, the recovery L-Connect's own RF code relies on
-/// (<c>WinUsb.RfSend</c> closes the dongle on any failed write and opens it again on the next call).
+/// The <see cref="IDeviceTransport"/> over a WinUSB device: one of the two L-Wireless dongles or
+/// the HydroShift II OLED Curve's pump MCU. Each is a plain USB device with one
+/// interrupt endpoint pair carrying 64-byte packets, so <see cref="Write"/> is one OUT transfer and
+/// <see cref="Read"/> gathers IN transfers - until the device stops sending, as L-Connect's
+/// <c>WinUsb.ReadAll</c> does for a dongle, or the one packet the pump MCU answers with - with the
+/// pipe timeouts of the device's <see cref="WinUsbPipePolicy"/>; there are no HID reports, so the
+/// feature and input-report calls are not supported. Every call that reaches the device - transfer,
+/// reopen, close - is bounded. A device that stops taking writes or stops answering requests is
+/// marked faulted and reopened on the same path on the <see cref="DoublingBackoff"/> schedule, the
+/// recovery L-Connect's own RF code relies on (<c>WinUsb.RfSend</c> closes the dongle on any failed
+/// write and opens it again on the next call).
 /// </summary>
 internal sealed class WinUsbTransport : IDeviceTransport {
-    // The dongles' single endpoint pair: OUT 1 for commands, IN 1 (0x81) for replies.
+    // The devices' single endpoint pair: OUT 1 for commands, IN 1 (0x81) for replies.
     private const byte OutPipe = 0x01;
     private const byte InPipe = 0x81;
 
-    // L-Connect gives a packet write 100 ms (WinUsb.RfSend: writer.Write(bytes, 100, ...)); a healthy
-    // dongle takes it in under a millisecond. Set as the OUT pipe's transfer timeout.
-    private const uint WriteTimeoutMilliseconds = 100;
-
-    // A dongle answers a request from its own buffer within a few milliseconds, one 64-byte packet
-    // at a time, and the end of a reply is simply the first packet that does not arrive - so each
-    // IN transfer is given this long and a timeout ends the read. L-Connect uses 10 ms
-    // (WinUsb.ReadAll); this is more generous so a busy host does not truncate a multi-packet list
-    // reply. Set as the IN pipe's transfer timeout.
-    private const uint ReadTimeoutMilliseconds = 50;
-
-    // A read drains the reply to its end, as ReadAll does, rather than stopping at the length asked
-    // for: packets left in the dongle would otherwise sit in front of the next request's reply, and a
-    // flush does not reach them (see Write). The drain is capped so a dongle that never stops sending
-    // cannot hold a read open: past the length asked for, at most this many more packets are read -
-    // more than the longest reply the plugin asks for, a 434-byte list page (seven packets), so a
-    // whole page left over from an exchange cut short is drained in one read.
+    // A read of a dongle drains the reply to its end, as ReadAll does, rather than stopping at the
+    // length asked for: packets left in the dongle would otherwise sit in front of the next request's
+    // reply, and a flush does not reach them (see Write). The drain is capped so a dongle that never
+    // stops sending cannot hold a read open: past the length asked for, at most this many more packets
+    // are read - more than the longest reply the plugin asks for, a 434-byte list page (seven
+    // packets), so a whole page left over from an exchange cut short is drained in one read. A read
+    // under a policy that takes the packets asked for and no more does not drain.
     private const int DrainPacketLimit = 8;
 
-    // The pipe timeouts above end a transfer only when WinUSB's own cancel completes; these bound the
-    // whole call around them, so a driver stack that stops completing anything cannot hold the
-    // thread. A write is a flush and one packet; a read is up to one pipe timeout per packet it may
-    // read - those asked for, the drain allowance, and the one that ends the reply. The margin is far
-    // beyond a healthy dongle's latency.
-    private const int WriteCallTimeoutMilliseconds = 1000;
-    private const int ReadCallMarginMilliseconds = 500;
+    // The policy's pipe timeouts end a transfer only when WinUSB's own cancel completes; these bound
+    // the whole call around them, so a driver stack that stops completing anything cannot hold the
+    // thread. A write is a flush and one packet: its pipe timeout and the margin, and never less
+    // than a second. A read is one pipe timeout per packet it may read - those asked for, the
+    // drain allowance where the policy drains, and the one that ends the reply - and the margin.
+    // The margin is far beyond a healthy device's latency.
+    private const int MinimumWriteCallTimeoutMilliseconds = 1000;
+    private const int CallMarginMilliseconds = 500;
 
     // An abort is itself a request to the same driver stack, so it is bounded too; if it runs out
     // the handle's I/O is cancelled instead, which waits for nothing.
@@ -69,6 +63,7 @@ internal sealed class WinUsbTransport : IDeviceTransport {
     private const int ErrorSemTimeout = 121;
 
     private readonly string _devicePath;
+    private readonly WinUsbPipePolicy _policy;
     private readonly ILog _log;
     private readonly IWinUsbApi _api;
     private readonly DeviceCallGate _calls;
@@ -92,12 +87,14 @@ internal sealed class WinUsbTransport : IDeviceTransport {
     private WinUsbTransport(
         OpenedInterface opened,
         string devicePath,
+        WinUsbPipePolicy policy,
         ILog log,
         IWinUsbApi api,
         DeviceCallGate calls,
         ITransferDelay delay) {
         _opened = opened;
         _devicePath = devicePath;
+        _policy = policy;
         _log = log;
         _api = api;
         _calls = calls;
@@ -105,12 +102,14 @@ internal sealed class WinUsbTransport : IDeviceTransport {
     }
 
     /// <summary>
-    /// Open the dongle at <paramref name="devicePath"/>; throws <see cref="IOException"/> when Windows
-    /// refuses, and <see cref="OperationCanceledException"/> once <paramref name="token"/> is cancelled,
-    /// before its next native call. The caller bounds the open (see <see cref="WindowsDeviceEnumerator"/>).
+    /// Open the device at <paramref name="devicePath"/> with the pipe timeouts and reply shape of
+    /// <paramref name="policy"/>; throws <see cref="IOException"/> when Windows refuses, and
+    /// <see cref="OperationCanceledException"/> once <paramref name="token"/> is cancelled, before its
+    /// next native call. The caller bounds the open (see <see cref="WindowsDeviceEnumerator"/>).
     /// </summary>
     public static WinUsbTransport Open(
         string devicePath,
+        WinUsbPipePolicy policy,
         ILog log,
         IWinUsbApi api,
         DeviceCallGate calls,
@@ -118,6 +117,10 @@ internal sealed class WinUsbTransport : IDeviceTransport {
         CancellationToken token) {
         if (string.IsNullOrEmpty(devicePath)) {
             throw new ArgumentException("Device path is required.", nameof(devicePath));
+        }
+
+        if (policy is null) {
+            throw new ArgumentNullException(nameof(policy));
         }
 
         if (log is null) {
@@ -136,7 +139,7 @@ internal sealed class WinUsbTransport : IDeviceTransport {
             throw new ArgumentNullException(nameof(delay));
         }
 
-        return new WinUsbTransport(OpenInterface(api, devicePath, token), devicePath, log, api, calls, delay);
+        return new WinUsbTransport(OpenInterface(api, devicePath, policy, token), devicePath, policy, log, api, calls, delay);
     }
 
     public bool CanWrite => true;
@@ -153,6 +156,8 @@ internal sealed class WinUsbTransport : IDeviceTransport {
         EnsureOpen("WinUsb_WritePipe");
 
         OpenedInterface opened = _opened;
+        int timeout = Math.Max(
+            MinimumWriteCallTimeoutMilliseconds, (int)_policy.WriteTimeoutMilliseconds + CallMarginMilliseconds);
         bool flushed = false;
         int flushError = 0;
         bool written = false;
@@ -176,14 +181,14 @@ internal sealed class WinUsbTransport : IDeviceTransport {
                 token.ThrowIfCancellationRequested();
                 written = _api.WritePipe(opened.Interface, OutPipe, report, out transferred, out error);
             },
-            WriteCallTimeoutMilliseconds,
+            timeout,
             () => cancelOutcome = CancelPendingTransfers(opened));
 
         if (!completed) {
             throw FailedWrite(string.Format(
                 CultureInfo.InvariantCulture,
                 "WinUsb_WritePipe timed out after {0} ms; {1}",
-                WriteCallTimeoutMilliseconds,
+                timeout,
                 cancelOutcome));
         }
 
@@ -238,14 +243,15 @@ internal sealed class WinUsbTransport : IDeviceTransport {
 
         EnsureOpen("WinUsb_ReadPipe");
 
-        // Gather 64-byte packets until the dongle stops sending (an IN transfer times out), keeping the
-        // first length bytes. A reply shorter than requested is returned zero-padded, as the HID
-        // stream read does; one longer is drained and the surplus discarded, as ReadAll does.
+        // Gather 64-byte packets, keeping the first length bytes: until the device stops sending (an
+        // IN transfer times out) where the policy reads the whole reply, otherwise the packets asked
+        // for and no more. A reply shorter than requested is returned zero-padded, as the HID stream
+        // read does; one longer is drained and the surplus discarded, as ReadAll does.
         OpenedInterface opened = _opened;
         byte[] buffer = new byte[length];
         int packets = (length + WirelessProtocol.PacketLength - 1) / WirelessProtocol.PacketLength;
-        int limit = packets + DrainPacketLimit;
-        int timeout = ReadCallMarginMilliseconds + ((limit + 1) * (int)ReadTimeoutMilliseconds);
+        int limit = _policy.ReadsWholeReply ? packets + DrainPacketLimit : packets;
+        int timeout = CallMarginMilliseconds + ((limit + 1) * (int)_policy.ReadTimeoutMilliseconds);
         int total = 0;
         int error = 0;
         string cancelOutcome = string.Empty;
@@ -260,7 +266,7 @@ internal sealed class WinUsbTransport : IDeviceTransport {
             Fault();
             throw new IOException(string.Format(
                 CultureInfo.InvariantCulture,
-                "WinUsb_ReadPipe timed out after {0} ms; {1}; dongle unresponsive, handle faulted.",
+                "WinUsb_ReadPipe timed out after {0} ms; {1}; device unresponsive, handle faulted.",
                 timeout,
                 cancelOutcome));
         }
@@ -272,11 +278,12 @@ internal sealed class WinUsbTransport : IDeviceTransport {
         }
 
         // Nothing at all within the pipe timeout is a reply that did not come: L-Connect's ReadAll
-        // hands back zeros for it and its caller ignores the reply, without closing anything. So is
-        // it here - the read fails, the handle stays; a dongle that has really stopped also fails its
-        // writes, which do fault it.
+        // and Read hand back zeros for it and their callers ignore the reply, without closing
+        // anything. So is it here - the read fails, the handle stays; a device that has really
+        // stopped also fails its writes, which do fault it. A caller for whom the reply is
+        // optional tells this failure apart by its type.
         if (total == 0) {
-            throw new IOException("WinUSB interrupt-IN read returned no data.");
+            throw new DeviceReplyMissingException("WinUSB interrupt-IN read returned no data.");
         }
 
         RecordDrain(total - length);
@@ -304,7 +311,7 @@ internal sealed class WinUsbTransport : IDeviceTransport {
             surplus));
     }
 
-    // Read up to limit packets until the dongle has nothing more, keeping what fits in buffer and
+    // Read up to limit packets until the device has nothing more, keeping what fits in buffer and
     // returning how many bytes arrived in all. error is 0 unless a transfer failed for a reason other
     // than the end of the reply. Each packet is its own native call, so the token is checked before
     // each: a read given up on stops rather than going on to a transfer the abort has already passed.
@@ -418,7 +425,7 @@ internal sealed class WinUsbTransport : IDeviceTransport {
                 Describe("reopen"),
                 token => {
                     stale.Dispose();
-                    handoff.Complete(OpenInterface(_api, _devicePath, token));
+                    handoff.Complete(OpenInterface(_api, _devicePath, _policy, token));
                 },
                 ReopenTimeoutMilliseconds,
                 () => { });
@@ -450,9 +457,10 @@ internal sealed class WinUsbTransport : IDeviceTransport {
     }
 
     // Open the device through its USB device interface and bind WinUSB to it, then set the per-pipe
-    // transfer timeouts. Anything opened is released if a later step fails, or if the bounded call
-    // running this has been given up on before the next step.
-    private static OpenedInterface OpenInterface(IWinUsbApi api, string devicePath, CancellationToken token) {
+    // transfer timeouts from the policy. Anything opened is released if a later step fails, or if the
+    // bounded call running this has been given up on before the next step.
+    private static OpenedInterface OpenInterface(
+        IWinUsbApi api, string devicePath, WinUsbPipePolicy policy, CancellationToken token) {
         token.ThrowIfCancellationRequested();
         SafeHandle device = api.OpenDevice(devicePath, out int error)
             ?? throw new IOException(string.Format(
@@ -476,12 +484,12 @@ internal sealed class WinUsbTransport : IDeviceTransport {
         var opened = new OpenedInterface(device, usbInterface);
         try {
             token.ThrowIfCancellationRequested();
-            if (!api.SetPipeTransferTimeout(usbInterface, OutPipe, WriteTimeoutMilliseconds, out error)) {
+            if (!api.SetPipeTransferTimeout(usbInterface, OutPipe, policy.WriteTimeoutMilliseconds, out error)) {
                 throw PipePolicyFailure(OutPipe, devicePath, error);
             }
 
             token.ThrowIfCancellationRequested();
-            if (!api.SetPipeTransferTimeout(usbInterface, InPipe, ReadTimeoutMilliseconds, out error)) {
+            if (!api.SetPipeTransferTimeout(usbInterface, InPipe, policy.ReadTimeoutMilliseconds, out error)) {
                 throw PipePolicyFailure(InPipe, devicePath, error);
             }
         } catch {

@@ -277,7 +277,11 @@ internal sealed class RememberedControllerFile : IRememberedControllerStore {
 
     // The kinds a plan is ever made for.
     private static bool IsBuildable(DeviceKind kind)
-        => kind == DeviceKind.UniFan || kind == DeviceKind.TlFan || kind == DeviceKind.Galahad2 || kind == DeviceKind.WirelessTransmitter;
+        => kind == DeviceKind.UniFan
+            || kind == DeviceKind.TlFan
+            || kind == DeviceKind.Galahad2
+            || kind == DeviceKind.HydroShiftCurve
+            || kind == DeviceKind.WirelessTransmitter;
 
     // A JSON string: quotes, backslashes and control characters escaped, everything else as is.
     private static string Quote(string text) {

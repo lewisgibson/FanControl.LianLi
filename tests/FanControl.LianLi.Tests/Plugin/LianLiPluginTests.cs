@@ -40,6 +40,9 @@ public class LianLiPluginTests {
     private static LocatedDevice Galahad(int index)
         => new LocatedDevice(0x0416, 0x7371, "fake/galahad/" + index, null);
 
+    private static LocatedDevice HydroShiftCurve()
+        => new LocatedDevice(0x0416, 0x8051, "fake/hydroshift-curve", null);
+
     // The device path that became controller 0. Each path reports its own RPM on every channel
     // (1000 rpm for "aaa", 2000 for "zzz"), so controller 0's first fan sensor says which it is.
     private static string PathOfControllerZero(FakeEnumerator enumerator) {
@@ -253,6 +256,51 @@ public class LianLiPluginTests {
         Assert.Contains(container.ControlSensors, s => s.Name.Contains("Pump"));
 
         plugin.Close();
+    }
+
+    [Fact]
+    public void InitializeThenLoad_RegistersThePumpAndCoolantTemperatureForAHydroShiftCurve() {
+        // The 0x8051 pump MCU is a WinUSB device the plugin builds as a pump controller: one control
+        // with its rpm, and the liquid temperature as a curve source. Its first write takes the
+        // pump off the motherboard header.
+        var logger = new FakeLogger();
+        var enumerator = new FakeEnumerator(HydroShiftCurve());
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+
+        plugin.Initialize();
+        var container = new FakeSensorsContainer();
+        plugin.Load(container);
+
+        IPluginControlSensor pump = Assert.Single(container.ControlSensors);
+        Assert.Equal("LianLi/0/ch0/ctl", pump.Id);
+        Assert.Contains("Pump", pump.Name, StringComparison.Ordinal);
+        Assert.Equal("LianLi/0/ch0/fan", Assert.Single(container.FanSensors).Id);
+        Assert.Equal("LianLi/0/coolant/temp", Assert.Single(container.TempSensors).Id);
+
+        // Close before reading the transport: the worker polls it until the plugin stops.
+        plugin.Close();
+        Assert.Equal(new byte[] { 0x64, 1, 0, 0, 0, 0, 0, 0 }, enumerator.Opened[0].Writes[0]);
+        Assert.Contains(logger.Messages, m => m.Contains("kind=HydroShiftCurve pump and liquid temperature path=fake/hydroshift-curve"));
+    }
+
+    [Fact]
+    public void AHydroShiftCurveWhoseSetupWriteIsRejected_StaysRegistered_AndLogsIt() {
+        // The MCU opens but rejects the software-control write. The pump must stay registered - the
+        // worker re-asserts it after a reconnect and when the pump reports it follows the header.
+        var logger = new FakeLogger();
+        var enumerator = new FakeEnumerator(HydroShiftCurve()) { FailWrites = true };
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+
+        plugin.Initialize();
+        var container = new FakeSensorsContainer();
+        plugin.Load(container);
+
+        Assert.Single(container.ControlSensors);
+        Assert.Single(container.TempSensors);
+
+        plugin.Close();
+        Assert.Contains(logger.Messages, m => m.Contains("software-control assert failed for fake/hydroshift-curve"));
+        Assert.All(enumerator.Opened, transport => Assert.True(transport.IsDisposed));
     }
 
     [Fact]

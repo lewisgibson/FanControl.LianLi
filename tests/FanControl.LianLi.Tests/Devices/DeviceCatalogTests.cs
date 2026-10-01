@@ -41,6 +41,13 @@ public class DeviceCatalogTests {
     }
 
     [Fact]
+    public void HydroShiftCurveProductIds_ContainThePumpMcuAlone() {
+        var catalog = new DeviceCatalog();
+        Assert.Equal(new[] { 0x8051 }, catalog.HydroShiftCurveProductIds);
+        Assert.DoesNotContain(0x8051, catalog.CommandPacketProductIds); // a WinUSB device, not a HID one
+    }
+
+    [Fact]
     public void ProductIds_ContainEverySupportedPid() {
         var catalog = new DeviceCatalog();
         foreach (int pid in new[] { 0x7750, 0xA100, 0xA101, 0xA102, 0xA103, 0xA104, 0xA105, 0xA106 }) {
@@ -74,6 +81,9 @@ public class DeviceCatalogTests {
     [InlineData(0x0416, 0x7395, "Galahad2")] // Galahad II Vision LCD (alternate pid)
     [InlineData(0x0416, 0x7398, "Galahad2")] // HydroShift LCD
     [InlineData(0x0416, 0x739A, "Galahad2")] // HydroShift LCD (alternate pid)
+    [InlineData(0x0416, 0x8051, "HydroShiftCurve")] // HydroShift II OLED Curve pump MCU
+    [InlineData(0x0416, 0x8052, "Unknown")]  // its bootloader, never opened
+    [InlineData(0x0CF2, 0x8051, "Unknown")]  // right pid, wrong vendor for the pump
     [InlineData(0x0416, 0x8040, "WirelessTransmitter")] // L-Wireless transmitter dongle
     [InlineData(0x0416, 0x8041, "WirelessReceiver")]    // L-Wireless receiver dongle
     [InlineData(0x1A86, 0xE304, "WirelessTransmitter")] // alternate vendor pair

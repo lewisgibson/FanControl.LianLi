@@ -223,6 +223,20 @@ public sealed class RememberedControllerFileTests : IDisposable {
     }
 
     [Fact]
+    public void AHydroShiftCurveEntry_ReadsBack_WithItsCoolantTemperature() {
+        WriteText("{\"version\":1,\"controllers\":[{\"key\":\"usb/pump\",\"lastSeen\":\"2026-09-01T12:00:00Z\",\"kind\":\"HydroShiftCurve\",\"index\":3,\"devices\":[{\"vendorId\":1046,\"productId\":32849,\"path\":\"usb/pump\"}],"
+            + "\"channels\":[{\"controlId\":\"LianLi/3/ch0/ctl\",\"controlName\":\"Pump\",\"rpmId\":\"LianLi/3/ch0/fan\",\"rpmName\":\"Pump RPM\",\"lastSeen\":\"2026-09-01T12:00:00Z\"}],"
+            + "\"temperatures\":[{\"id\":\"LianLi/3/coolant/temp\",\"name\":\"Coolant\",\"lastSeen\":\"2026-09-01T12:00:00Z\"}]}]}");
+
+        StoredController entry = Assert.Single(Read());
+
+        Assert.Equal(DeviceKind.HydroShiftCurve, entry.Controller.Plan.Kind);
+        Assert.Equal(0x8051, entry.Controller.Plan.Devices[0].ProductId);
+        Assert.Equal("LianLi/3/ch0/ctl", Assert.Single(entry.Controller.Channels).ControlId);
+        Assert.Equal("LianLi/3/coolant/temp", Assert.Single(entry.Controller.Temperatures).Id);
+    }
+
+    [Fact]
     public void Machine_IsBesideThePluginLog()
         => Assert.Equal(
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FanControl.LianLi", "remembered-controllers.json"),

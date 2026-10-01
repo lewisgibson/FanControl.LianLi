@@ -44,6 +44,17 @@ internal sealed class FakeWinUsbApi : IWinUsbApi {
 
     public Dictionary<byte, int> AbortErrors { get; } = new Dictionary<byte, int>();
 
+    /// <summary>
+    /// When set, a read with nothing in <see cref="Replies"/> answers with what this returns for
+    /// the last packet written, a 64-byte packet at a time until it is used up, then ends the reply
+    /// as the pipe timeout does: a device that answers every request, for a test that runs a
+    /// controller for longer than a queue of replies would last. Null answers nothing.
+    /// </summary>
+    public Func<byte[], byte[]?>? ReplyFor { get; set; }
+
+    private byte[]? _pendingReply;
+    private int _pendingOffset;
+
     public int? CancelError { get; set; }
 
     public Action<string>? OnCall { get; set; }
@@ -87,6 +98,8 @@ internal sealed class FakeWinUsbApi : IWinUsbApi {
     public bool WritePipe(SafeHandle usbInterface, byte pipe, byte[] buffer, out int transferred, out int error) {
         Record(string.Format(CultureInfo.InvariantCulture, "WritePipe {0} 0x{1:X2} {2}", usbInterface, pipe, buffer.Length));
         Written.Add((byte[])buffer.Clone());
+        _pendingReply = ReplyFor?.Invoke(buffer);
+        _pendingOffset = 0;
         (bool succeeded, int count, int failure) = WriteResults.Count > 0 ? WriteResults.Dequeue() : (true, -1, 0);
         transferred = count < 0 ? buffer.Length : count;
         error = succeeded ? 0 : failure;
@@ -95,7 +108,7 @@ internal sealed class FakeWinUsbApi : IWinUsbApi {
 
     public bool ReadPipe(SafeHandle usbInterface, byte pipe, byte[] buffer, out int transferred, out int error) {
         Record(string.Format(CultureInfo.InvariantCulture, "ReadPipe {0} 0x{1:X2} {2}", usbInterface, pipe, buffer.Length));
-        (byte[]? packet, int failure) = Replies.Count > 0 ? Replies.Dequeue() : (null, ErrorSemTimeout);
+        (byte[]? packet, int failure) = Replies.Count > 0 ? Replies.Dequeue() : (NextPendingPacket(), ErrorSemTimeout);
         if (packet is null) {
             transferred = 0;
             error = failure;
@@ -121,6 +134,20 @@ internal sealed class FakeWinUsbApi : IWinUsbApi {
     private void Record(string call) {
         Calls.Add(call);
         OnCall?.Invoke(call);
+    }
+
+    // The next 64-byte packet of the reply the responder gave for the last write, or null once
+    // it is used up.
+    private byte[]? NextPendingPacket() {
+        if (_pendingReply is null || _pendingOffset >= _pendingReply.Length) {
+            return null;
+        }
+
+        int length = Math.Min(64, _pendingReply.Length - _pendingOffset);
+        var packet = new byte[length];
+        Array.Copy(_pendingReply, _pendingOffset, packet, 0, length);
+        _pendingOffset += 64;
+        return packet;
     }
 
     private static bool Result(int failure, out int error) {

@@ -511,7 +511,7 @@ public class HidTransportTests {
     public void Read_NoData_FailsWithoutFaulting() {
         using HidTransport transport = Open();
 
-        IOException failure = Assert.Throws<IOException>(() => transport.Read(64));
+        DeviceReplyMissingException failure = Assert.Throws<DeviceReplyMissingException>(() => transport.Read(64));
 
         Assert.Equal("HID interrupt-IN read returned no data.", failure.Message);
         transport.Write(new byte[] { 0x01 });

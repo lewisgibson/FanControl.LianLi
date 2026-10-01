@@ -8,17 +8,19 @@ using FanControl.LianLi.Protocol;
 namespace FanControl.LianLi.Transport;
 
 /// <summary>
-/// Locates the L-Wireless dongles. They are not HID devices - Windows binds them to WinUSB, so
+/// Locates the plugin's WinUSB devices: the L-Wireless dongles and the HydroShift II OLED Curve's
+/// pump MCU. They are not HID devices - Windows binds them to WinUSB, so
 /// they have no HID interface for <see cref="HidDeviceLocator"/> to list - and the way to one is
 /// not the generic USB device interface but the interface GUID WinUSB registered for it in its
-/// hardware key, which is what Lian Li's own USB library reads (docs/wireless.md). So this walks the present USB device instances,
-/// keeps the ones whose ids are a dongle's, reads <c>DeviceInterfaceGUIDs</c> from each one's
-/// hardware key, and resolves that interface to the path <see cref="WinUsbTransport"/> opens. A
-/// device with no interface GUID is not WinUSB-bound - Lian Li's driver was never installed - and
-/// is skipped rather than opened and failed. Every native failure along the way is logged with the
-/// call, the device and the code, so "the dongles are not found" can always be told apart from
-/// "Windows would not say". The walk runs inside the bounded device scan, so it checks the scan's
-/// token before every native call and stops the moment the scan has been given up on.
+/// hardware key, which is what Lian Li's own USB library reads (docs/wireless.md). So this walks
+/// the present USB device instances, keeps the ones whose ids are one of those devices'
+/// (<see cref="IsWinUsbDevice"/>), reads <c>DeviceInterfaceGUIDs</c> from each one's hardware key,
+/// and resolves that interface to the path <see cref="WinUsbTransport"/> opens. A device with no
+/// interface GUID is not WinUSB-bound - Lian Li's driver was never installed - and is skipped
+/// rather than opened and failed. Every native failure along the way is logged with the call, the
+/// device and the code, so "the dongles are not found" can always be told apart from "Windows
+/// would not say". The walk runs inside the bounded device scan, so it checks the scan's token
+/// before every native call and stops the moment the scan has been given up on.
 /// </summary>
 internal sealed class WinUsbDeviceLocator {
     // CONFIGRET codes. A list can grow between the call that sizes it and the call that fills it (a
@@ -70,9 +72,18 @@ internal sealed class WinUsbDeviceLocator {
     }
 
     /// <summary>
-    /// Every present dongle whose vendor and product id appear in both allow-lists, as the path to
-    /// its WinUSB interface. Throws <see cref="OperationCanceledException"/> once
-    /// <paramref name="token"/> is cancelled, before the next native call.
+    /// Whether a vendor/product pair is a device the plugin reaches over WinUSB - one of the
+    /// L-Wireless dongles or the HydroShift II OLED Curve's pump MCU - so the scan
+    /// lists it here and the enumerator opens it with <see cref="WinUsbTransport"/>.
+    /// </summary>
+    public static bool IsWinUsbDevice(int vendorId, int productId)
+        => WirelessProtocol.IsDongle(vendorId, productId) || HydroShiftCurveProtocol.IsPump(vendorId, productId);
+
+    /// <summary>
+    /// Every present WinUSB device of the plugin's whose vendor and product id appear in both
+    /// allow-lists, as the path to its WinUSB interface. Throws
+    /// <see cref="OperationCanceledException"/> once <paramref name="token"/> is cancelled, before
+    /// the next native call.
     /// </summary>
     public IReadOnlyList<LocatedDevice> Locate(
         IReadOnlyList<int> vendorIds, IReadOnlyList<int> productIds, CancellationToken token) {
@@ -87,13 +98,13 @@ internal sealed class WinUsbDeviceLocator {
         var located = new List<LocatedDevice>();
         foreach (string instanceId in ListUsbDeviceInstances(token)) {
             if (!UsbDevicePath.TryParseIds(instanceId, out int vendorId, out int productId)
-                || !WirelessProtocol.IsDongle(vendorId, productId)
+                || !IsWinUsbDevice(vendorId, productId)
                 || !Contains(vendorIds, vendorId)
                 || !Contains(productIds, productId)) {
                 continue;
             }
 
-            string? path = ResolveInterfacePath(instanceId, token);
+            string? path = ResolveInterfacePath(Role(vendorId, productId), instanceId, token);
             if (path is null) {
                 continue;
             }
@@ -103,6 +114,10 @@ internal sealed class WinUsbDeviceLocator {
 
         return located;
     }
+
+    // How a device is named in the log, so a line about the pump MCU does not call it a dongle.
+    private static string Role(int vendorId, int productId)
+        => WirelessProtocol.IsDongle(vendorId, productId) ? "wireless dongle" : "HydroShift II OLED Curve pump";
 
     private IReadOnlyList<string> ListUsbDeviceInstances(CancellationToken token) {
         const uint flags = IdListFilterEnumerator | IdListFilterPresent;
@@ -137,7 +152,7 @@ internal sealed class WinUsbDeviceLocator {
 
     // The interface path for a device instance: read the GUIDs its driver registered, then ask for
     // that interface class filtered to this instance. The first path a GUID yields is the device.
-    private string? ResolveInterfacePath(string instanceId, CancellationToken token) {
+    private string? ResolveInterfacePath(string role, string instanceId, CancellationToken token) {
         token.ThrowIfCancellationRequested();
         int located = _configurationManager.LocateDeviceNode(out uint deviceInstance, instanceId, LocateDeviceNodeNormal);
         if (located != CrSuccess) {
@@ -148,7 +163,7 @@ internal sealed class WinUsbDeviceLocator {
         IReadOnlyList<string> guids = ReadInterfaceGuids(deviceInstance, instanceId, token);
         foreach (string guidText in guids) {
             if (!Guid.TryParse(guidText, out Guid interfaceGuid)) {
-                _log.Write("  wireless dongle " + instanceId + ": registered interface GUID '" + guidText + "' is not a GUID");
+                _log.Write("  " + role + " " + instanceId + ": registered interface GUID '" + guidText + "' is not a GUID");
                 continue;
             }
 
@@ -159,8 +174,8 @@ internal sealed class WinUsbDeviceLocator {
         }
 
         _log.Write(guids.Count == 0
-            ? "  wireless dongle " + instanceId + " has no WinUSB interface registered: Windows has not bound it to WinUSB, so L-Connect cannot reach it either"
-            : "  wireless dongle " + instanceId + " has a WinUSB interface registered but none present: it may still be starting, and the next scan looks again");
+            ? "  " + role + " " + instanceId + " has no WinUSB interface registered: Windows has not bound it to WinUSB, so L-Connect cannot reach it either"
+            : "  " + role + " " + instanceId + " has a WinUSB interface registered but none present: it may still be starting, and the next scan looks again");
         return null;
     }
 
@@ -228,7 +243,7 @@ internal sealed class WinUsbDeviceLocator {
 
     private void Failed(string operation, string subject, int code)
         => _log.Write(string.Format(
-            CultureInfo.InvariantCulture, "  wireless dongle scan: {0} failed for {1} (code {2})", operation, subject, code));
+            CultureInfo.InvariantCulture, "  WinUSB device scan: {0} failed for {1} (code {2})", operation, subject, code));
 
     private static bool Contains(IReadOnlyList<int> list, int value) {
         for (int i = 0; i < list.Count; i++) {

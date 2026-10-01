@@ -12,7 +12,8 @@ namespace FanControl.LianLi.Devices;
 /// map to a pure <see cref="IFanProtocol"/> via <see cref="ProtocolFor"/>; the 0x0416
 /// command-packet controllers (Uni Fan TL, Galahad II Trinity) have no <c>IFanProtocol</c>
 /// and are identified by <see cref="Classify"/> instead, as are the L-Wireless dongles in
-/// <see cref="WirelessProductIds"/>. The Strimer Plus (0xA200) is a
+/// <see cref="WirelessProductIds"/> and the HydroShift II OLED Curve's pump MCU in
+/// <see cref="HydroShiftCurveProductIds"/>. The Strimer Plus (0xA200) is a
 /// lighting-only device listed in <see cref="LightingProductIds"/>. Unknown ids classify as
 /// <see cref="DeviceKind.Unknown"/> and produce no controller and no writes.
 /// </summary>
@@ -79,6 +80,10 @@ internal sealed class DeviceCatalog {
             WirelessProtocol.AlternateTransmitterProductId,
             WirelessProtocol.AlternateReceiverProductId,
         };
+
+        // The HydroShift II OLED Curve's pump rides on its lighting MCU, a WinUSB device like the
+        // dongles; its screen and display-mode devices are not listed, as the plugin leaves them alone.
+        HydroShiftCurveProductIds = new[] { HydroShiftCurveProtocol.ProductId };
     }
 
     /// <summary>The USB vendor ids the plugin scans: the Uni family (0x0CF2), the 0x0416 family, and the wireless dongles' alternate vendor.</summary>
@@ -98,6 +103,9 @@ internal sealed class DeviceCatalog {
 
     /// <summary>The L-Wireless dongle product ids (transmitter and receiver, both vendor pairs), located but built as a pair.</summary>
     public IReadOnlyList<int> WirelessProductIds { get; }
+
+    /// <summary>The HydroShift II OLED Curve's pump MCU product id, a 0x0416 WinUSB device built as a pump controller.</summary>
+    public IReadOnlyList<int> HydroShiftCurveProductIds { get; }
 
     /// <summary>
     /// Classify a located device by its vendor and product id so the plugin knows what to build.
@@ -120,6 +128,10 @@ internal sealed class DeviceCatalog {
 
             if (Galahad2ProductIds.Contains(productId)) {
                 return DeviceKind.Galahad2;
+            }
+
+            if (HydroShiftCurveProtocol.IsPump(vendorId, productId)) {
+                return DeviceKind.HydroShiftCurve;
             }
         }
 

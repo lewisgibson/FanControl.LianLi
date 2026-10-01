@@ -155,6 +155,20 @@ public class WindowsDeviceEnumeratorTests {
     }
 
     [Fact]
+    public void Open_TheHydroShiftCurvePumpMcu_OpensAWinUsbTransport_NotAHidOne() {
+        const string PumpPath = @"\\?\usb#vid_0416&pid_8051#7&2&0&1#{guid}";
+
+        using IDeviceTransport transport = Enumerator().Open(new LocatedDevice(0x0416, 0x8051, PumpPath, null));
+
+        Assert.IsType<WinUsbTransport>(Assert.IsType<ClaimedTransport>(transport).Inner);
+        // Under the pump MCU's pipe policy, not the dongles'.
+        Assert.Contains("SetPipeTransferTimeout interface0 0x01 200", _winUsb.Calls);
+        Assert.Contains("SetPipeTransferTimeout interface0 0x81 200", _winUsb.Calls);
+        Assert.Equal("OpenDevice " + PumpPath, _winUsb.Calls[0]);
+        Assert.Empty(_hid.Calls);
+    }
+
+    [Fact]
     public void Open_ARememberedHidDevice_ReadsItsCapabilitiesFromItsPath_ThenOpens() {
         _hid.Capabilities[UniPath] = new HidCapabilities(0xFF72, 65, 353, 65);
 

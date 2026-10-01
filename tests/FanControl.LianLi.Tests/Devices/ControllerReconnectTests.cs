@@ -13,7 +13,7 @@ using Xunit;
 namespace FanControl.LianLi.Tests.Devices;
 
 /// <summary>
-/// Every wired controller family on the real HID transport over the scripted native API, the fault latch,
+/// Every wired controller family and the HydroShift II OLED Curve pump on the real transport over the scripted native API, the fault latch,
 /// the backoff and the reopen included, rather than on a fake transport that accepts every
 /// transfer. The device drops off the bus, stays away while a number of reopens fail, and comes
 /// back reset; whatever the timing - on which transfer the fault lands, and how many reopens fail
@@ -25,6 +25,7 @@ public sealed class ControllerReconnectTests {
     private const string UniPath = @"\\?\hid#vid_0cf2&pid_a102&mi_01#7&9c2f7a3&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}";
     private const string GalahadPath = @"\\?\hid#vid_0416&pid_7371&mi_00#fake";
     private const string TlPath = @"\\?\hid#vid_0416&pid_7372&mi_01#fake";
+    private const string PumpPath = @"\\?\usb#vid_0416&pid_8051#7&2&0&1#{guid}";
 
     private const int ErrorDeviceNotConnected = 1167;
     private const int ErrorFileNotFound = 2;
@@ -36,7 +37,7 @@ public sealed class ControllerReconnectTests {
 
     // The plugin's replay shape (LianLiPlugin.ApplyLighting): the transfers written in order inside
     // a catch-all that logs the failure, reports it and lets fan control continue.
-    private bool Replay(HidTransport transport, IReadOnlyList<KeyValuePair<bool, byte[]>> look) {
+    private bool Replay(IDeviceTransport transport, IReadOnlyList<KeyValuePair<bool, byte[]>> look) {
         try {
             foreach (KeyValuePair<bool, byte[]> transfer in look) {
                 if (transfer.Key) {
@@ -272,4 +273,64 @@ public sealed class ControllerReconnectTests {
         Assert.DoesNotContain(_log.Messages, m => m.Contains("lighting apply failed"));
     }
 
+    // ---------- HydroShift II OLED Curve over the WinUSB transport ----------
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void HydroShiftCurve_TheReplayAndSoftwareControlReachTheReopenedMcu(int failedReopens) {
+        var api = new FakeWinUsbApi {
+            ReplyFor = packet => packet[0] switch {
+                0x60 => new byte[] { 0x60, 30, 1 },
+                0x62 => new byte[] { 0x62, 0x07, 0x3A },
+                _ => new[] { packet[0] },
+            },
+        };
+        using WinUsbTransport transport = WinUsbTransport.Open(PumpPath, WinUsbPipePolicy.PumpMcu, _log, api, NewGate(), new FakeTransferDelay(), CancellationToken.None);
+        var work = new List<KeyValuePair<bool, byte[]>> { new KeyValuePair<bool, byte[]>(false, new byte[] { 0x70, 1, 0, 0, 0, 0, 0, 0 }) };
+        var controller = new HydroShiftCurveController(0, transport, _clock, _log);
+        controller.ReplayOnReconnect(() => Replay(transport, work));
+        controller.AssertSoftwareControl();
+        controller.SetTarget(0, 50);
+        using var loop = new ControllerLoop(0, controller, _log, 1000);
+        loop.Tick();
+
+        api.WriteResults.Enqueue((false, 0, 31));
+        for (int i = 0; i < failedReopens; i++) {
+            api.OpenDeviceErrors.Enqueue(ErrorFileNotFound);
+        }
+
+        int writesAtReopen = RunUntilReopened(api, loop.Tick);
+
+        List<byte[]> after = api.Written.Skip(writesAtReopen).ToList();
+        int replayAt = after.FindIndex(w => w[0] == 0x70);
+        int controlAt = after.FindIndex(w => w[0] == 0x64);
+        int pumpAt = after.FindIndex(w => w[0] == 0x61);
+        Assert.True(replayAt >= 0 && controlAt > replayAt && pumpAt > controlAt, "the replay, then software control, then the pump");
+        Assert.Contains(_log.Messages, m => m == "H0 reconnected: setup replayed (transport generation 1)");
+        Assert.DoesNotContain(_log.Messages, m => m.Contains("lighting apply failed"));
+    }
+
+    // Tick until the device open that succeeds, then a few ticks more for the replay that follows.
+    // Returns how many packets had been written to the device - or whatever countWritten counts -
+    // at that moment.
+    private static int RunUntilReopened(FakeWinUsbApi api, Action tick, Func<int>? countWritten = null) {
+        int writesAtReopen = -1;
+        api.OnCall = call => {
+            if (call.StartsWith("OpenDevice", StringComparison.Ordinal) && api.OpenDeviceErrors.Count == 0 && writesAtReopen < 0) {
+                writesAtReopen = countWritten is null ? api.Written.Count : countWritten();
+            }
+        };
+
+        for (int i = 0; i < 2000 && writesAtReopen < 0; i++) {
+            tick();
+        }
+
+        Assert.True(writesAtReopen >= 0, "the device was never reopened");
+        for (int i = 0; i < 3; i++) {
+            tick();
+        }
+
+        return writesAtReopen;
+    }
 }

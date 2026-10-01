@@ -276,7 +276,7 @@ internal sealed class HidTransport : IDeviceTransport {
         RunStreamCall("ReadFile", stream, token => read = RunStreamTransfer("ReadFile", begin, token));
 
         if (read <= 0) {
-            throw new IOException("HID interrupt-IN read returned no data.");
+            throw new DeviceReplyMissingException("HID interrupt-IN read returned no data.");
         }
 
         byte[] buffer = new byte[length];

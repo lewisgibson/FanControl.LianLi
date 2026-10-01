@@ -181,13 +181,15 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
         _lightingConfigurations = ReadLConnectLighting();
 #endif
 
-        // Every build also locates the 0x0416 command-packet controllers (Uni Fan TL, Galahad II);
-        // the Lighting build additionally locates lighting-only products (Strimer Plus) to drive
-        // their RGB. The enumerator requires both vendor and product to match, so listing a product
-        // id here is what opts a family into discovery.
+        // Every build also locates the 0x0416 command-packet controllers (Uni Fan TL, Galahad II),
+        // the wireless dongles and the HydroShift II OLED Curve's pump MCU; the Lighting build
+        // additionally locates lighting-only products (Strimer Plus) to drive their RGB. The
+        // enumerator requires both vendor and product to match, so listing a product id here is
+        // what opts a family into discovery.
         var productIds = new List<int>(_catalog.ProductIds);
         productIds.AddRange(_catalog.CommandPacketProductIds);
         productIds.AddRange(_catalog.WirelessProductIds);
+        productIds.AddRange(_catalog.HydroShiftCurveProductIds);
 #if ENABLE_LIGHTING
         productIds.AddRange(_catalog.LightingProductIds);
 #endif
@@ -244,6 +246,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
                 case DeviceKind.UniFan:
                 case DeviceKind.TlFan:
                 case DeviceKind.Galahad2:
+                case DeviceKind.HydroShiftCurve:
                     plans.Add(new ControllerPlan(kind, info));
                     break;
                 case DeviceKind.WirelessTransmitter:
@@ -592,6 +595,8 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
                 return BuildUniController(index, first, _catalog.ProtocolFor(first.ProductId));
             case DeviceKind.WirelessTransmitter:
                 return BuildWirelessController(plan, index);
+            case DeviceKind.HydroShiftCurve:
+                return BuildHydroShiftCurveController(index, first);
             default:
                 return BuildCommandPacketController(plan, index, first);
         }
@@ -795,6 +800,43 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
         }
 
         return enabled.Count == 0 ? "none" : string.Join(",", enabled);
+    }
+
+    // Open the HydroShift II OLED Curve's pump MCU, a WinUSB device, and take the pump off the
+    // motherboard's PWM header so the host owns its speed. The controller's constructor does no
+    // I/O and owns the transport from there; a device that will not open throws to the caller with
+    // nothing left to release. No lighting is driven for it in any build: the MCU's lighting is a
+    // stream of frames L-Connect renders on the PC, not a look the device keeps.
+    private HydroShiftCurveController BuildHydroShiftCurveController(int index, LocatedDevice info) {
+        IDeviceTransport transport = _enumerator.Open(info);
+        var controller = new HydroShiftCurveController(index, transport, _clock, _log);
+        AssertSoftwareControl(controller, info);
+        _log.Write(string.Format(
+            CultureInfo.InvariantCulture,
+            "  controller pid=0x{0:x4} kind={1} pump and liquid temperature path={2}",
+            info.ProductId,
+            DeviceKind.HydroShiftCurve,
+            info.DevicePath));
+        return controller;
+    }
+
+    // Assert software control of the HydroShift II OLED Curve's pump, the counterpart of the Uni
+    // manual-mode assert: a rejected setup write must not lose the controller, and the worker
+    // sends it again when the pump reports it is following the header, and after every reconnect.
+    // The fault is isolated here at the composition seam and logged.
+    private void AssertSoftwareControl(HydroShiftCurveController controller, LocatedDevice info) {
+        try {
+            controller.AssertSoftwareControl();
+        }
+#pragma warning disable CA1031 // host seam: a rejected setup write degrades to worker-time re-asserts, never loses the controller
+        catch (Exception ex) {
+            _log.Write(string.Format(
+                CultureInfo.InvariantCulture,
+                "  software-control assert failed for {0}: {1}; the worker re-asserts it when the pump reports it follows the motherboard",
+                info.DevicePath,
+                ex.Message));
+        }
+#pragma warning restore CA1031
     }
 
     // Open a 0x0416 command-packet controller (Uni Fan TL or Galahad II). The controller's

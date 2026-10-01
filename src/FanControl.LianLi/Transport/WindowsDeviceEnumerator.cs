@@ -4,28 +4,28 @@ using System.Globalization;
 using System.IO;
 using System.Threading;
 using FanControl.LianLi.Logging;
-using FanControl.LianLi.Protocol;
 
 namespace FanControl.LianLi.Transport;
 
 /// <summary>
 /// Finds and opens every device the plugin drives, whichever kind it is. HID controllers come from
 /// <see cref="HidDeviceLocator"/>, matched on the vendor and product ids each interface reports; the
-/// L-Wireless dongles are WinUSB devices with no HID interface at all, and come from
-/// <see cref="WinUsbDeviceLocator"/>. An open routes to the matching transport. Both the scan and an
-/// open run under a bounded wait, because both run on the host's thread during Initialize and both
-/// open a device. Neither goes through any library the host shares: every handle is the plugin's own,
-/// opened on a thread the plugin owns, so a device that wedges during either can cost the plugin its
-/// deadline but cannot leave behind a lock another component in the host waits on.
+/// L-Wireless dongles and the HydroShift II OLED Curve's pump MCU are WinUSB
+/// devices with no HID interface at all, and come from <see cref="WinUsbDeviceLocator"/>. An open
+/// routes to the matching transport. Both the scan and an open run under a bounded wait, because
+/// both run on the host's thread during Initialize and both open a device. Neither goes through any
+/// library the host shares: every handle is the plugin's own, opened on a thread the plugin owns, so
+/// a device that wedges during either can cost the plugin its deadline but cannot leave behind a
+/// lock another component in the host waits on.
 /// </summary>
 internal sealed class WindowsDeviceEnumerator : IDeviceEnumerator {
     // The scan opens each HID interface whose path names a device the plugin drives, for its
-    // attributes and capabilities, and walks the configuration manager for the dongles. A controller
-    // that has come back from sleep wedged - present to Windows but never completing an open - blocks
-    // that walk, and Locate runs on the host's refresh thread (FanControl closes and re-initialises
-    // every plugin a few seconds after a resume). So the walk is bounded: one that runs out fails this
-    // Initialize, which the host retries a few times five seconds apart, instead of freezing FanControl
-    // behind a blank window. A healthy walk takes a few tens of milliseconds.
+    // attributes and capabilities, and walks the configuration manager for the WinUSB devices. A
+    // controller that has come back from sleep wedged - present to Windows but never completing an
+    // open - blocks that walk, and Locate runs on the host's refresh thread (FanControl closes and
+    // re-initialises every plugin a few seconds after a resume). So the walk is bounded: one that
+    // runs out fails this Initialize, which the host retries a few times five seconds apart, instead
+    // of freezing FanControl behind a blank window. A healthy walk takes a few tens of milliseconds.
     private const int LocateTimeoutMilliseconds = 5000;
 
     // An open is a few CreateFile/IOCTL calls: milliseconds on a healthy device, an immediate error on
@@ -162,8 +162,10 @@ internal sealed class WindowsDeviceEnumerator : IDeviceEnumerator {
     }
 
     private IDeviceTransport OpenCore(LocatedDevice info, CancellationToken token) {
-        if (WirelessProtocol.IsDongle(info.VendorId, info.ProductId)) {
-            return WinUsbTransport.Open(info.DevicePath, _log, _winUsb, _calls, _delay, token);
+        if (WinUsbDeviceLocator.IsWinUsbDevice(info.VendorId, info.ProductId)) {
+            // Each kind of WinUSB device is timed as L-Connect times it.
+            return WinUsbTransport.Open(
+                info.DevicePath, WinUsbPipePolicy.For(info.VendorId, info.ProductId), _log, _winUsb, _calls, _delay, token);
         }
 
         // A device remembered from an earlier run carries only its path, as does one whose capabilities

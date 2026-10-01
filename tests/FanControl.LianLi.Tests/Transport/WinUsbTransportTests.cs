@@ -1,7 +1,9 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using FanControl.LianLi.Protocol;
 using FanControl.LianLi.Tests.Fakes;
 using FanControl.LianLi.Transport;
 using Xunit;
@@ -26,7 +28,11 @@ public class WinUsbTransportTests {
     private readonly FakeLogger _log = new FakeLogger();
     private readonly DeviceCallGate _gate;
 
-    private WinUsbTransport Open() => WinUsbTransport.Open(Path, _log, _api, _gate, _delay, CancellationToken.None);
+    private WinUsbTransport Open() => WinUsbTransport.Open(Path, WinUsbPipePolicy.Dongle, _log, _api, _gate, _delay, CancellationToken.None);
+
+    private const string PumpPath = @"\\?\usb#vid_0416&pid_8051#7&2&0&1#{guid}";
+
+    private WinUsbTransport OpenPump() => WinUsbTransport.Open(PumpPath, WinUsbPipePolicy.PumpMcu, _log, _api, _gate, _delay, CancellationToken.None);
 
     public WinUsbTransportTests() {
         _gate = new DeviceCallGate(_calls, _clock, _log);
@@ -47,7 +53,7 @@ public class WinUsbTransportTests {
     }
 
     [Fact]
-    public void Open_OpensTheDevice_BindsWinUsb_AndSetsBothPipeTimeouts() {
+    public void Open_OpensTheDevice_BindsWinUsb_AndSetsBothPipeTimeouts_FromThePolicy() {
         using WinUsbTransport transport = Open();
 
         Assert.Equal(
@@ -61,6 +67,22 @@ public class WinUsbTransportTests {
         Assert.True(transport.CanWrite);
         Assert.Equal(0, transport.Generation);
         Assert.False(transport.IsFaulted);
+    }
+
+    // The pump MCU's policy: 200 ms for a write and 200 ms for its one reply packet, as L-Connect's
+    // lcd207 SDK times them (WinUsbHS2.SendAndReadLed, WinUsb.Read).
+    [Fact]
+    public void Open_ThePumpMcu_SetsItsOwnPipeTimeouts() {
+        using WinUsbTransport transport = OpenPump();
+
+        Assert.Equal(
+            new[] {
+                "OpenDevice " + PumpPath,
+                "Initialize device0",
+                "SetPipeTransferTimeout interface0 0x01 200",
+                "SetPipeTransferTimeout interface0 0x81 200",
+            },
+            _api.Calls);
     }
 
     [Fact]
@@ -112,7 +134,7 @@ public class WinUsbTransportTests {
         };
 
         Assert.Throws<OperationCanceledException>(
-            () => WinUsbTransport.Open(Path, _log, _api, _gate, _delay, abandonment.Token));
+            () => WinUsbTransport.Open(Path, WinUsbPipePolicy.Dongle, _log, _api, _gate, _delay, abandonment.Token));
 
         Assert.StartsWith(blocked, _api.Calls.Last(), StringComparison.Ordinal);
         Assert.Equal(1, _api.Devices[0].Releases);
@@ -123,7 +145,7 @@ public class WinUsbTransportTests {
     [Fact]
     public void Open_AlreadyGivenUpOn_OpensNothing() {
         Assert.Throws<OperationCanceledException>(
-            () => WinUsbTransport.Open(Path, _log, _api, _gate, _delay, FakeDeviceCallRunner.Cancelled));
+            () => WinUsbTransport.Open(Path, WinUsbPipePolicy.Dongle, _log, _api, _gate, _delay, FakeDeviceCallRunner.Cancelled));
 
         Assert.Empty(_api.Calls);
     }
@@ -131,11 +153,12 @@ public class WinUsbTransportTests {
     [Fact]
     public void Open_ValidatesItsArguments() {
         CancellationToken none = CancellationToken.None;
-        Assert.Throws<ArgumentException>(() => WinUsbTransport.Open(string.Empty, _log, _api, _gate, _delay, none));
-        Assert.Throws<ArgumentNullException>(() => WinUsbTransport.Open(Path, null!, _api, _gate, _delay, none));
-        Assert.Throws<ArgumentNullException>(() => WinUsbTransport.Open(Path, _log, null!, _gate, _delay, none));
-        Assert.Throws<ArgumentNullException>(() => WinUsbTransport.Open(Path, _log, _api, null!, _delay, none));
-        Assert.Throws<ArgumentNullException>(() => WinUsbTransport.Open(Path, _log, _api, _gate, null!, none));
+        Assert.Throws<ArgumentException>(() => WinUsbTransport.Open(string.Empty, WinUsbPipePolicy.Dongle, _log, _api, _gate, _delay, none));
+        Assert.Throws<ArgumentNullException>(() => WinUsbTransport.Open(Path, null!, _log, _api, _gate, _delay, none));
+        Assert.Throws<ArgumentNullException>(() => WinUsbTransport.Open(Path, WinUsbPipePolicy.Dongle, null!, _api, _gate, _delay, none));
+        Assert.Throws<ArgumentNullException>(() => WinUsbTransport.Open(Path, WinUsbPipePolicy.Dongle, _log, null!, _gate, _delay, none));
+        Assert.Throws<ArgumentNullException>(() => WinUsbTransport.Open(Path, WinUsbPipePolicy.Dongle, _log, _api, null!, _delay, none));
+        Assert.Throws<ArgumentNullException>(() => WinUsbTransport.Open(Path, WinUsbPipePolicy.Dongle, _log, _api, _gate, null!, none));
     }
 
     [Fact]
@@ -459,7 +482,7 @@ public class WinUsbTransportTests {
         IOException failure = Assert.Throws<IOException>(() => transport.Read(128));
 
         Assert.Equal(
-            "WinUsb_ReadPipe timed out after 1050 ms; pending transfers aborted; dongle unresponsive, handle faulted.",
+            "WinUsb_ReadPipe timed out after 1050 ms; pending transfers aborted; device unresponsive, handle faulted.",
             failure.Message);
         Assert.Single(_api.Calls, call => call.StartsWith("ReadPipe", StringComparison.Ordinal));
         Assert.Single(_api.Replies);
@@ -485,12 +508,61 @@ public class WinUsbTransportTests {
         using WinUsbTransport transport = Open();
         transport.Write(Packet(0x11));
 
-        IOException failure = Assert.Throws<IOException>(() => transport.Read(64));
+        DeviceReplyMissingException failure = Assert.Throws<DeviceReplyMissingException>(() => transport.Read(64));
 
         Assert.Equal("WinUSB interrupt-IN read returned no data.", failure.Message);
         transport.Write(Packet(0x11));
         Assert.Equal(0, transport.Generation);
         Assert.Empty(_log.Messages);
+    }
+
+    // The pump MCU answers every command with one packet (lcd207's WinUsb.Read makes one transfer),
+    // so its read takes the packet asked for and does not wait a whole timeout for a second one.
+    [Fact]
+    public void Read_UnderThePumpMcuPolicy_TakesOnePacket_AndDoesNotWaitForAnother() {
+        using WinUsbTransport transport = OpenPump();
+        _api.Replies.Enqueue((new byte[] { 0x60, 31, 1 }, 0));
+        _api.Replies.Enqueue((new byte[] { 0x62, 7, 0xD0 }, 0));
+
+        byte[] reply = transport.Read(64);
+
+        Assert.Equal(31, reply[1]);
+        Assert.Single(_api.Calls, call => call.StartsWith("ReadPipe", StringComparison.Ordinal));
+        Assert.Single(_api.Replies); // the second packet is left for the next read
+        Assert.Empty(_log.Messages);
+    }
+
+    // The pump's reply window is L-Connect's 200 ms: a reply the MCU takes 100 ms over, which the
+    // dongles' 50 ms window would have cut off, is read.
+    [Fact]
+    public void Read_UnderThePumpMcuPolicy_AcceptsAReplyWithinTheSdksWindow() {
+        uint readTimeout = 0;
+        bool statusPending = true;
+        _api.OnCall = call => {
+            if (call.StartsWith("SetPipeTransferTimeout interface0 0x81 ", StringComparison.Ordinal)) {
+                readTimeout = uint.Parse(call.Split(' ')[3], CultureInfo.InvariantCulture);
+            }
+
+            if (call.StartsWith("ReadPipe ", StringComparison.Ordinal) && statusPending) {
+                statusPending = false;
+                // The MCU answers this command at 100 ms: within lcd207.WinUsb.Read's 200 ms.
+                _api.Replies.Enqueue(readTimeout >= 100 ? (new byte[] { 0x60, 31, 1 }, 0) : (null, FakeWinUsbApi.ErrorSemTimeout));
+            }
+        };
+        using WinUsbTransport transport = OpenPump();
+
+        transport.Write(HydroShiftCurveProtocol.EncodeStatusRequest());
+
+        Assert.Equal(31, transport.Read(64)[1]);
+    }
+
+    [Fact]
+    public void Read_UnderThePumpMcuPolicy_NothingAfterARequest_FailsAsAMissingReply() {
+        using WinUsbTransport transport = OpenPump();
+        transport.Write(HydroShiftCurveProtocol.EncodeSetPump(979));
+
+        Assert.Throws<DeviceReplyMissingException>(() => transport.Read(64));
+        Assert.Equal(0, transport.Generation);
     }
 
     [Fact]
@@ -515,7 +587,7 @@ public class WinUsbTransportTests {
         IOException failure = Assert.Throws<IOException>(() => transport.Read(64));
 
         Assert.Equal(
-            "WinUsb_ReadPipe timed out after 1000 ms; pending transfers aborted; dongle unresponsive, handle faulted.",
+            "WinUsb_ReadPipe timed out after 1000 ms; pending transfers aborted; device unresponsive, handle faulted.",
             failure.Message);
         Assert.Empty(_delay.Waits);
     }

@@ -35,6 +35,12 @@ internal sealed class FakeDeviceTransport : IDeviceTransport {
     public int InterruptReadCount { get; private set; }
 
     /// <summary>
+    /// When set, a <see cref="Read"/> with nothing queued throws <see cref="DeviceReplyMissingException"/>,
+    /// as the real transports do for a reply that never comes, instead of yielding zeros.
+    /// </summary>
+    public bool MissingRepliesThrow { get; set; }
+
+    /// <summary>
     /// When set, <see cref="GetInputReport"/> blocks on this event before returning, letting a
     /// test hold a tick mid-read (simulating the slow post-hibernate HID read that stalls the
     /// keepalive thread while it holds the tick gate).
@@ -121,6 +127,10 @@ internal sealed class FakeDeviceTransport : IDeviceTransport {
 
         lock (_lock) {
             InterruptReadCount++;
+            if (MissingRepliesThrow && ReadReplies.Count == 0) {
+                throw new DeviceReplyMissingException("simulated reply that never came");
+            }
+
             byte[] buffer = new byte[length];
             if (ReadReplies.Count > 0) {
                 byte[] reply = ReadReplies.Dequeue();

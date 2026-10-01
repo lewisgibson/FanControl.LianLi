@@ -47,6 +47,52 @@ public class WinUsbDeviceLocatorTests {
     private static WinUsbDeviceLocator Locator(FakeConfigurationManagerApi api, FakeLogger? log = null)
         => new WinUsbDeviceLocator(api, new ContainerIdResolver(api), log ?? new FakeLogger());
 
+    // The HydroShift II OLED Curve's pump MCU: the same walk, under its own interface GUID.
+    private const string Pump = @"USB\VID_0416&PID_8051\7&2a3b4c5d&0&1";
+    private const string PumpPath = @"\\?\usb#vid_0416&pid_8051#7&2a3b4c5d&0&1#{a5dcbf10-6530-11d2-901f-00c04fb951ed}";
+    private const uint PumpNode = 9;
+
+    private static FakeConfigurationManagerApi TwoDonglesAndAPump() {
+        FakeConfigurationManagerApi api = TwoDongles();
+        api.DeviceIds.Add(Pump);
+        AddDongle(api, Pump, PumpNode, PumpPath);
+        return api;
+    }
+
+    [Theory]
+    [InlineData(0x0416, 0x8040, true)]
+    [InlineData(0x1A86, 0xE305, true)]
+    [InlineData(0x0416, 0x8051, true)]
+    [InlineData(0x0416, 0x8052, false)] // the pump MCU's bootloader
+    [InlineData(0x0416, 0x7372, false)] // a HID controller
+    public void IsWinUsbDevice_IsEitherDongleOrThePumpMcu(int vendor, int product, bool expected)
+        => Assert.Equal(expected, WinUsbDeviceLocator.IsWinUsbDevice(vendor, product));
+
+    [Fact]
+    public void Locate_FindsThePumpMcu_BesideTheDongles_WhenItIsAllowed() {
+        FakeConfigurationManagerApi api = TwoDonglesAndAPump();
+
+        IReadOnlyList<LocatedDevice> withPump = Locator(api).Locate(Vendors, new[] { 0x8040, 0x8041, 0x8051 }, CancellationToken.None);
+        IReadOnlyList<LocatedDevice> donglesOnly = Locator(api).Locate(Vendors, Products, CancellationToken.None);
+
+        Assert.Equal(new[] { TransmitterPath, ReceiverPath, PumpPath }, withPump.Select(d => d.DevicePath));
+        Assert.Equal(0x8051, withPump[2].ProductId);
+        Assert.Null(withPump[2].Device);
+        Assert.Equal(2, donglesOnly.Count);
+    }
+
+    [Fact]
+    public void Locate_APumpMcuWithoutWinUsbBound_IsSkipped_AndNamedAsThePump() {
+        FakeConfigurationManagerApi api = TwoDonglesAndAPump();
+        var log = new FakeLogger();
+        api.HardwareKeys[PumpNode] = new Dictionary<string, (int Type, char[] Data)>();
+
+        Assert.Equal(2, Locator(api, log).Locate(Vendors, new[] { 0x8040, 0x8041, 0x8051 }, CancellationToken.None).Count);
+        Assert.Contains(
+            "  HydroShift II OLED Curve pump " + Pump + " has no WinUSB interface registered: Windows has not bound it to WinUSB, so L-Connect cannot reach it either",
+            log.Messages);
+    }
+
     [Fact]
     public void Locate_FindsEachDongle_AtItsRegisteredInterfacePath() {
         FakeConfigurationManagerApi api = TwoDongles();
