@@ -92,7 +92,7 @@ internal sealed class WirelessDonglePair : IDisposable {
     }
 
     // RfRead: a reply is empty when its first byte is zero, and a read that throws counts as empty
-    // too, since ReadAll hands back what it got - zeros - for one that failed part way. The count is
+    // too, since ReadAll returns what it got - zeros - for one that failed part way. The count is
     // the pair's, and the dongle reset is the one this read was from.
     private byte[] Read(Dongle dongle, Dongle partner, int length) {
         byte[] reply;
@@ -120,7 +120,7 @@ internal sealed class WirelessDonglePair : IDisposable {
     }
 
     // The reset goes out as an ordinary write to the partner, so it is itself counted against the
-    // partner, as L-Connect's reset is an RfSend. Its own failure is logged rather than thrown: the
+    // partner, as L-Connect's reset is an RfSend. Its own failure is logged, not thrown: the
     // caller is already failing with the write that triggered it, or reading nothing, and that is
     // the error to report.
     private void Reset(Dongle failing, Dongle through, string why) {
@@ -134,7 +134,7 @@ internal sealed class WirelessDonglePair : IDisposable {
                 why,
                 through.Name));
         }
-#pragma warning disable CA1031 // resilience: the reset is best effort and logged; the failure that triggered it is what the caller reports
+#pragma warning disable CA1031 // resilience: the reset is tried once and logged; the failure that triggered it is what the caller reports
         catch (Exception ex) {
             _log.Write(string.Format(
                 CultureInfo.InvariantCulture,

@@ -81,7 +81,7 @@ public sealed class JsonValueTests {
     [Fact]
     public void Parse_DeeplyNested_ThrowsInsteadOfOverflowingTheStack() {
         // Far deeper than the parser's nesting cap; it must throw a catchable FormatException
-        // rather than recurse into an (uncatchable) StackOverflowException.
+        // instead of recursing into an (uncatchable) StackOverflowException.
         string json = new string('[', 5000) + new string(']', 5000);
         Assert.Throws<FormatException>(() => JsonValue.Parse(json));
     }

@@ -13,7 +13,7 @@ using Xunit;
 namespace FanControl.LianLi.Tests.Plugin;
 
 /// <summary>
-/// The plugin as FanControl actually drives it: a new plugin object on every refresh, sharing one
+/// The plugin as FanControl drives it: a new plugin object on every refresh, sharing one
 /// process; Close only for an instance that registered sensors; Update on the host's own thread.
 /// </summary>
 public sealed class LianLiPluginLifecycleTests {
@@ -55,7 +55,7 @@ public sealed class LianLiPluginLifecycleTests {
     [Fact]
     public void AnInstanceFanControlNeverClosed_IsStoppedByTheNextOne() {
         // FanControl only closes an instance that registered sensors, so one that found nothing
-        // useful is simply dropped - with its worker still running.
+        // useful is dropped - with its worker still running.
         var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore());
         var enumerator = new FakeEnumerator(Sli("a"));
         using LianLiPlugin abandoned = NewPlugin(enumerator, runtime);
@@ -620,7 +620,7 @@ public sealed class LianLiPluginLifecycleTests {
     // A receiver's change delivered after Initialize and before Load has published what it
     // registered: the chain let go is remembered under its receiver, the chain taken is left to
     // the pair's memory, and neither asks for a refresh, since Load registers the chain under
-    // whoever the memory names when it runs. The FLEX chain tests reach this from the receiver's
+    // whichever the memory names when it runs. The FLEX chain tests reach this from the receiver's
     // own worker, which may or may not beat Load; this is the same callback, delivered by hand.
     [Fact]
     public void AFlexReceiversChange_BeforeLoadHasPublished_IsRememberedAndAsksForNoRefresh() {
@@ -664,7 +664,7 @@ public sealed class LianLiPluginLifecycleTests {
     }
 
     // A device the pair first hears while Load is registering a later controller - after the pair's
-    // own registration, before Load published what it registered: nobody registers it, and the
+    // own registration, before Load published what it registered: nothing registers it, and the
     // worker's callback finds nothing published to compare against. Load's check of the memory
     // after publishing is what catches it (a claim remembered before the publication is in the
     // memory Load reads after it), or, had the claim come after, the callback's own check would.
@@ -783,7 +783,7 @@ public sealed class LianLiPluginLifecycleTests {
     // build hears a group before Load runs: the stand-in exposes nothing, the memory has the
     // group's sensors, and Load asks for the refresh that registers them. Nothing else is
     // registered, so FanControl would never hear that refresh; the placeholder is registered for
-    // the correction already pending, exactly as for a device still to come.
+    // the correction already pending, as for a device still to come.
     [Fact]
     public void APlaceholder_WhenNothingRegisters_ButACorrectionIsAlreadyWanted() {
         var store = new FakeRememberedControllerStore();
@@ -1085,7 +1085,7 @@ public sealed class LianLiPluginLifecycleTests {
         second.Close();
 
         // The earlier stand-in's background rebuild may still be running, and a controller whose
-        // build is in flight is deliberately kept; the first scan with none running lets it go.
+        // build is in flight is kept; the first scan with none running lets it go.
         clock.Advance(TimeSpan.FromDays(2));
         // (Kept, it is still pruned: its sensors go before the controller itself does.)
         Assert.True(SpinWait.SpinUntil(() => {
@@ -1100,7 +1100,7 @@ public sealed class LianLiPluginLifecycleTests {
         after.Close();
     }
 
-    // A build that outlives its scan keeps its index: a later scan does not hand it to another
+    // A build that outlives its scan keeps its index: a later scan does not give it to another
     // controller, so the late result and that controller never collide.
     [Fact]
     public void ABuildStillRunning_KeepsItsIndex_FromTheNextScansControllers() {
@@ -1223,7 +1223,7 @@ public sealed class LianLiPluginLifecycleTests {
     // instance's scan ran under, and only while that instance owns the worker: once it has closed
     // and the next instance has read the saved controllers, it opens nothing, so it can never claim
     // a device at a guessed index the file gives another controller, nor hold the device against
-    // the next instance's scan for an open nobody would adopt.
+    // the next instance's scan for an open no scan would adopt.
     [Fact]
     public void ARebuildFromAnInstanceThatHasClosed_OrOfAnEarlierNumbering_OpensNothing() {
         var store = new FakeRememberedControllerStore { UnreadableLoads = 1 };
@@ -1321,9 +1321,9 @@ public sealed class LianLiPluginLifecycleTests {
         plugin.Close();
     }
 
-    // A pair that only ever hears devices it does not drive - a neighbour's kit in range - waits
+    // A pair that only hears devices it does not drive - a neighbour's kit in range - waits
     // while the process that first saw it runs, a refresh included, and not in any process after: the
-    // placeholder must not stay for good.
+    // placeholder must not stay indefinitely.
     [Fact]
     public void APlaceholder_ForAPairHearingOnlyAnotherMastersDevices_OnlyInTheProcessThatFirstSawIt() {
         byte[] foreign = WirelessProtocolTests.Record(
@@ -1493,7 +1493,7 @@ public sealed class LianLiPluginLifecycleTests {
 
     // A build started while the saved controllers could not be read was numbered without them. When
     // it finishes after a later scan has read them, it is not remembered at its guessed index - that
-    // could be another controller's for good - and the next scan builds it under the saved numbering.
+    // could be another controller's from then on - and the next scan builds it under the saved numbering.
     [Theory]
     [InlineData(true, true)]
     [InlineData(true, false)]

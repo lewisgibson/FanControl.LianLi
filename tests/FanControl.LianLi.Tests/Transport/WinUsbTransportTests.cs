@@ -187,7 +187,7 @@ public class WinUsbTransportTests {
     }
 
     // The receiver's write is given L-Connect's 2000 ms pipe timeout (WinUsbLed.SendAndRead), so
-    // the bound around the call is that plus the margin, or a write inside its window would be
+    // the bound around the call is that and the margin, or a write inside its window would be
     // given up on and the handle faulted; the dongles and the pump keep their second.
     [Fact]
     public void Write_UnderTheFlexReceiverPolicy_IsBoundedBeyondItsTwoSecondPipeTimeout() {

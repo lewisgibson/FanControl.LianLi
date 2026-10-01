@@ -64,7 +64,7 @@ public class FanControllerTests {
     // The control/RPM sensor identifiers are the contract with a user's saved FanControl config:
     // FanControl binds every fan curve to these exact strings. If a change alters an identifier, the
     // binding to it silently breaks - the curve now points at an id nothing exposes. (Auto-hide
-    // deliberately stops exposing an *empty* channel, which is safe: FanControl greys that one
+    // stops exposing an *empty* channel, which is safe: FanControl greys that one
     // binding out and re-links it if the fan returns, leaving the rest of the config intact - so
     // hiding an empty slot is fine, but *re-keying* a populated channel is not.) These are pinned so
     // a change that re-keys a control fails a test loudly BEFORE it ships. Do not "fix" this test by
@@ -104,7 +104,7 @@ public class FanControllerTests {
     [Fact]
     public void IsChannelPopulated_DefaultsToAllShown_BeforeDetection() {
         // Until DetectPopulation runs, every channel is shown - the controller is never hidden by
-        // default, so a controller whose probe never runs (or faults) still surfaces all channels.
+        // default, so a controller whose probe never runs (or faults) still shows all channels.
         var (controller, _, _) = NewSlController();
 
         for (int channel = 0; channel < 4; channel++) {
@@ -246,7 +246,7 @@ public class FanControllerTests {
         controller.ApplyPending();
         transport.Clear();
 
-        // The device is back but still refuses writes: the fault surfaces to the worker and the
+        // The device is back but still refuses writes: the fault reaches the worker and the
         // generation stays unrecorded, so the whole replay runs again once writes succeed.
         transport.Generation = 1;
         transport.FailFeatures = true;
@@ -298,7 +298,7 @@ public class FanControllerTests {
     // setup is replayed and recorded, and the look alone stays owed, tried again with the next
     // keepalive re-send until it succeeds.
     [Fact]
-    public void ApplyPending_ALookTheDeviceRefused_StaysOwedOnItsOwn_AndIsTriedAgainOnTheKeepaliveCadence() {
+    public void ApplyPending_ALookTheDeviceRefused_StaysOwedOnItsOwn_AndIsTriedAgainOnTheKeepaliveInterval() {
         var (controller, transport, clock) = NewSlController();
         int replays = 0;
         controller.ReplayOnReconnect(() => ++replays >= 2);
@@ -390,7 +390,7 @@ public class FanControllerTests {
         controller.PollRpm();
 
         // L-Connect primes the device before every RPM read; the primer (a feature report) must be
-        // sent so the device refreshes its input report rather than returning the stale idle buffer.
+        // sent so the device refreshes its input report instead of returning the stale idle buffer.
         Assert.Single(transport.Features);                                // exactly one primer per poll
         Assert.Equal(new byte[] { 0xE0, 0x50, 0x00 }, transport.Features[0]); // the transport pads to the feature length
         Assert.Equal(1, transport.ReadCount);                            // and the read happened

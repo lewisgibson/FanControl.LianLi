@@ -12,7 +12,7 @@ internal interface IDeviceEnumerator {
     /// Locate every connected device whose vendor and product ids both
     /// appear in the supplied allow-lists. Throws when the scan cannot complete
     /// in bounded time (a device that has stopped answering Windows), so the
-    /// caller can fail this scan and let the host retry rather than block.
+    /// caller can fail this scan and let the host retry instead of blocking.
     /// </summary>
     IReadOnlyList<LocatedDevice> Locate(
         IReadOnlyList<int> vendorIds,

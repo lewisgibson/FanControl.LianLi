@@ -6,7 +6,7 @@ namespace FanControl.LianLi.Transport;
 
 /// <summary>
 /// <see cref="IThreadCanceller"/> over kernel32. Elsewhere - the unit suite also runs on Linux -
-/// there is no Win32 thread to cancel, so it hands out no handle and the timeout path skips the
+/// there is no Win32 thread to cancel, so it returns no handle and the timeout path skips the
 /// cancel.
 /// </summary>
 // Excluded from coverage: nothing here but the P/Invoke calls themselves. The handshake that
@@ -16,7 +16,7 @@ internal sealed class WindowsThreadCanceller : IThreadCanceller {
     // CancelSynchronousIo requires THREAD_TERMINATE on the thread whose I/O it cancels.
     private const uint ThreadTerminate = 0x0001;
 
-    /// <summary>The one instance; it holds no state.</summary>
+    /// <summary>The single instance; it holds no state.</summary>
     public static readonly WindowsThreadCanceller Instance = new WindowsThreadCanceller();
 
     private WindowsThreadCanceller() {

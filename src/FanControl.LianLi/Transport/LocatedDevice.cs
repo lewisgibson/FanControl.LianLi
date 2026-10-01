@@ -2,7 +2,7 @@ namespace FanControl.LianLi.Transport;
 
 /// <summary>
 /// A located device - a HID interface, or one of the WinUSB-bound L-Wireless dongles - as the
-/// identifying ids and path the enumerator opens a transport on, plus what the scan read about a HID
+/// identifying ids and path the enumerator opens a transport on, and what the scan read about a HID
 /// interface. Plain data: nothing here holds a handle, so a located device can be kept, remembered
 /// across runs and compared without owning anything.
 /// </summary>
@@ -35,7 +35,7 @@ internal sealed class LocatedDevice {
     /// The Windows ContainerId of the physical device, or null when it could not be resolved. Every
     /// HID interface a single controller exposes shares this GUID and it differs across physical
     /// controllers, so it is the de-duplication key (see <see cref="HidDeviceDeduplicator"/>). The
-    /// USB serial is deliberately not used: the Lian Li Uni controllers all report the same
+    /// USB serial is not used: the Lian Li Uni controllers all report the same
     /// firmware-fixed serial, which would wrongly collapse distinct controllers into one.
     /// </summary>
     public string? ContainerId { get; }
@@ -51,7 +51,7 @@ internal sealed class LocatedDevice {
     /// The HID interface as the scan read it - its report capabilities - which the enumerator opens a
     /// transport with. Null for a WinUSB device (the L-Wireless dongles), for a HID interface whose
     /// capabilities the scan could not read, and for a device remembered from an earlier run; the
-    /// enumerator reads a HID interface's capabilities afresh when it opens one of those.
+    /// enumerator reads a HID interface's capabilities again when it opens one of those.
     /// </summary>
     public HidInterface? Device { get; }
 }

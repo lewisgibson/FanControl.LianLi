@@ -6,7 +6,7 @@ namespace FanControl.LianLi.Devices;
 /// that races USB re-enumeration can return a partial buffer); both decode to nonsense values far
 /// above anything a real fan reaches - the documented idle case is ~50000 rpm. Rejecting an
 /// implausible value, and keeping the last good reading, stops the host ever seeing the garbage.
-/// This mirrors how L-Connect stays robust: it validates the report before trusting it, rather
+/// This follows L-Connect: it validates the report before trusting it, rather
 /// than decoding whatever bytes arrive.
 /// </summary>
 internal static class ChannelReadDecision {
@@ -20,7 +20,7 @@ internal static class ChannelReadDecision {
 
     /// <summary>
     /// Decide whether a decoded RPM is a believable reading (<c>0</c>..<see cref="MaxPlausibleRpm"/>)
-    /// and should overwrite the cached value, rather than idle/partial-buffer garbage to be ignored.
+    /// and should overwrite the cached value, not idle/partial-buffer garbage to be ignored.
     /// </summary>
     public static bool IsPlausible(float rpm) => rpm >= 0f && rpm <= MaxPlausibleRpm;
 }

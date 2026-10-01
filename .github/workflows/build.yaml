@@ -44,7 +44,7 @@ jobs:
               # variant 'argb' defines ENABLE_ARGB (the startup ARGB-sync write) and
               # variant 'lighting' defines ENABLE_LIGHTING (the startup L-Connect-look
               # replay); the two are mutually exclusive, and a given matrix leg sets at
-              # most one. The assembly is deliberately NOT renamed here: the tests resolve
+              # most one. The assembly is NOT renamed here: the tests resolve
               # [InlineData] typeof(...) protocol arguments against this assembly, and
               # renaming it breaks that resolution. The renamed shippable artifacts are
               # built in the release workflow.
@@ -57,5 +57,5 @@ jobs:
               # property here (it would be a no-op against the already-built test DLL).
               # This is the step that runs each variant's gated tests, the lighting ones
               # included. CollectCoverage holds each variant to full line and branch coverage of the code
-              # compiled into it; the threshold lives in the test project.
+              # compiled into it; the threshold is in the test project.
               run: dotnet test -c Release --no-build -p:CollectCoverage=true

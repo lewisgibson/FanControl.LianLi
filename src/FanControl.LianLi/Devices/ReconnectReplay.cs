@@ -7,10 +7,10 @@ namespace FanControl.LianLi.Devices;
 /// (<see cref="IFanDevice.ReplayOnReconnect"/>): the Lighting build's saved look. A controller
 /// owes it from the moment it sets a reopened device up again, and it stays owed until a replay
 /// reports that it was done, so a look the device refused, or that was cut short by the device
-/// going away again, is tried again rather than recorded as replayed. A refused look is tried
-/// again on the keepalive cadence (<see cref="ChannelWriteDecision.RefreshInterval"/>), like the
-/// duty, so a device that rejects its look for good costs a line in the log every fifteen seconds
-/// rather than every tick; a look owed afresh, because the device came back again, is tried at
+/// going away again, is tried again not recorded as replayed. A refused look is tried
+/// again on the keepalive interval (<see cref="ChannelWriteDecision.RefreshInterval"/>), like the
+/// duty, so a device that keeps rejecting its look costs a line in the log every fifteen seconds
+/// instead of every tick; a look owed again, because the device came back again, is tried at
 /// once. Worker-thread only, like the controller that owns it.
 /// </summary>
 internal sealed class ReconnectReplay {

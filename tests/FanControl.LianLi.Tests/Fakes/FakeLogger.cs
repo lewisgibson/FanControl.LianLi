@@ -6,7 +6,7 @@ namespace FanControl.LianLi.Tests.Fakes;
 /// <summary>
 /// Collects log lines. The worker thread writes to this while the test thread reads it - a plugin
 /// under test has a live keepalive loop behind it - so writes are locked and <see cref="Messages"/>
-/// hands back a snapshot rather than the live list.
+/// returns a snapshot, not the live list.
 /// </summary>
 internal sealed class FakeLogger : ILog {
     private readonly object _gate = new object();

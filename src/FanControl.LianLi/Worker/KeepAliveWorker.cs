@@ -17,7 +17,7 @@ namespace FanControl.LianLi.Worker;
 /// when the call returns.
 /// </summary>
 internal sealed class KeepAliveWorker : IDisposable {
-    // The controllers' own cadence: RPM once a second, the keepalive re-assert every 15 s.
+    // The controllers' own timing: RPM once a second, the keepalive re-assert every 15 s.
     private const int DefaultTickIntervalMs = 1000;
 
     // How long Dispose waits for every loop to finish, together. FanControl waits for Close.
@@ -65,7 +65,7 @@ internal sealed class KeepAliveWorker : IDisposable {
     }
 
     /// <summary>
-    /// Tick every controller now rather than at its next interval, because a target changed. Safe
+    /// Tick every controller now instead of at its next interval, because a target changed. Safe
     /// from any thread until <see cref="Dispose"/> is called; the caller must not wake a worker it
     /// has started disposing.
     /// </summary>

@@ -32,7 +32,7 @@ internal sealed class WindowsDeviceEnumerator : IDeviceEnumerator {
     // one still re-enumerating. Only a wedged device runs it out - the same reasoning as the scan.
     private const int OpenTimeoutMilliseconds = 2000;
 
-    // The scan's key in the call gate. It reaches every device rather than one, so a scan still stuck
+    // The scan's key in the call gate. It reaches every device, not one, so a scan still stuck
     // holds back only the next scan; no device path can take this form.
     private const string ScanKey = "the device scan";
 
@@ -55,7 +55,7 @@ internal sealed class WindowsDeviceEnumerator : IDeviceEnumerator {
     }
 
     /// <summary>
-    /// The enumerator over the supplied native surfaces, gate and delay. Every transport it opens
+    /// The enumerator over the supplied native APIs, gate and delay. Every transport it opens
     /// shares <paramref name="calls"/>, so a call still stuck on a device path holds back both the
     /// transport's retries and the next open of that path.
     /// </summary>
@@ -96,7 +96,7 @@ internal sealed class WindowsDeviceEnumerator : IDeviceEnumerator {
         // Nothing to cancel by handle - the scan opens and closes its own handles as it goes; the bound
         // cancels a blocked call by thread, and the walk stops at its next native call once the bound
         // has given up on it. A scan that ran out may still finish on its abandoned thread and assign
-        // 'located' after this returns; nobody reads it then.
+        // 'located' after this returns; nothing reads it then.
         bool completed = _calls.TryRun(
             ScanKey,
             "device scan",

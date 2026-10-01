@@ -91,7 +91,7 @@ public class ReconnectingFanDeviceTests {
         Assert.Contains(logger.Messages, m => m.Contains("C0 reconnect attempt 1 failed: not yet"));
         Assert.False(device.IsConnected);
 
-        // The next offers are skipped rather than hammering a device that is not there...
+        // The next offers are skipped instead of hammering a device that is not there...
         for (int offer = 0; offer < 10; offer++) {
             device.ApplyPending();
         }
@@ -111,7 +111,7 @@ public class ReconnectingFanDeviceTests {
 
         device.SetTarget(0, 40);
         device.SetTarget(1, 60);
-        device.ReleaseChannel(1); // released again before the rebuild: nothing to hand over
+        device.ReleaseChannel(1); // released again before the rebuild: nothing to pass on
         Assert.Empty(built.Targets);
 
         device.ApplyPending();
@@ -301,7 +301,7 @@ public class ReconnectingFanDeviceTests {
     }
 
     // A TL hub that came back with one of its remembered fans missing, which answers a poll later:
-    // the controller adds it, and the stand-in wrapped around it matches it and hands it its target.
+    // the controller adds it, and the stand-in wrapped around it matches it and gives it its target.
     [Fact]
     public void ARememberedTlFanThatAnswersLater_GetsItsReadingAndItsTarget() {
         static byte[] Handshake(params (int Port, int Fan, int Rpm)[] fans) {

@@ -6,7 +6,7 @@ using FanControl.LianLi.Plugin;
 
 namespace FanControl.LianLi.Tests.Fakes;
 
-// Keeps what is saved in memory, and hands back whatever a test put in it.
+// Keeps what is saved in memory, and returns whatever a test put in it.
 internal sealed class FakeRememberedControllerStore : IRememberedControllerStore {
     public List<StoredController> Stored { get; } = new List<StoredController>();
 

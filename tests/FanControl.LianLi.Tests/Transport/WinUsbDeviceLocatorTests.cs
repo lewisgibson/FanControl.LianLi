@@ -195,7 +195,7 @@ public class WinUsbDeviceLocatorTests {
         };
 
         Assert.Equal(TransmitterPath, Locator(api, log).Locate(Vendors, Products, CancellationToken.None)[0].DevicePath);
-        Assert.Empty(log.Messages); // the plural value simply being absent is not a failure
+        Assert.Empty(log.Messages); // the plural value being absent is not a failure
     }
 
     [Fact]

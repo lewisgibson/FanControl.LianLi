@@ -12,7 +12,7 @@ namespace FanControl.LianLi.Devices;
 /// single stray in-range garbage read cannot promote an empty channel, and a stale idle-buffer read
 /// or two at startup cannot demote a real one. If NO channel looks populated (fans not spun up, or
 /// every probe was garbage), the result is inconclusive and every channel is shown, so a controller
-/// is never hidden outright.
+/// is never hidden as a whole.
 /// </summary>
 internal static class ChannelPopulationDecision {
     /// <summary>

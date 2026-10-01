@@ -71,7 +71,7 @@ public sealed class ControllerLoopTests {
     [Fact]
     public void WakingAndStopping_WhileTheLoopReleasesItself_NeverTouchesADisposedEvent() {
         // The loop's thread disposes its event as its last act; a wake or a stop from another thread
-        // that lands in that moment must be ignored rather than set a disposed handle.
+        // that lands in that moment must be ignored instead of setting a disposed handle.
         for (int round = 0; round < 200; round++) {
             var device = new FakeFanDevice("c0");
             var loop = new ControllerLoop(0, device, new FakeLogger(), 1);

@@ -13,7 +13,7 @@ namespace FanControl.LianLi.Tests.Transport;
 /// kernel may still complete into them.
 /// </summary>
 public class HidOverlappedTransferTests {
-    // ERROR_GEN_FAILURE: a start the driver refused outright.
+    // ERROR_GEN_FAILURE: a start the driver refused at once.
     private const int ErrorGenFailure = 31;
 
     // ERROR_NOT_ENOUGH_MEMORY: CreateEventW failing.
@@ -124,7 +124,7 @@ public class HidOverlappedTransferTests {
         Assert.False(transfer.Wait(500));
         api.Complete();
         Assert.True(transfer.Wait(500));
-        // Seen once, the completion is remembered rather than waited for again.
+        // Seen once, the completion is remembered, not waited for again.
         Assert.True(transfer.Wait(500));
         Assert.Equal(3, api.Calls.Count(call => call == "WaitForSingleObject 500"));
 
@@ -247,7 +247,7 @@ public class HidOverlappedTransferTests {
 
         transfer.Dispose();
 
-        // The kernel may still complete into all three, so they are kept rather than freed under it.
+        // The kernel may still complete into all three, so they are kept, not freed under it.
         Assert.Equal(3, api.Live.Count);
         Assert.Empty(api.Released);
     }

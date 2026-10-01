@@ -13,7 +13,7 @@ namespace FanControl.LianLi.Tests.Protocol;
 /// fan-group mode, the effect report (a looked-up wire byte and the Lowest->Off brightness fold),
 /// the apply order, and that an unrecognised mode leaves its port untouched. The motherboard
 /// ARGB-sync hand-over is asserted once for every family against the fan protocol's own report,
-/// and each family's merge sequence and (on the v2 families) merge-order report byte for byte.
+/// and each family's merge sequence and (on the v2 families) merge-order report, every byte of them.
 /// </summary>
 public sealed class UniFanLightingEncoderTests
 {
@@ -26,7 +26,7 @@ public sealed class UniFanLightingEncoderTests
     {
         // L-Connect's Init and resume with the controller's "sync to motherboard" switch on: the
         // fan quantity (and on the v2 families the merge order), then the family's ARGB-sync
-        // register written 1, and no look or frame. The sync report is byte for byte the one the
+        // register written 1, and no look or frame. The sync report is identical to the one the
         // ARGB build sends through the fan protocol.
         (UniFanLightingProfile profile, IFanProtocol protocol) = family switch
         {

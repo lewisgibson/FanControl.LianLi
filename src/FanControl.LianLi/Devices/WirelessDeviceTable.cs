@@ -17,11 +17,11 @@ namespace FanControl.LianLi.Devices;
 /// its receiver slot remembered and its targets started from what it reports;</item>
 /// <item>a device's countdown restarts whenever it is heard, and counts down on every read for
 /// every device but a Lancool 217, bound or not; every one whose countdown has run out is dropped
-/// from the table before the read goes out, so a device that comes back is appended afresh and
+/// from the table before the read goes out, so a device that comes back is appended as new and
 /// numbered last, as L-Connect numbers it;</item>
 /// <item>a bound device that shares its receiver slot with another of this master's devices more than
 /// four reads running is either a ghost - an address that differs from the other's only in a first
-/// byte of 1, which L-Connect removes for good - or a conflict L-Connect would settle by unbinding.</item>
+/// byte of 1, which L-Connect removes and never re-adds - or a conflict L-Connect would resolve by unbinding.</item>
 /// </list>
 ///
 /// Where L-Connect would unbind a device the plugin never does (it never sends a bind index of 0):
@@ -56,7 +56,7 @@ internal sealed class WirelessDeviceTable {
 
     // The addresses of bound devices dropped from the table and not heard since, so that the log
     // tells one heard again from one never heard before. An address leaves it only when its device
-    // returns, so one dropped for good stays for the controller's life.
+    // returns, so one dropped as a ghost stays listed for the controller's life.
     private readonly HashSet<string> _droppedWhileBound = new HashSet<string>(StringComparer.Ordinal);
     private readonly int _index;
     private readonly ILog _log;
@@ -135,8 +135,8 @@ internal sealed class WirelessDeviceTable {
 
     /// <summary>
     /// A cycle with no list to read, because the master is not known: L-Connect reads no list then,
-    /// so none of its own countdowns move, but the plugin still counts the read as one nobody was
-    /// heard in, so a device is not shown live for ever on readings nobody is refreshing.
+    /// so none of its own countdowns move, but the plugin still counts the read as one in which nothing was
+    /// heard in, so a device is not shown live for ever on readings nothing is refreshing.
     /// </summary>
     public void MissRead() {
         foreach (WirelessDevice device in _devices) {
@@ -148,7 +148,7 @@ internal sealed class WirelessDeviceTable {
 
     /// <summary>
     /// Apply one list read to the table. <paramref name="list"/> is null when the read failed or the
-    /// reply was not a list, which still counts as a read nobody was heard in.
+    /// reply was not a list, which still counts as a read in which nothing was heard.
     /// </summary>
     public void Apply(WirelessDeviceList? list, byte[] masterMac, long masterClockMilliseconds) {
         if (masterMac is null) {
@@ -239,7 +239,7 @@ internal sealed class WirelessDeviceTable {
             _devices.Remove(ghost);
             _log.Write(string.Format(
                 CultureInfo.InvariantCulture,
-                "W{0}:{1} is a ghost of another device's address sharing its receiver slot; dropped for good, as L-Connect does",
+                "W{0}:{1} is a ghost of another device's address sharing its receiver slot; dropped and not added again, as L-Connect does",
                 _index,
                 ghost.MacText));
         }

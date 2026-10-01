@@ -58,7 +58,7 @@ public class ProtocolEncodingTests {
     // ---- start/stop toggle: only the floored (v2/SL-Infinity) families act on it, and only at 0%.
     // Enabled 0% -> the stop value 1 (stops 0rpm-capable fans); disabled 0% -> the 10 spin floor
     // (never sends the stop value the user did not enable). 1-100 are identical either way. The raw
-    // v1 families ignore the flag entirely.
+    // v1 families ignore the flag.
 
     [Theory]
     [InlineData(0, new byte[] { 224, 32, 0, 10 })]  // start/stop off: 0% floors at 10, not the stop value 1

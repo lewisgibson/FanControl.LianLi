@@ -26,7 +26,7 @@ internal sealed class WindowsWinUsbApi : IWinUsbApi {
     // WinUsb_SetPipePolicy PIPE_TRANSFER_TIMEOUT: milliseconds a transfer on that pipe may take.
     private const uint PipeTransferTimeoutPolicy = 0x03;
 
-    /// <summary>The one instance; it holds no state.</summary>
+    /// <summary>The single instance; it holds no state.</summary>
     public static readonly WindowsWinUsbApi Instance = new WindowsWinUsbApi();
 
     private WindowsWinUsbApi() {

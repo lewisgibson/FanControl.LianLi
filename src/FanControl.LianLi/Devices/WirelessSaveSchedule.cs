@@ -68,8 +68,8 @@ internal sealed class WirelessSaveSchedule {
 
     /// <summary>Whether the periodic save is due now. Taking it moves the start mark a month on, as L-Connect does.</summary>
     public bool TakePeriodicSave(DateTime nowUtc) {
-        // The start mark is deliberately moved into the future once taken (a month on, as L-Connect
-        // does), so it is compared plainly; the other marks are only ever in the past.
+        // The start mark is moved into the future once taken (a month on, as L-Connect
+        // does), so it is compared plainly; the other marks are only in the past.
         if ((nowUtc - _startUtc > FirstPeriodicSave || ClockSpan.Since(nowUtc, _lastSaveUtc) > PeriodicSaveInterval)
             && ClockSpan.Since(nowUtc, _lastEffectUtc) > QuietAfterEffect) {
             _startUtc = nowUtc.AddMonths(1);

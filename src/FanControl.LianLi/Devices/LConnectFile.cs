@@ -10,7 +10,7 @@ namespace FanControl.LianLi.Devices;
 /// <summary>
 /// Reads one of L-Connect's saved documents. Everything L-Connect writes under its ProgramData
 /// directory - the per-controller lighting configs, the start/stop profiles, the wireless device
-/// settings - is gzipped UTF-8 JSON, so the decompress-and-parse step lives here once rather than
+/// settings - is gzipped UTF-8 JSON, so the decompress-and-parse step is here once instead of
 /// in each reader. The decompressed size is capped: these documents are kilobytes, and a file that
 /// claims otherwise is either corrupt or hostile, and either way is not worth expanding.
 /// </summary>

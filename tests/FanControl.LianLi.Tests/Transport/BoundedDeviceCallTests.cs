@@ -53,7 +53,7 @@ public class BoundedDeviceCallTests {
 
             // The call blocks past the timeout; TryRun must give up and invoke onTimeout. The real
             // transport's onTimeout cancels the I/O so the blocked native call returns - here releasing
-            // the gate stands in for that, letting the abandoned thread unwind and the test end cleanly.
+            // the gate stands in for that, letting the abandoned thread unwind and the test end.
             bool completed = BoundedDeviceCall.TryRun(
                 _ => { running.Set(); release.Wait(CancellationToken.None); },
                 50,
@@ -286,9 +286,9 @@ public class BoundedDeviceCallTests {
     public void TryRun_TimesOutBeforeTheThreadStarts_TheCallNeverRuns_AndTheThreadClosesItsHandle() {
         // The race: the caller gives up while the thread is still opening its own handle. The caller
         // finds the slot empty, so has nothing to cancel or close. The thread then finds the slot
-        // claimed: it closes the handle itself, and it does not start a call nobody can cancel now.
+        // claimed: it closes the handle itself, and it does not start a call nothing can cancel now.
         // It reports the call returned only once it has decided, so waiting for that proves the call
-        // was never started rather than merely not started yet.
+        // was never started, as opposed to not started yet.
         using var gate = new ManualResetEventSlim(false);
         using var returned = new ManualResetEventSlim(false);
         var threads = new FakeThreadCanceller { OpenGate = gate };
@@ -351,9 +351,9 @@ public class BoundedDeviceCallTests {
 
     [Fact]
     public void TryRun_CallThrowsAfterTheCallerGaveUp_ReportsTheFailureFromTheAbandonedThread_ThenThatItReturned() {
-        // The caller has returned before the call throws, so nobody can rethrow it: it must reach the
+        // The caller has returned before the call throws, so nothing can rethrow it: it must reach the
         // late-failure sink instead of vanishing with the thread. Only then is it reported returned,
-        // from the same thread, so whoever hears it returned has already heard how it ended.
+        // from the same thread, so whatever hears it returned has already heard how it ended.
         AbandonedCallScenario.Run(() => {
             using var release = new ManualResetEventSlim(false);
             using var running = new ManualResetEventSlim(false);

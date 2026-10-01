@@ -4,7 +4,7 @@ namespace FanControl.LianLi.Protocol;
 
 /// <summary>
 /// Pure encoder/decoder for the pump of the HydroShift II OLED Curve AIO. The pump hangs off the
-/// cooler's lighting MCU (vendor 0x0416, pid 0x8051), a WinUSB device rather than a HID one, and
+/// cooler's lighting MCU (vendor 0x0416, pid 0x8051), a WinUSB device, not a HID one, and
 /// L-Connect drives it through its lcd207 SDK (<c>WinUsbHS2</c> and <c>HS2Controller</c>, from
 /// which every byte here was taken). Each command is one eight-byte packet whose first byte is the
 /// command, and the MCU answers every command with one interrupt packet that echoes the command
@@ -53,7 +53,7 @@ internal static class HydroShiftCurveProtocol {
 
     // HS2Controller.DataPoints, in its order (fastest first): the target rpm and the output value
     // the pump is sent for it. The rpm axis is what the pump was measured to run at for each output
-    // value, so the table is not evenly spaced and is interpolated rather than fitted.
+    // value, so the table is not evenly spaced and is interpolated, not fitted.
     private static readonly int[] TableRpm =
     {
         2735, 2703, 2651, 2592, 2537, 2477, 2420, 2365, 2305, 2248, 2188,

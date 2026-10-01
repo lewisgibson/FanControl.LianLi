@@ -2,8 +2,8 @@ namespace FanControl.LianLi.Protocol;
 
 /// <summary>
 /// The Lian Li Uni controller families this plugin drives. Unknown product ids
-/// are simply absent from the catalog and produce no controller, so there is
-/// deliberately no <c>Unknown</c> member.
+/// are absent from the catalog and produce no controller, so there is
+/// no <c>Unknown</c> member, and none is needed.
 /// </summary>
 internal enum DeviceFamily {
     /// <summary>Uni Hub (legacy, 0x7750) and Uni SL (0xA100).</summary>

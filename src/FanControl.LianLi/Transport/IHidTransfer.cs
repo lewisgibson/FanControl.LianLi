@@ -11,7 +11,7 @@ namespace FanControl.LianLi.Transport;
 /// owns. So <see cref="IDisposable.Dispose"/> releases that memory only once <see cref="Wait"/> has seen
 /// the transfer complete. A caller that gives up on a transfer whose completion it never saw - a
 /// cancel the driver did not finish in time - calls <see cref="ReleaseWhenComplete"/> first, so the
-/// memory is freed when the kernel does complete it, rather than freed early (a late completion
+/// memory is freed when the kernel does complete it, not freed early (a late completion
 /// would then corrupt it) or kept for ever.
 /// </summary>
 internal interface IHidTransfer : IDisposable {

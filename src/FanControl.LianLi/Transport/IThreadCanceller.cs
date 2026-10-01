@@ -4,7 +4,7 @@ namespace FanControl.LianLi.Transport;
 
 /// <summary>
 /// The three thread operations <see cref="BoundedDeviceCall"/> needs to cancel a native call that
-/// has stopped answering. A seam so the handle handshake between the caller and the throwaway
+/// has stopped answering. An interface so the handle handshake between the caller and the throwaway
 /// thread - which decides who closes the handle when the two race - can be tested without Windows.
 /// </summary>
 internal interface IThreadCanceller {

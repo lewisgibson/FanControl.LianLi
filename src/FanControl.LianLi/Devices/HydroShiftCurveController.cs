@@ -9,13 +9,13 @@ namespace FanControl.LianLi.Devices;
 /// <summary>
 /// Coordinates the pump of one HydroShift II OLED Curve AIO (vendor 0x0416, pid 0x8051): one
 /// channel, the pump, and the liquid temperature as an <see cref="ITemperatureSource"/>. Like
-/// <see cref="Galahad2Controller"/> the FanControl-thread surface only mutates locked in-memory
+/// <see cref="Galahad2Controller"/> the FanControl-thread methods only mutate locked in-memory
 /// state and every USB transfer happens on the worker-thread methods, over the WinUSB transport
 /// the L-Wireless dongles use: each command is written and its one-packet reply read, as
 /// L-Connect's <c>WinUsbHS2.SendAndReadLed</c> does. A status or tachometer reply is the data, so
 /// one that does not come, or echoes another command, fails or is ignored; the reply to a set-pump
 /// or sync command is one L-Connect discards, so one that does not come is logged and nothing
-/// more. The pump is re-sent every two seconds (<see cref="ResendInterval"/>), the cadence of
+/// more. The pump is re-sent every two seconds (<see cref="ResendInterval"/>), the interval of
 /// L-Connect's own pump control timer, and the status poll re-asserts software control if the pump
 /// reports it has gone back to the motherboard's PWM header. FanControl's duty spans 1600 to 2400
 /// rpm, the range every ordinary L-Connect pump mode drives, through
@@ -28,7 +28,7 @@ internal sealed class HydroShiftCurveController : IFanDevice, ITemperatureSource
 
     // L-Connect's pump control timer sends the speed every two seconds (pumpSpeedControlInterval),
     // and nothing is known about how long the pump holds an output value with nothing driving it,
-    // so the plugin keeps that cadence rather than the fifteen seconds the other families refresh at.
+    // so the plugin keeps that interval instead of the fifteen seconds the other families refresh at.
     internal static readonly TimeSpan ResendInterval = TimeSpan.FromSeconds(2);
 
     private readonly int _index;
@@ -38,7 +38,7 @@ internal sealed class HydroShiftCurveController : IFanDevice, ITemperatureSource
 
     private readonly object _lock = new object();
     private int _target = -1;                  // commanded duty %, -1 = unassigned
-    private int _lastWritten = -2;             // last duty actually written
+    private int _lastWritten = -2;             // last duty written
     private DateTime _lastWriteUtc = DateTime.MinValue;
     private float _rpm;                        // last measured RPM
     private bool _rpmImplausible;              // last read rejected as garbage
@@ -57,7 +57,7 @@ internal sealed class HydroShiftCurveController : IFanDevice, ITemperatureSource
     private readonly ReconnectReplay _reconnectReplay;
 
     // Which optional replies are missing, and which data replies echo another command, so each is
-    // logged once per run rather than every second. Worker-thread only.
+    // logged once per run , not every second. Worker-thread only.
     private bool _setPumpReplyMissing;
     private bool _syncReplyMissing;
     private bool _statusForeign;
@@ -106,7 +106,7 @@ internal sealed class HydroShiftCurveController : IFanDevice, ITemperatureSource
     /// <inheritdoc />
     public void ReplayOnReconnect(Func<bool> replay) => _reconnectReplay.Register(replay);
 
-    // ---------- FanControl-thread surface (no I/O) ----------
+    // ---------- FanControl-thread methods (no I/O) ----------
 
     /// <summary>Set the commanded duty for the pump. The worker pushes it to hardware.</summary>
     public void SetTarget(int channel, int duty) {
@@ -192,7 +192,7 @@ internal sealed class HydroShiftCurveController : IFanDevice, ITemperatureSource
     /// Read the status (the liquid temperature and the sync state) and the tachometer, as
     /// L-Connect's pump info timer does every second, into the caches. A reply that echoes another
     /// command is a stale one and is ignored, logged once per run, so the caches keep their last
-    /// good values rather than take a tachometer's bytes for a temperature.
+    /// good values instead of taking a tachometer's bytes for a temperature.
     /// </summary>
     public void PollRpm() {
         byte[] statusReply = Exchange(HydroShiftCurveProtocol.EncodeStatusRequest());
@@ -234,7 +234,7 @@ internal sealed class HydroShiftCurveController : IFanDevice, ITemperatureSource
     }
 
     // A command whose reply L-Connect discards (the set-pump and sync commands: SendAndReadLed reads
-    // it into a buffer nobody looks at, and its Read hands back zeros for one that never comes). The
+    // it into a buffer nothing reads, and its Read returns zeros for one that never comes). The
     // reply is still read, to keep it out of the next exchange, but one that does not come within
     // the pipe timeout is logged once per run and does not fail the write, since the command went
     // out and whether this MCU answers these two at all is not known. A pipe that fails still throws.

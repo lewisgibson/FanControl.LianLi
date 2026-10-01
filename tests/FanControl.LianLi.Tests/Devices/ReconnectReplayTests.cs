@@ -9,7 +9,7 @@ namespace FanControl.LianLi.Tests.Devices;
 /// <summary>
 /// The work a controller owes its device after a reconnect: owed from the moment the device is
 /// back, done once the replay says so, kept owed while it says otherwise and tried again on the
-/// keepalive cadence, or at once when the device comes back again.
+/// keepalive interval, or at once when the device comes back again.
 /// </summary>
 public sealed class ReconnectReplayTests {
     private readonly FakeClock _clock = new FakeClock();
@@ -51,9 +51,9 @@ public sealed class ReconnectReplayTests {
     }
 
     // A look the device refused is tried again with the next keepalive re-send, not every tick,
-    // so a device that refuses it for good costs a log line every fifteen seconds.
+    // so a device that keeps refusing it costs a log line every fifteen seconds.
     [Fact]
-    public void AReplayThatReportsFailure_StaysOwed_AndIsTriedAgainOnTheKeepaliveCadence() {
+    public void AReplayThatReportsFailure_StaysOwed_AndIsTriedAgainOnTheKeepaliveInterval() {
         var replay = new ReconnectReplay(_clock);
         int runs = 0;
         replay.Register(() => runs++ >= 2);
@@ -76,7 +76,7 @@ public sealed class ReconnectReplayTests {
         Assert.False(replay.IsOwed);
     }
 
-    // The device came back again before the refused look was due: it is owed afresh, at once.
+    // The device came back again before the refused look was due: it is owed again, at once.
     [Fact]
     public void ADeviceBackAgain_HasTheReplayTriedAtOnce_HoweverRecentlyItFailed() {
         var replay = new ReconnectReplay(_clock);

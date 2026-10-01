@@ -4,7 +4,7 @@ using System;
 namespace FanControl.LianLi.Protocol;
 
 /// <summary>
-/// One encoded HID transfer in a lighting apply sequence: the exact report bytes plus
+/// One encoded HID transfer in a lighting apply sequence: the exact report bytes and
 /// whether it is sent as a feature report (effect / fan-quantity / frame-latch) or an
 /// output report (colour data). Produced by <see cref="SlInfinityLightingEncoder"/> and
 /// written verbatim by the replay; the bytes include the leading report id (0xE0).

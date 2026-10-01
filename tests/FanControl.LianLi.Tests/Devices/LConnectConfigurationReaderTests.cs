@@ -32,7 +32,7 @@ public sealed class LConnectConfigReaderTests : IDisposable
         }
         catch (IOException)
         {
-            // Best-effort temp cleanup; a locked file must not fail the test run.
+            // Temp cleanup that may fail; a locked file must not fail the test run.
         }
     }
 
@@ -150,7 +150,7 @@ public sealed class LConnectConfigReaderTests : IDisposable
     public void Read_ParsesAVisionFanLookWithNamedColoursAndItsScreenRing()
     {
         string folder = CreateFolder("vision0");
-        // Galahad2Vision.FanLightingSetting has Color1..Color4 rather than a Colors array, and its
+        // Galahad2Vision.FanLightingSetting has Color1..Color4 , not a Colors array, and its
         // ScreenLEDLightingSetting carries the static look under Static beside the dynamic ones.
         WriteGzip(folder, "fan", Setting("FanLEDLighting",
             "{\"Mode\":5,\"Brightness\":3,\"Speed\":2,\"Color1\":{\"A\":255,\"R\":1,\"G\":2,\"B\":3},\"Color2\":{\"R\":4,\"G\":5,\"B\":6},"

@@ -13,7 +13,7 @@ namespace FanControl.LianLi.Transport;
 /// Locates the wired controllers: the HID interfaces whose vendor and product id the plugin drives. The
 /// walk is the plugin's own - the configuration manager's list of present HID interfaces, then, per
 /// interface, a handle opened with no access rights, <c>HidD_GetAttributes</c> for its ids and
-/// <c>HidP_GetCaps</c> for its usage page and report lengths - on the scan's thread and nobody else's.
+/// <c>HidP_GetCaps</c> for its usage page and report lengths - on the scan's thread only.
 /// It takes no lock, queues no work and waits on nothing another component in the host shares, so a
 /// controller that wedges mid-scan costs this scan its deadline and nothing more: the bounded scan
 /// cancels the stuck call, and this walk checks the scan's token before each native call so an
@@ -21,7 +21,7 @@ namespace FanControl.LianLi.Transport;
 /// </summary>
 internal sealed class HidDeviceLocator {
     // ERROR_FILE_NOT_FOUND / ERROR_PATH_NOT_FOUND: nothing is listening on the path - the device is
-    // unplugged or has not re-enumerated yet - which an open of a remembered device reports plainly.
+    // unplugged or has not re-enumerated yet - which an open of a remembered device reports as such.
     private const int ErrorFileNotFound = 2;
     private const int ErrorPathNotFound = 3;
 
@@ -185,7 +185,7 @@ internal sealed class HidDeviceLocator {
     // several HID interfaces while keeping distinct controllers apart (even ones sharing a serial).
     // An unresolved id is a missing-metadata case the de-duplicator handles safely (it falls back to
     // the per-interface device path, which never collapses), so log a trace and locate the device
-    // either way rather than surface it as a fault.
+    // either way instead of reporting it as a fault.
     private string? TryGetContainerId(string path, CancellationToken token) {
         string? containerId = _containers.Resolve(path, token);
         if (containerId is null) {
@@ -200,7 +200,7 @@ internal sealed class HidDeviceLocator {
             CultureInfo.InvariantCulture, "  HID interface {0}: {1} failed (error {2}); passed over", path, operation, error));
 
     /// <summary>
-    /// The interface's capabilities: its report descriptor fetched (the one step that reaches the
+    /// The interface's capabilities: its report descriptor fetched (the only step that reaches the
     /// device), parsed, and released. A bounded call given up on while the fetch was out stops before
     /// the parse, and the descriptor is released either way. On failure <paramref name="error"/> is the
     /// fetch's Win32 error, or the parse's <c>HIDP_STATUS</c> code.

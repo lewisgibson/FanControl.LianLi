@@ -8,7 +8,7 @@ namespace FanControl.LianLi.Plugin;
 /// <summary>
 /// What a scan decided to build: the kind of controller and the located device(s) it runs over
 /// (one for a wired controller, the transmitter then the receiver for a wireless pair). It says
-/// what to build rather than holding a way to build it, because it outlives the plugin instance
+/// what to build, not a way to build it, because it outlives the plugin instance
 /// that made it: FanControl creates a new plugin object on every refresh, and a remembered plan is
 /// rebuilt by whichever instance is current.
 /// </summary>

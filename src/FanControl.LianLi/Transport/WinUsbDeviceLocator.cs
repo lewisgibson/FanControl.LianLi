@@ -17,7 +17,7 @@ namespace FanControl.LianLi.Transport;
 /// (<see cref="IsWinUsbDevice"/>), reads <c>DeviceInterfaceGUIDs</c> from each one's hardware key,
 /// and resolves that interface to the path <see cref="WinUsbTransport"/> opens. A device with no
 /// interface GUID is not WinUSB-bound - Lian Li's driver was never installed - and is skipped
-/// rather than opened and failed. Every native failure along the way is logged with the call, the
+/// not opened and failed. Every native failure along the way is logged with the call, the
 /// device and the code, so "the dongles are not found" can always be told apart from "Windows
 /// would not say". The walk runs inside the bounded device scan, so it checks the scan's token
 /// before every native call and stops the moment the scan has been given up on.
@@ -211,7 +211,7 @@ internal sealed class WinUsbDeviceLocator {
     // Read one REG_SZ or REG_MULTI_SZ value as a list of strings; anything else reads as nothing. The
     // sizing call passes no buffer, which RegQueryValueExW documents as returning ERROR_SUCCESS with
     // the size; ERROR_MORE_DATA also carries the size, so either is taken as sized.
-    // A value that is simply not there (ERROR_FILE_NOT_FOUND) is the normal case for one of the two
+    // A value that is not there (ERROR_FILE_NOT_FOUND) is the normal case for one of the two
     // names; any other failure is logged.
     private IReadOnlyList<string> ReadStringValue(IntPtr key, string name, string instanceId, CancellationToken token) {
         uint size = 0;

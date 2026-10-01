@@ -90,7 +90,7 @@ public class LoggingTests {
             var logger = new FileLogger(dir, maximumBytes: 64);
 
             logger.Write(new string('a', 80)); // passes the limit
-            logger.Write("second");            // rotates, then starts afresh
+            logger.Write("second");            // rotates, then starts a new file
             logger.Write(new string('b', 80));
             logger.Write("fourth");            // rotates again, replacing the first previous file
 

@@ -412,7 +412,7 @@ public sealed class LConnectWirelessConfigurationTests : IDisposable {
 
     // ---------- the locked device list (savedDevices.config) ----------
 
-    // One RfDevice as System.Text.Json writes it: byte arrays as base64, the rest as numbers, plus
+    // One RfDevice as System.Text.Json writes it: byte arrays as base64, the rest as numbers, and
     // the fields the plugin does not read.
     private static string LockedEntry(string mac, string master, int devType = 0, int fanNum = 2, string masterText = "aa:bb:cc:dd:ee:ff")
         => "{\"changingEffect\":false,\"MacStr\":\"x\",\"MasterMacStr\":\"" + masterText + "\",\"_target_rx_type\":4,\"_rx_type\":3,"

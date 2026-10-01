@@ -126,7 +126,7 @@ public class KeepAliveWorkerTests {
         Assert.True(returned, "Dispose blocked on the stuck HID read instead of returning within the join timeout");
 
         // The join timed out (the thread is still mid-read holding the gate), so Dispose left the
-        // controller alone rather than race a use-after-dispose against the worker - the loop thread
+        // controller alone instead of racing a use-after-dispose against the worker - the loop thread
         // itself disposes it once the stuck read returns and the loop exits.
         Assert.True(disposeThread.Join(TimeSpan.FromSeconds(2)));
         Assert.True(
@@ -239,7 +239,7 @@ public class KeepAliveWorkerTests {
 
         worker.Dispose();
 
-        // The two closes run on the loops' own threads, rather than one after the other.
+        // The two closes run on the loops' own threads, , not one after the other.
         Assert.True(SpinWait.SpinUntil(() => first.Closed && second.Closed, TimeSpan.FromSeconds(15)));
         Assert.True(first.SawTheOther && second.SawTheOther);
     }

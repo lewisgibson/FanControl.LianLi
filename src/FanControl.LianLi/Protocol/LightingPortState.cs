@@ -6,7 +6,7 @@ namespace FanControl.LianLi.Protocol;
 
 /// <summary>
 /// One controller port's saved lighting look, as read from L-Connect's configuration:
-/// the effect mode and its parameters plus the per-fan colours. <see cref="Mode"/>,
+/// the effect mode and its parameters and the per-fan colours. <see cref="Mode"/>,
 /// <see cref="Speed"/>, <see cref="Direction"/>, and <see cref="Brightness"/> are the raw
 /// integer enum values L-Connect stores; <see cref="SlInfinityLightingEncoder"/> translates
 /// the mode to its wire byte and expands the colours per the family's LED layout.

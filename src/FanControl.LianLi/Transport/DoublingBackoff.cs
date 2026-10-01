@@ -5,9 +5,9 @@ namespace FanControl.LianLi.Transport;
 /// <summary>
 /// The pure schedule behind every "try again, but not every time" loop in the plugin: the first
 /// attempt is immediate, so a transient fault costs no dead time, and each attempt that does not
-/// settle the matter pushes the next one further out, doubling up to a ceiling.
+/// resolve it pushes the next one further out, doubling up to a ceiling.
 ///
-/// It counts <em>attempts offered</em> rather than seconds, because the transports sit below the
+/// It counts <em>attempts offered</em> , not seconds, because the transports sit below the
 /// injected clock, and because the thing being waited on is a device, whose readiness is not a
 /// function of wall time. The callers: each transport reopening a faulted handle, offered a turn per
 /// transfer, and a stand-in rebuilding a controller a scan could not reach, offered a turn per worker
@@ -53,7 +53,7 @@ internal sealed class DoublingBackoff {
         return true;
     }
 
-    /// <summary>The matter settled: the next offer attempts immediately again.</summary>
+    /// <summary>Resolved: the next offer attempts immediately again.</summary>
     public void Reset() {
         _gap = _initialGap;
         _skipsBeforeNextAttempt = 0;

@@ -17,7 +17,7 @@ namespace FanControl.LianLi.Devices;
 /// bindings stay intact, and it builds the real controller in the background - on the shared
 /// <see cref="DoublingBackoff"/> schedule, through the plugin's own builder, on a thread of its own
 /// so a device that takes seconds to answer delays nothing but itself - then forwards everything to
-/// it, matching channels by id so a fan that did not come back is simply left with no reading.
+/// it, matching channels by id so a fan that did not come back is left with no reading.
 /// </summary>
 internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IFanSpeedSource {
     private readonly int _index;
@@ -27,7 +27,7 @@ internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IF
     private readonly Func<IFanDevice> _build;
     private readonly ILog _log;
     // The rebuild schedule: immediate, then a gap doubling from 10 offers to 640. The worker
-    // offers two a tick, so a device that is simply gone is retried every few minutes.
+    // offers two a tick, so a device that is gone is retried every few minutes.
     private readonly DoublingBackoff _backoff = new DoublingBackoff(10, 640);
 
     private readonly object _lock = new object();
@@ -139,7 +139,7 @@ internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IF
     /// Raised, on whichever thread adopted it, with the controller once this stand-in has taken it -
     /// from its own rebuild or from <see cref="Offer"/>. The controller may have sensors the stand-in
     /// was not made with (a wireless device heard while it was built); the stand-in forwards only the
-    /// remembered ones, so whoever registered them needs to know.
+    /// remembered ones, so the plugin instance that registered them needs to know.
     /// </summary>
     public event EventHandler<IFanDevice>? Adopted;
 
@@ -199,7 +199,7 @@ internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IF
         }
     }
 
-    // ---------- FanControl-thread surface (no I/O) ----------
+    // ---------- FanControl-thread methods (no I/O) ----------
 
     /// <summary>Set the commanded duty; kept for the controller and forwarded once (or as soon as) it exists.</summary>
     public void SetTarget(int channel, int duty) {
@@ -309,7 +309,7 @@ internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IF
         => new Thread(work) { IsBackground = true, Name = "LianLiReconnect" }.Start();
 
     // A controller that adds sensors as it goes - a wireless one hearing a device check in - may by
-    // now have one the connection could not match when it was made; match again, and hand the new
+    // now have one the connection could not match when it was made; match again, and give the new
     // matches their targets. Only when its sensor count moved, so an unchanged controller costs a
     // comparison a poll.
     // Only the worker thread ever replaces the connection (the rebuild adopts it, this remaps it),
@@ -339,7 +339,7 @@ internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IF
 
     // Match the built controller's channels to the remembered ones by control id and hand it
     // everything the host set in the meantime. False when the stand-in was disposed while the
-    // rebuild ran: nobody will drive the controller, so the caller disposes it.
+    // rebuild ran: nothing will drive the controller, so the caller disposes it.
     private bool Adopt(IFanDevice built) {
         var connection = new Connection(built, _channels, _fanSpeeds, _temperatures);
         lock (_lock) {

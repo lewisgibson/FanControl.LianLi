@@ -4,7 +4,7 @@ name: Release
 # bumps the semver to 1.1.<run_number> and publishes a versioned GitHub release with a
 # zip per variant. GitHub automatically marks the newest release as "Latest", so the
 # /releases/latest URL always resolves to it. (A rolling "latest" tag is
-# intentionally not used: GitHub immutable releases can permanently reserve a
+# not used: GitHub immutable releases can permanently reserve a
 # reused tag name, which breaks a moving tag.)
 
 on:
@@ -17,7 +17,7 @@ permissions:
 
 concurrency:
     # Serialize releases: a push to main waits for any in-flight release to finish
-    # rather than cancelling it mid-publish, so pushes produce sequential releases
+    # instead of cancelling it mid-publish, so pushes produce sequential releases
     # in order (cancelling mid-publish could leave a half-created release/tag).
     group: release-${{ github.ref }}
     cancel-in-progress: false
@@ -203,7 +203,7 @@ jobs:
               # "No source changes since <tag>." or "First release.". Each commit is a heading
               # (its subject) and, for a commit by a person, its body: a Dependabot commit
               # (author dependabot[bot], or a subject starting "Bump ") gets the subject alone,
-              # since its body is pull-request boilerplate. Commit bodies are prose, one
+              # since its body is the pull-request template text. Commit bodies are prose, one
               # paragraph per line; a body an editor hard-wrapped is joined back onto one line
               # per paragraph so GitHub does not render it with ragged line breaks, while
               # list items, headings, quotes, tables and fenced code are kept as they are.

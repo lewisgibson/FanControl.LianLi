@@ -90,9 +90,9 @@ public class Galahad2ControllerTests {
     }
 
     // A look the cooler refused stays owed on its own and is tried again on the keepalive
-    // cadence; the duties are re-sent regardless, and the reconnect is recorded.
+    // interval; the duties are re-sent regardless, and the reconnect is recorded.
     [Fact]
-    public void ApplyPending_ALookTheCoolerRefused_StaysOwed_AndIsTriedAgainOnTheKeepaliveCadence() {
+    public void ApplyPending_ALookTheCoolerRefused_StaysOwed_AndIsTriedAgainOnTheKeepaliveInterval() {
         var (controller, transport, clock) = NewController();
         int replays = 0;
         controller.ReplayOnReconnect(() => ++replays >= 2);

@@ -4,7 +4,7 @@ namespace FanControl.LianLi.Protocol;
 
 /// <summary>
 /// A lighting effect as L-Connect saved it for one wireless device: the rendered, compressed frame
-/// data and the figures the device needs to play it back, plus the 4-byte identity L-Connect stamped
+/// data and the figures the device needs to play it back, and the 4-byte identity L-Connect stamped
 /// it with. The device reports the identity of the effect it is running, so a saved effect whose
 /// identity differs is streamed to it again (see <see cref="WirelessProtocol.EncodeEffectPayloads"/>).
 /// </summary>

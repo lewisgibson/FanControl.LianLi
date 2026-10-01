@@ -215,7 +215,7 @@ public sealed class WirelessControllerTests : IDisposable {
     }
 
     // With no master known nothing refreshes the readings, so after the usual 30 reads they stop
-    // looking live: a fan reads 0 rather than its last speed for ever.
+    // looking live: a fan reads 0, not its last speed for ever.
     [Fact]
     public void AMasterWithNoAddress_LetsTheReadingsGoStale() {
         FakeWirelessRecord group = Group(1);
@@ -436,7 +436,7 @@ public sealed class WirelessControllerTests : IDisposable {
         Assert.Equal(0f, Controller.GetFanSpeed(2));
     }
 
-    // A late device with nobody subscribed is adopted all the same.
+    // A late device with no subscriber is adopted all the same.
     [Fact]
     public void ALateDevice_IsAdoptedWithoutASubscriber() {
         Build();
@@ -447,7 +447,7 @@ public sealed class WirelessControllerTests : IDisposable {
         Assert.Equal(1, Controller.ChannelCount);
     }
 
-    // A fan count past the record's four slots is clamped rather than trusted.
+    // A fan count past the record's four slots is clamped, not trusted.
     [Fact]
     public void AGroupReportingMoreThanFourFans_HasFourReadings() {
         FakeWirelessRecord record = Group(1, fans: 4);
@@ -1388,7 +1388,7 @@ public sealed class WirelessControllerTests : IDisposable {
     }
 
     // A dongle that came back frees the device's sequence with everything else it resets, so the
-    // handover is sent again at once, under the next sequence, rather than waiting for a round
+    // handover is sent again at once, under the next sequence, instead of waiting for a round
     // that was cut short.
     [Fact]
     public void TheLightingHandover_IsSentAgainUnderTheNextSequence_WhenTheDongleComesBackMidRound() {
@@ -1582,7 +1582,7 @@ public sealed class WirelessControllerTests : IDisposable {
 
     // TryRestoreWirelessThemeSwitches returns, restoring nothing, for a group whose FanNum is 0: a
     // group that for a while reports no fan has no screen whose bit says anything, so its switch is
-    // left pending rather than taken as every screen showing its theme, and is decided against the
+    // left pending , not taken as every screen showing its theme, and is decided against the
     // bits its screens report once a fan is back. Here the count drops while the colours wait for
     // their interval, which held the switch until then.
     [Fact]
@@ -1995,7 +1995,7 @@ public sealed class WirelessControllerTests : IDisposable {
 
     // UpdateSensorSettingByWiredLess keeps the service's fan index for an SL-Infinity or SL-INF
     // FLEX group whose end cap is on the left (isINFRightAttach false), so the first screen's
-    // colours go in slot 0 of the buffer rather than the last slot.
+    // colours go in slot 0 of the buffer , not the last slot.
     [Fact]
     public void TheScreenColours_KeepTheServicesOrder_ForALeftAttachedSlInfFlexGroup() {
         _configuration.FanScreens[MacText(1)] = new WirelessFanScreenPresentation(B(6, 6, 6, 6), B(0, 0, 0, 0), 60, 1, false);
@@ -2242,7 +2242,7 @@ public sealed class WirelessControllerTests : IDisposable {
     // group that reports one fan fewer while its second screen's colours are being sent has that
     // round sent to its end (the count now equals the screens coloured, so the colouring is done
     // here without ever looking at the round again) and the sequence freed for the theme switch
-    // behind it, rather than held for good by a round this pass would never see.
+    // behind it, instead of held indefinitely by a round this pass would never see.
     [Fact]
     public void TheScreenColours_AFanRemovedDuringItsScreensRound_DoesNotHoldTheThemeSwitchForever() {
         _configuration.FanScreens[MacText(1)] = new WirelessFanScreenPresentation(B(1, 2, 3, 4), B(0, 0, 0, 0), 60, 1, false);
@@ -2331,7 +2331,7 @@ public sealed class WirelessControllerTests : IDisposable {
 
     // A chain that went unbound (to its USB receiver, say) keeps its sensors here, retained, and
     // when it is bound to the master again nothing is added; but it is driven here again, so the
-    // plugin is told, as it is for a new sensor: whoever registered those sensors elsewhere has to
+    // plugin is told, as it is for a new sensor: the plugin instance that registered those sensors elsewhere has to
     // move them.
     [Fact]
     public void AChainDrivenAgainWithItsSensorsRetained_RaisesTopologyChanged() {
@@ -2739,7 +2739,7 @@ public sealed class WirelessControllerTests : IDisposable {
     }
 
     // A locked list learned after construction puts a water block on the table before any list
-    // read has given it sensors; it is sent nothing that second rather than failing.
+    // read has given it sensors; it is sent nothing that second instead of failing.
     [Fact]
     public void AWaterBlockFromALockedListLearnedLate_IsSentNothingUntilItHasSensors() {
         Func<byte[], byte[]?>? answers = _rig.Transmitter.Responder;
@@ -2756,7 +2756,7 @@ public sealed class WirelessControllerTests : IDisposable {
 
     // SyncControlInfo services a pending command whether or not SendAioInfo sends the pump
     // anything: a screen switch mid-round when FanControl releases the pump control is carried to
-    // its end (its acknowledgement here), so the device's one sequence is not held for good and the
+    // its end (its acknowledgement here), so the device's one sequence is not held indefinitely and the
     // lighting handover's second round, waiting behind it, goes out.
     [Fact]
     public void TheScreenSwitch_ReleasedMidRound_IsCarriedToItsEnd_SoTheHandoverBehindItIsNotHeldForever() {
@@ -2911,7 +2911,7 @@ public sealed class WirelessControllerTests : IDisposable {
     }
 
     private static string TransmitterLostLine(int generation, int index = 4)
-        => "W" + index + ": the transmitter was lost (generation " + generation + "); every device is owed its screen switch or screen colours again once it is back, as L-Connect's service sends them again when the transmitter is plugged in again";
+        => "W" + index + ": the transmitter was lost (generation " + generation + "); every device will be sent its screen switch or screen colours again once it is back, as L-Connect's service sends them again when the transmitter is plugged in again";
 
     private static string LookStartedOverLine(bool pump, int lifetime)
         => "W4:a00000000001 " + (pump ? "screen switch" : "screen colours") + " begun before the transmitter was lost (now lifetime " + lifetime + "); started over, to be sent again once the transmitter carries it";
@@ -4164,7 +4164,7 @@ public sealed class WirelessControllerTests : IDisposable {
     // ---------- reconnect ----------
 
     // A reopened dongle: the registered replay runs, and the cycle - master query included, which
-    // re-asserts the channel - runs at once rather than at the next second.
+    // re-asserts the channel - runs at once instead of at the next second.
     [Fact]
     public void AReopenedDongle_RunsTheReplayAndTheCycleAtOnce() {
         Build();
@@ -4188,7 +4188,7 @@ public sealed class WirelessControllerTests : IDisposable {
     }
 
     // While either dongle's handle is still faulted nothing is replayed: the dongle is off the
-    // bus, and the cycle's own transfers are what reopen it. A device's effect tried afresh then
+    // bus, and the cycle's own transfers are what reopen it. A device's effect tried again then
     // would be sent, and given up on, against a dead transmitter. Once both are back the replay
     // runs and the cycle follows at once, the screen switch included, since the transmitter's
     // loss dropped its mark the moment it was seen.
@@ -4232,10 +4232,10 @@ public sealed class WirelessControllerTests : IDisposable {
         Assert.NotEmpty(Payloads(0x19)); // and so does the screen switch, its mark dropped with the transmitter
     }
 
-    // A replay that reports failure stays owed and is tried again on the keepalive cadence; the
+    // A replay that reports failure stays owed and is tried again on the keepalive interval; the
     // reconnect itself is recorded and the cycle runs.
     [Fact]
-    public void AReplayThatReportsFailure_StaysOwed_AndIsTriedAgainOnTheKeepaliveCadence() {
+    public void AReplayThatReportsFailure_StaysOwed_AndIsTriedAgainOnTheKeepaliveInterval() {
         Build();
         int replays = 0;
         Controller.ReplayOnReconnect(() => ++replays >= 2);

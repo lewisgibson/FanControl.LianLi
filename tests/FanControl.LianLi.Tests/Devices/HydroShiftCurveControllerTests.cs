@@ -188,9 +188,9 @@ public class HydroShiftCurveControllerTests {
     }
 
     // Registered work the MCU refused stays owed on its own: software control and the pump are
-    // replayed regardless, and the work is tried again on the keepalive cadence.
+    // replayed regardless, and the work is tried again on the keepalive interval.
     [Fact]
-    public void ApplyPending_ReplayedWorkTheMcuRefused_StaysOwed_AndIsTriedAgainOnTheKeepaliveCadence() {
+    public void ApplyPending_ReplayedWorkTheMcuRefused_StaysOwed_AndIsTriedAgainOnTheKeepaliveInterval() {
         var (controller, transport, clock, _) = NewController();
         int replays = 0;
         controller.ReplayOnReconnect(() => ++replays >= 2);

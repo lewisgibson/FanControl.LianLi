@@ -192,7 +192,7 @@ public sealed class WirelessDeviceTableTests {
             log.Messages);
     }
 
-    // Once it is heard again a dropped device is appended as new, taken as bound afresh (its targets
+    // Once it is heard again a dropped device is appended as new, taken as bound again (its targets
     // start from what it reports), and told from a device never heard before only by the log.
     [Fact]
     public void Apply_ADroppedBoundDevice_IsAppendedAgainWhenHeard() {
@@ -213,7 +213,7 @@ public sealed class WirelessDeviceTableTests {
         Assert.Contains("W3:a00000000001 heard again", log.Messages);
         Assert.Equal(2, log.Messages.Count(m => m.StartsWith("W3:a00000000001 bound to this master", StringComparison.Ordinal)));
 
-        // An unbound device that comes back is simply new.
+        // An unbound device that comes back is new.
         Read(table, Rec(3, Other));
         for (int read = 0; read < 30; read++) {
             Read(table, Rec(2, receiver: 2));
@@ -236,7 +236,7 @@ public sealed class WirelessDeviceTableTests {
         Assert.Contains(log.Messages, m => m.StartsWith("W3:a00000000001 not heard for 30 list reads; dropped", StringComparison.Ordinal));
     }
 
-    // RefreshList's RemoveAll: every expired device goes in the one read.
+    // RefreshList's RemoveAll: every expired device goes in the same read.
     [Fact]
     public void Apply_DropsEveryExpiredDeviceInOneRead() {
         var (table, _) = NewTable();
@@ -268,7 +268,7 @@ public sealed class WirelessDeviceTableTests {
     }
 
     // The plugin's lost mark, for a device that stays on the table: L-Connect reads no list without
-    // a master, so its countdown does not move, but thirty cycles nobody was heard in mark it lost.
+    // a master, so its countdown does not move, but thirty cycles in which nothing was heard mark it lost.
     [Fact]
     public void MissRead_MarksABoundDeviceLostAfterThirtyMissesAndFoundWhenHeard() {
         var (table, log) = NewTable();
@@ -403,7 +403,7 @@ public sealed class WirelessDeviceTableTests {
         }
 
         Assert.Equal("300000000007", Assert.Single(table.Devices).MacText);
-        Assert.Contains("W3:010000000007 is a ghost of another device's address sharing its receiver slot; dropped for good, as L-Connect does", log.Messages);
+        Assert.Contains("W3:010000000007 is a ghost of another device's address sharing its receiver slot; dropped and not added again, as L-Connect does", log.Messages);
 
         Read(table, records);
         Assert.Single(table.Devices);
@@ -497,14 +497,14 @@ public sealed class WirelessDeviceTableTests {
     }
 
     // RefreshList under lock_list: no new device, the saved product type and (for a fan group) fan
-    // types kept, no receiver slot conflict settled, nothing dropped.
+    // types kept, no receiver slot conflict resolved, nothing dropped.
     [Fact]
     public void WhileLocked_NoNewDevice_TheSavedIdentityKept_AndNothingDropped() {
         var (table, log) = NewTable();
         FakeWirelessRecord group = Rec(1);
         group.FanTypes = new byte[] { 36, 36, 0, 0 };
         // 3 shares 1's receiver slot, and the V150 (5) counts down unheard: unlocked, the one would
-        // be settled as a conflict and the other dropped.
+        // be resolved as a conflict and the other dropped.
         table.Lock(new[] { Locked(group), Locked(Rec(3)), Locked(Rec(5, type: 66)) });
 
         FakeWirelessRecord heard = Rec(1, type: 3);

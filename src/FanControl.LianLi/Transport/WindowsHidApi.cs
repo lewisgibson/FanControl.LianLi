@@ -10,7 +10,7 @@ namespace FanControl.LianLi.Transport;
 /// <see cref="IHidApi"/> and <see cref="IHidOverlappedApi"/> over <c>kernel32</c> and <c>hid.dll</c>.
 /// </summary>
 // Excluded from coverage: nothing here but the P/Invoke calls themselves, the unmanaged memory an
-// overlapped transfer hands the kernel and the thread-pool wait on its event. Every decision taken on
+// overlapped transfer gives the kernel and the thread-pool wait on its event. Every decision taken on
 // their results is HidTransport's, HidDeviceLocator's or HidOverlappedTransfer's, unit-tested through
 // a fake.
 [ExcludeFromCodeCoverage]
@@ -37,7 +37,7 @@ internal sealed class WindowsHidApi : IHidApi, IHidOverlappedApi {
     // HIDP_STATUS_SUCCESS: HidP_GetCaps returns an NTSTATUS-style code, not a Win32 BOOL.
     private const int HidpStatusSuccess = 0x00110000;
 
-    /// <summary>The one instance; it holds no state.</summary>
+    /// <summary>The single instance; it holds no state.</summary>
     public static readonly WindowsHidApi Instance = new WindowsHidApi();
 
     private WindowsHidApi() {
@@ -179,7 +179,7 @@ internal sealed class WindowsHidApi : IHidApi, IHidOverlappedApi {
         public CompletionWait(IntPtr handle) => SafeWaitHandle = new SafeWaitHandle(handle, ownsHandle: false);
     }
 
-    // What RegisterEventWait hands back: disposing it unregisters the thread-pool wait and drops the
+    // What RegisterEventWait returns: disposing it unregisters the thread-pool wait and drops the
     // WaitHandle view of the event, leaving the event itself for the transfer to close.
     private sealed class CompletionRegistration : IDisposable {
         private readonly RegisteredWaitHandle _registration;

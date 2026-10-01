@@ -10,7 +10,7 @@ namespace FanControl.LianLi.Plugin;
 
 /// <summary>
 /// The plugin's state that has to outlive a plugin object. FanControl creates a new plugin
-/// instance on every refresh (its plugin loader instantiates the type afresh each Initialize, while
+/// instance on every refresh (its plugin loader instantiates the type again on each Initialize, while
 /// the assembly stays loaded), and it only calls Close on an instance that registered at least one
 /// sensor. So what an instance starts - the worker and the controllers it drives - is owned here,
 /// where the next instance can shut it down even when the previous one was never closed; and the
@@ -43,10 +43,10 @@ internal sealed class PluginRuntime {
     private int _numberingEpoch;
 
     // Builds still running from before that read: they hold their device, but not the index they
-    // were guessed, which IndexFor hands out by the file.
+    // were guessed, which IndexFor assigns by the file.
     private readonly HashSet<string> _unnumberedBuilds = new HashSet<string>(StringComparer.Ordinal);
 
-    // The keys this process remembered first, rather than read back from the file, that have not yet
+    // The keys this process remembered first, not read back from the file, that have not yet
     // had a sensor. A move takes the mark with it.
     private readonly HashSet<string> _firstRememberedHere = new HashSet<string>(StringComparer.Ordinal);
 
@@ -56,8 +56,8 @@ internal sealed class PluginRuntime {
 
     // The build running for each key, and the index it was given. A build can outlive the scan that
     // started it - and that scan's plugin instance - so its index is held here until its result lands,
-    // or a later scan could hand the same index to another controller and the two would collide when
-    // the late one is remembered. And only one build of a device runs at a time, whoever starts it -
+    // or a later scan could give the same index to another controller and the two would collide when
+    // the late one is remembered. And only one build of a device runs at a time, whichever scan starts it -
     // a scan, or a stand-in rebuilding - so a device is never opened and set up by two owners at once.
     private readonly Dictionary<string, int> _building = new Dictionary<string, int>(StringComparer.Ordinal);
     private bool _restored;
@@ -163,7 +163,7 @@ internal sealed class PluginRuntime {
             // read, and numbered without it. The file wins: a controller it has keeps its saved index
             // and every sensor it saved, and one numbered onto a saved index is let go, to be
             // numbered again by the next scan. Keeping the guesses would move a curve onto another
-            // controller's fans for good once they were saved over the file.
+            // controller's fans permanently once they were saved over the file.
             foreach (KeyValuePair<string, RememberedController> guessed in _remembered.ToList()) {
                 if (!saved.ContainsKey(guessed.Key)
                     && saved.Values.Any(other => other.Controller.Index == guessed.Value.Index)) {
@@ -348,7 +348,7 @@ internal sealed class PluginRuntime {
         }
     }
 
-    /// <summary>Have the worker run a tick now rather than at its next interval: a target changed.</summary>
+    /// <summary>Have the worker run a tick now instead of at its next interval: a target changed.</summary>
     public void Wake() {
         // Under the lock: a worker is only disposed after it has been taken out of _worker under
         // this same lock, so the one woken here is never one that is being disposed.
@@ -365,7 +365,7 @@ internal sealed class PluginRuntime {
     /// one that drives it now is the one to stand in with it, never both. So only the sensors
     /// <paramref name="controller"/> drives (<see cref="RememberedController.DrivenIds"/>) are added
     /// to its memory, and they are taken from any other remembered controller that has them; a
-    /// sensor it reports but only retains stays where it is remembered, so a chain nobody drives
+    /// sensor it reports but only retains stays where it is remembered, so a chain no controller drives
     /// keeps its last driver's binding. Returns what is now remembered, which is what the
     /// controller's sensors are registered from.
     /// </summary>
@@ -374,7 +374,7 @@ internal sealed class PluginRuntime {
 
     /// <summary>
     /// <see cref="Remember(string, RememberedController)"/>, also giving back the ids
-    /// <paramref name="claimed"/> from other remembered controllers: whoever registered those
+    /// <paramref name="claimed"/> from other remembered controllers: the plugin instance that registered those
     /// sensors under the other controller has to refresh.
     /// </summary>
     public RememberedController Remember(string key, RememberedController controller, out IReadOnlyCollection<string> claimed) {
@@ -484,7 +484,7 @@ internal sealed class PluginRuntime {
     /// Whether the controller under <paramref name="key"/> is new: never remembered, or first
     /// remembered by this process and never yet with a sensor. Only a new controller may still be
     /// waiting for its devices to answer; one an earlier process remembered with nothing (a pair that
-    /// only hears a neighbour's kit, say) is not, so the placeholder it would bring cannot stay for good.
+    /// only hears a neighbour's kit, say) is not, so the placeholder it would bring cannot stay indefinitely.
     /// </summary>
     public bool IsNew(string key) {
         lock (_sync) {
@@ -524,7 +524,7 @@ internal sealed class PluginRuntime {
         }
     }
 
-    /// <summary>Whether a build of the controller at <paramref name="key"/> is running, whoever started it.</summary>
+    /// <summary>Whether a build of the controller at <paramref name="key"/> is running, whichever scan started it.</summary>
     public bool IsBuilding(string key) {
         if (key is null) {
             throw new ArgumentNullException(nameof(key));
@@ -546,7 +546,7 @@ internal sealed class PluginRuntime {
     /// there are several and nothing tells them apart. A device's path is where it is plugged in, and a Lian Li controller has no
     /// serial of its own to tell it by (every Uni unit shares one), so this is the identity that
     /// survives a move to another port: the moved device keeps its index, so its wired sensor ids,
-    /// and its sensors, so the user's curves stay bound, rather than registering beside a stand-in
+    /// and its sensors, so the user's curves stay bound, instead of registering beside a stand-in
     /// for its old path that can never connect. Returns the key taken over, or null.
     /// </summary>
     public string? TakeOverMoved(ControllerPlan plan, ISet<string> plannedKeys) {
@@ -626,7 +626,7 @@ internal sealed class PluginRuntime {
     /// The index for the controller at <paramref name="key"/>: the one it was first built at, so its
     /// sensor ids never move within a process, or else the lowest index neither remembered for
     /// another controller nor already in <paramref name="taken"/>. The first scan of a process
-    /// therefore numbers controllers in scan order, exactly as before any were remembered. The
+    /// therefore numbers controllers in scan order, as before any were remembered. The
     /// chosen index is added to <paramref name="taken"/>.
     /// </summary>
     public int IndexFor(string key, ISet<int> taken) {
@@ -687,7 +687,7 @@ internal sealed class PluginRuntime {
     /// through the instance that registered the stand-in: only while that instance still owns the
     /// worker (<see cref="IsOwnedBy"/>). One FanControl has closed, or a later instance has
     /// succeeded, opens nothing: its rebuild would hold the device against the next instance's scan
-    /// for the length of an open nobody would adopt, and that scan would stand in for the device
+    /// for the length of an open no scan would adopt, and that scan would stand in for the device
     /// instead of opening it. Checked and claimed under one lock, so a rebuild thread started
     /// before the close and reaching this after it is refused whatever the timing.
     /// </summary>
@@ -703,7 +703,7 @@ internal sealed class PluginRuntime {
 
     /// <summary>
     /// Start a build of the controller at <paramref name="key"/> at <paramref name="index"/>: false,
-    /// starting nothing, when one is already running, whoever started it. The index is held, and no
+    /// starting nothing, when one is already running, whichever scan started it. The index is held, and no
     /// other build of the device starts, until <see cref="EndBuild"/>.
     /// </summary>
     public bool TryBeginBuild(string key, int index) {

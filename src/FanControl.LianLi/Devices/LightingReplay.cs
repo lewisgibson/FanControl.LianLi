@@ -17,7 +17,7 @@ internal static class LightingReplay
 {
     // The controller processes one report at a time; L-Connect itself paces its writes
     // (~20 ms apart). A short gap after each transfer matches that and avoids dropping reports
-    // during the one-shot startup apply. This is one-time setup I/O, not a worker cadence, so a
+    // during the one-shot startup apply. This is one-time setup I/O, not the worker's repeating work, so a
     // fixed sleep is appropriate here.
     private const int WriteSpacingMilliseconds = 15;
 

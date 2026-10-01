@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 namespace FanControl.LianLi.Transport;
 
 /// <summary>
-/// Mirrors the native <c>DEVPROPKEY</c>: a property-set GUID plus an id within that set, naming one
+/// Mirrors the native <c>DEVPROPKEY</c>: a property-set GUID and an id within that set, naming one
 /// property of a device node or device interface in the configuration manager.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]

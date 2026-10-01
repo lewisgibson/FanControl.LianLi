@@ -69,7 +69,7 @@ internal sealed class WirelessDeviceRecord {
     public byte Channel { get; }
 
     /// <summary>
-    /// The receiver slot the master assigned the device when it bound it. L-Connect hands out 1-13
+    /// The receiver slot the master assigned the device when it bound it. L-Connect assigns 1-13
     /// (<c>MasterDevice.GetRxUnused</c>); a device bound by an older release may still report 14 or 15.
     /// </summary>
     public byte ReceiverType { get; }

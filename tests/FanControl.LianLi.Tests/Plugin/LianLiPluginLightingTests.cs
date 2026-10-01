@@ -799,7 +799,7 @@ public sealed class LianLiPluginLightingTests : IDisposable
     private static LocatedDevice Device(int productId, string devicePath)
         => new LocatedDevice(0x0CF2, productId, devicePath, null);
 
-    // Write one controller's saved look (a StaticColor port plus a fan quantity) as L-Connect
+    // Write one controller's saved look (a StaticColor port and a fan quantity) as L-Connect
     // stores it: gzipped JSON setting files under a per-device folder.
     private void WriteSavedLook()
     {
@@ -830,7 +830,7 @@ public sealed class LianLiPluginLightingTests : IDisposable
     // Three wired SL-Infinity controllers, each with its own saved look, keep all twelve control
     // ids and twelve RPM ids in the same order across a scan that lists them in reverse, one in
     // which the middle controller will not open, and a new runtime restored from the saved store,
-    // and every reachable one gets exactly its own look.
+    // and every reachable one gets its own look.
     [Fact]
     public void ThreeSlInfinityControllers_KeepTheirIdsAndOwnSavedLooksAcrossRefreshAndRestart()
     {
@@ -911,7 +911,7 @@ public sealed class LianLiPluginLightingTests : IDisposable
 
     // The bytes three SL-Infinity controllers with port 0 saved as Lottery_Inner (mode 46, wire
     // 0x26) at speed 1, direction 0 and brightness 2, FanQuantity [4,4,4,4] and MergeOrder
-    // [0,1,2,3] receive, spelled out rather than derived from the encoder: the four quantity
+    // [0,1,2,3] receive, spelled out, not derived from the encoder: the four quantity
     // reports, the 353-byte colour report (R, B, G per LED, the 16-slot palette repeated per fan),
     // the effect report, the frame, and the merge-order report last, after the look and its frame
     // as L-Connect's Init and ResumeSuspend send it (setFanQuantity, then setMergeOrder).

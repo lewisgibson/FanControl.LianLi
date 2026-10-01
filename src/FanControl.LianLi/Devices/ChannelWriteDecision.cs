@@ -19,7 +19,7 @@ internal static class ChannelWriteDecision {
     /// Decide whether a channel should be written now.
     /// </summary>
     /// <param name="target">Commanded duty percent; negative means unassigned.</param>
-    /// <param name="lastWritten">The duty last actually written.</param>
+    /// <param name="lastWritten">The duty last written.</param>
     /// <param name="lastWriteUtc">When the last write happened.</param>
     /// <param name="now">The current time.</param>
     /// <param name="refreshInterval">The staleness threshold.</param>

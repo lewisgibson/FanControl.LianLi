@@ -16,7 +16,7 @@ namespace FanControl.LianLi.Devices;
 /// report it, after the others. Like the other 0x0416
 /// devices it writes a command packet and reads the reply: a keepalive speed write per fan, and an
 /// RPM poll that writes a handshake and matches the reply back to the fans. The FanControl-thread
-/// surface only mutates locked state; all USB I/O is on the worker-thread methods.
+/// methods only mutate locked state; all USB I/O is on the worker-thread methods.
 /// </summary>
 internal sealed class TlFanController : IFanDevice {
     // The 0x0416 handshake reply is one 64-byte command-packet frame.
@@ -39,8 +39,8 @@ internal sealed class TlFanController : IFanDevice {
     private readonly ILog _log;
 
     // One per fan, in the order found: the construction handshake's by (port, fan-index), then any
-    // fan a later poll finds. A channel keeps its address for good, and the sensor id is keyed on
-    // the address, not the channel ordinal, so a fan found late re-keys nobody. Only the worker adds
+    // fan a later poll finds. A channel keeps its address from then on, and the sensor id is keyed on
+    // the address, not the channel ordinal, so a fan found late re-keys no other fan. Only the worker adds
     // one; every read from another thread is under _lock.
     private readonly List<Channel> _channels = new List<Channel>();
     private readonly Dictionary<int, int> _channelByAddress = new Dictionary<int, int>();
@@ -77,7 +77,7 @@ internal sealed class TlFanController : IFanDevice {
         }
 
         // Take software control of each fan once. L-Connect sets motherboard-RPM-sync separately
-        // from the speed writes, so this is asserted here rather than before every speed write.
+        // from the speed writes, so this is asserted here instead of before every speed write.
         TakeSoftwareControl();
         _setUpGeneration = _transport.Generation;
     }
@@ -126,7 +126,7 @@ internal sealed class TlFanController : IFanDevice {
     /// <inheritdoc />
     public void ReplayOnReconnect(Func<bool> replay) => _reconnectReplay.Register(replay);
 
-    // ---------- FanControl-thread surface (no I/O) ----------
+    // ---------- FanControl-thread methods (no I/O) ----------
 
     /// <summary>Set the commanded duty for a channel. The worker pushes it to hardware.</summary>
     public void SetTarget(int channel, int duty) {
@@ -357,7 +357,7 @@ internal sealed class TlFanController : IFanDevice {
 
         public int Target { get; set; } = -1;          // commanded duty %, -1 = unassigned
 
-        public int LastWritten { get; set; } = -2;     // last duty actually written
+        public int LastWritten { get; set; } = -2;     // last duty written
 
         public DateTime LastWriteUtc { get; set; } = DateTime.MinValue;
 

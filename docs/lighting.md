@@ -10,12 +10,7 @@ The Lighting build resolves that tension: it reads the look you already designed
 
 ## How it works
 
-The plugin reads L-Connect's **own saved configuration directly** - there is no import step, no capture, and no intermediary file:
-
-```
-C:\ProgramData\Lian-Li\L-Connect 3\device   --plugin (on startup)-->   controllers
-(L-Connect's gzipped JSON, read-only)        re-applies the saved look
-```
+The plugin reads L-Connect's **own saved configuration directly** - there is no import step, no capture, and no intermediary file. On startup it reads the gzipped JSON under `C:\ProgramData\Lian-Li\L-Connect 3\device` (read-only) and re-applies the saved look to the controllers.
 
 On startup the Lighting build:
 
@@ -23,7 +18,7 @@ On startup the Lighting build:
 2. Groups the `LightingPort*`, `FanQuantity` and `MergeOrder` settings (and the other families' equivalents) by the USB instance token in each `DeviceID`, together with that controller's `MotherboardARGBSync` switch (see [Motherboard ARGB sync](#motherboard-argb-sync-the-l-connect-switch)).
 3. For each controller FanControl locates, matches it to a saved look by that instance token, and - for an SL-Infinity controller - encodes the exact HID transfers L-Connect itself would send and writes them to the device before fan setup.
 
-All of the translation between L-Connect's saved settings and the controller (mode and colour encoding, fan-quantity, frame latch, apply order) lives in a single pure C# encoder, `Protocol/SlInfinityLightingEncoder.cs`, with the test suite asserting its output. Nothing about it is offline or external: build the DLL, drop it in, done.
+All of the translation between L-Connect's saved settings and the controller (mode and colour encoding, fan-quantity, frame latch, apply order) is in a single pure C# encoder, `Protocol/SlInfinityLightingEncoder.cs`, with the test suite asserting its output. Nothing about it is offline or external: build the DLL, drop it in, done.
 
 ### SL-Infinity merge effects
 
@@ -58,7 +53,7 @@ So at a start the register ends up with the saved order, and the saved look is t
 
 The plugin sends the saved order - or `0, 1, 2, 3` when none is saved or the saved one fails that validation - after the look and its frame at every start and again on every reconnect: the saved look in the ordinary case, the default look in merge mode, either written once, then the report, then in merge mode the merge sequence. It sends it whether or not the controller's sync switch is on, since L-Connect sends it regardless; with the switch on there is no look, and the report precedes the sync register as `setMergeOrder` precedes `setMotherboardARGBSync`.
 
-That placement, after the look and its frame, is the plugin's own consistent choice: it matches where `Init` and `ResumeSuspend` put the register rather than copying `ApplyAll`'s hash-ordered loop, and the register's end state at a start is L-Connect's, without its redundant default write. On a reconnect it is a deliberate departure from L-Connect's resume, which loses the saved order until a restart - an L-Connect bug the plugin does not copy. With the default order saved the two are the same bytes.
+That placement, after the look and its frame, is the plugin's own consistent choice: it matches where `Init` and `ResumeSuspend` put the register instead of copying `ApplyAll`'s hash-ordered loop, and the register's end state at a start is L-Connect's, without its redundant default write. On a reconnect it is a chosen departure from L-Connect's resume, which loses the saved order until a restart - an L-Connect bug the plugin does not copy. With the default order saved the two are the same bytes.
 
 ### Motherboard ARGB sync (the L-Connect switch)
 
@@ -70,9 +65,9 @@ L-Connect keeps its "sync to motherboard" lighting switch per controller (2.1.11
 - **Uni Fan TL:** nothing. L-Connect writes a TL hub no lighting at all while its switch is on (it only sends the per-fan sync packets at the moment the switch is flipped), so the plugin leaves the hub as it found it and says so in the log.
 - **Galahad II Vision and HydroShift LCD:** L-Connect has no per-controller switch for them (their controllers load no such setting and their fan light is always written with the on-board MCU as its source), so their saved look is always replayed and a `MotherboardARGBSync` file, which L-Connect never writes for them, would be ignored.
 
-The switch is honoured again on every reconnect, exactly as the look would be. Because the switch on its own is a configuration (L-Connect hands the LEDs over whether or not a look was ever applied), a Uni controller with the switch on and no saved look still gets its sync register. The log line for a synced controller reads `lighting left to the motherboard for <token> (N writes)`.
+The switch is honoured again on every reconnect, as the look would be. Because the switch on its own is a configuration (L-Connect hands the LEDs over whether or not a look was ever applied), a Uni controller with the switch on and no saved look still gets its sync register. The log line for a synced controller reads `lighting left to the motherboard for <token> (N writes)`.
 
-This is the same report the **ARGB build** sends every Uni controller at startup. The two builds are consistent by design: the ARGB build hands every Uni controller to the motherboard unconditionally and needs no L-Connect configuration, while the Lighting build hands over only the controllers whose L-Connect switch is on and replays the saved look on the rest. Both re-assert it after a reconnect. The ARGB build does not read the switch, and the Lighting build never asserts the register for a controller whose switch is off.
+This is the same report the **ARGB build** sends every Uni controller at startup. The two builds agree: the ARGB build hands every Uni controller to the motherboard unconditionally and needs no L-Connect configuration, while the Lighting build hands over only the controllers whose L-Connect switch is on and replays the saved look on the rest. Both re-assert it after a reconnect. The ARGB build does not read the switch, and the Lighting build never asserts the register for a controller whose switch is off.
 
 ### Galahad II Vision and HydroShift LCD
 
@@ -95,17 +90,17 @@ L-Connect's config lives under `C:\ProgramData\Lian-Li\L-Connect 3`; the plugin 
 
 Lighting is driven only when it can be done exactly. `LConnectConfigurationReader`, the per-family lighting encoders, and the plugin together guarantee:
 
-- **No L-Connect configuration** (the directory is absent, e.g. L-Connect was never installed) -> no lighting is driven; the build behaves exactly like the standard build. This is the opt-out path and the default.
+- **No L-Connect configuration** (the directory is absent, e.g. L-Connect was never installed) -> no lighting is driven; the build behaves like the standard build. This is the opt-out path and the default.
 - **A located controller with no matching saved look** -> that controller is left untouched.
 - **A controller of an unsupported family** (anything not listed under [Status](#status)) -> skipped and logged; the plugin never drives unverified bytes.
 - **A Galahad II Vision screen ring that follows a live sensor in L-Connect** -> the ring is left as found (the plugin has no sensor reading to drive it from) and the fan light is still written.
-- **A port whose mode L-Connect itself does not apply** -> that port is left alone while the others still apply, exactly as L-Connect behaves.
+- **A port whose mode L-Connect itself does not apply** -> that port is left alone while the others still apply, as L-Connect does.
 - **A controller whose L-Connect "sync to motherboard" switch is on** -> its look is not driven; the controller is handed to the motherboard's ARGB header the way L-Connect hands it over (see above).
-- **An unreadable/corrupt configuration** -> logged, and lighting is disabled rather than apply a partial look. **Fan control is never affected** in any of these cases.
+- **An unreadable/corrupt configuration** -> logged, and lighting is disabled instead of applying a partial look. **Fan control is never affected** in any of these cases.
 
-The plugin logs what it did at startup (`Lighting: read N L-Connect controller look(s)` and `lighting applied for <token> (N writes)`), so the log file shows exactly which controllers got a look.
+The plugin logs what it did at startup (`Lighting: read N L-Connect controller look(s)` and `lighting applied for <token> (N writes)`), so the log file shows which controllers got a look.
 
-## Important caveats
+## Limitations
 
 - **Distinct plugin name re-keys your controls.** The Lighting build advertises itself to FanControl as `Lian Li Uni (Lighting)` (so you can tell which build is loaded). Because FanControl folds the plugin name into each control's binding key, switching to or from this build re-keys the controls and your fan-curve bindings must be re-pointed. If you are migrating an existing config and want to keep the bindings, remap the identifier prefix in `userConfig.json` from `Lian Li Uni/` to `Lian Li Uni (Lighting)/` (back the file up first).
 - **Do not run another lighting tool at the same time.** The Lighting build owns the LEDs at startup; running L-Connect, OpenRGB, SignalRGB, etc. alongside it re-introduces the two-writers conflict. If you use one of those, use the **standard** build instead, which never touches lighting.
@@ -121,9 +116,9 @@ The plugin logs what it did at startup (`Lighting: read N L-Connect controller l
 
 ## Layering
 
-The lighting code is gated behind the `ENABLE_LIGHTING` compile symbol (the standard and ARGB builds contain none of it) and lives in:
+The lighting code is gated behind the `ENABLE_LIGHTING` compile symbol (the standard and ARGB builds contain none of it) and is in:
 
-- `Transport/IDeviceTransport.SetFeature` and `Transport/HidTransport` - the feature-report write capability (HID `SetFeature` / `HidD_SetFeature`). This seam method is the one piece that is not gated (a harmless unused capability in the other builds).
+- `Transport/IDeviceTransport.SetFeature` and `Transport/HidTransport` - the feature-report write capability (HID `SetFeature` / `HidD_SetFeature`). This interface method is the only piece that is not gated (a harmless unused capability in the other builds).
 - `Protocol/RgbColor`, `Protocol/LightingPortState`, `Protocol/LightingTransfer` - the value types the encoder consumes and produces.
 - `Protocol/SlInfinityLightingEncoder` - the pure encoder: saved per-port look in, exact HID transfers out. Byte-tested.
 - `Protocol/UniFanLightingEncoder` and `Protocol/UniFanLightingProfiles` - the same for the other Uni families, one profile per family carrying its registers, tables and merge sequence; `Protocol/StrimerPlusLightingEncoder`, `Protocol/TlFanLightingEncoder` and `Protocol/Galahad2LightingEncoder` (with `Galahad2ScreenLightingState` for the Vision's ring) for the rest. All byte-tested.

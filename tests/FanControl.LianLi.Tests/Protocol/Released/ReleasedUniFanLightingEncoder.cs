@@ -47,8 +47,8 @@ internal static class ReleasedUniFanLightingEncoder
 
     /// <summary>
     /// Encode the full apply sequence for one controller: fan-quantity for each group, each present
-    /// port (in the profile's apply order) as a colour output report plus an effect feature report,
-    /// then the frame latch. Ports whose mode the family does not recognise are skipped, exactly as
+    /// port (in the profile's apply order) as a colour output report and an effect feature report,
+    /// then the frame latch. Ports whose mode the family does not recognise are skipped, as
     /// L-Connect skips them.
     /// </summary>
     /// <param name="profile">The family parameters that drive the encoding.</param>

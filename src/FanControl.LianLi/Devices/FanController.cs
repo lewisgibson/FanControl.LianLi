@@ -9,8 +9,8 @@ namespace FanControl.LianLi.Devices;
 
 /// <summary>
 /// Coordinates one physical controller (4 channels). The FanControl-thread
-/// surface (<see cref="SetTarget"/>, <see cref="ReleaseChannel"/>,
-/// <see cref="GetRpm"/>) only mutates locked in-memory state; every USB
+/// methods (<see cref="SetTarget"/>, <see cref="ReleaseChannel"/>,
+/// <see cref="GetRpm"/>) only mutate locked in-memory state; every USB
 /// transfer happens on the worker-thread methods (<see cref="ApplyPending"/>,
 /// <see cref="PollRpm"/>), so the host UI thread never blocks on HID I/O.
 /// </summary>
@@ -33,7 +33,7 @@ internal sealed class FanController : IFanDevice {
 
     private readonly object _lock = new object();
     private readonly int[] _target = { -1, -1, -1, -1 };         // commanded duty %, -1 = unassigned
-    private readonly int[] _lastWritten = { -2, -2, -2, -2 };    // last duty actually written
+    private readonly int[] _lastWritten = { -2, -2, -2, -2 };    // last duty written
     private readonly DateTime[] _lastWriteUtc =
     {
         DateTime.MinValue, DateTime.MinValue, DateTime.MinValue, DateTime.MinValue,
@@ -112,20 +112,20 @@ internal sealed class FanController : IFanDevice {
     }
 
     /// <summary>
-    /// Detect which channels have a fan attached and narrow the surfaced set. The Uni controllers
+    /// Detect which channels have a fan attached and narrow the set shown. The Uni controllers
     /// report no presence bit (the input report carries only RPM), so population is inferred from a
     /// burst of RPM probes: a channel with a spinning fan reads a plausible non-zero RPM on a
     /// majority of probes, while an empty channel reads 0 or occasional out-of-range garbage. The
     /// majority rule (and the all-empty fallback in <see cref="ChannelPopulationDecision"/>) keeps a
     /// real fan from being hidden and an empty channel from being shown. Called once by the plugin
     /// composition root after construction and before Load registers sensors - off the periodic
-    /// Update path. The probe reads can throw on a genuine device fault; the caller guards this call
+    /// Update path. The probe reads can throw on a real device fault; the caller guards this call
     /// so a fault leaves the controller shown (all channels), never lost.
     ///
     /// Limitation: with no presence bit, a fan that is present but physically stopped at probe time
     /// (a 0rpm-capable fan the user has stopped) reads identically to an empty channel and stays
     /// hidden until it next spins. Detection runs before the plugin drives anything, when a present
-    /// fan sits at its non-zero firmware default, so this is rare in practice.
+    /// fan sits at its non-zero firmware default, so this is rare.
     /// </summary>
     public void DetectPopulation() {
         var plausibleCounts = new int[Channels];
@@ -164,7 +164,7 @@ internal sealed class FanController : IFanDevice {
     /// <inheritdoc />
     public void ReplayOnReconnect(Func<bool> replay) => _reconnectReplay.Register(replay);
 
-    // ---------- FanControl-thread surface (no I/O) ----------
+    // ---------- FanControl-thread methods (no I/O) ----------
 
     /// <summary>Set the commanded duty for a channel. The worker pushes it to hardware.</summary>
     public void SetTarget(int channel, int duty) {
@@ -269,7 +269,7 @@ internal sealed class FanController : IFanDevice {
     // is replayed while the handle is still faulted: the device is off the bus, and a transfer of
     // the loop below is what reopens it, on the backoff. Once it is back, redo what Initialize did
     // for it, in the same order - the saved look first, then manual mode - and forget every
-    // last-written duty so the loop that follows re-sends each channel now rather than at its next
+    // last-written duty so the loop that follows re-sends each channel now instead of at its next
     // refresh. A throw leaves the generation unrecorded, so the replay is retried on the next tick
     // and the worker isolates the fault as usual; a look that reports failure stays owed on its
     // own and is tried again, without holding up fan control.

@@ -56,7 +56,7 @@ internal static class ControllerBuilder {
             threads[i] = new Thread(slot.Run) { IsBackground = true, Name = "LianLiControllerBuild" };
         }
 
-        // TickCount rather than a clock: this is the host's own wall time being rationed, and the
+        // TickCount, not a clock: this is the host's own wall time being rationed, and the
         // subtraction is wrap-safe in unchecked arithmetic.
         int started = Environment.TickCount;
         foreach (Thread thread in threads) {
@@ -122,7 +122,7 @@ internal static class ControllerBuilder {
             try {
                 outcome.Deliver(_index, _onLateController, _onLateFailure);
             }
-#pragma warning disable CA1031 // host seam: an exception escaping this thread would end FanControl's process
+#pragma warning disable CA1031 // host boundary: an exception escaping this thread would end FanControl's process
             catch (Exception ex) {
                 _log.Write("controller build " + _index + ": handling its late result failed: " + ex.Message);
             }

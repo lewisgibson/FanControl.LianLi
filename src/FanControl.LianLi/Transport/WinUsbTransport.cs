@@ -26,7 +26,7 @@ internal sealed class WinUsbTransport : IDeviceTransport {
     private const byte OutPipe = 0x01;
     private const byte InPipe = 0x81;
 
-    // A read of a dongle drains the reply to its end, as ReadAll does, rather than stopping at the
+    // A read of a dongle drains the reply to its end, as ReadAll does, instead of stopping at the
     // length asked for: packets left in the dongle would otherwise sit in front of the next request's
     // reply, and a flush does not reach them (see Write). The drain is capped so a dongle that never
     // stops sending cannot hold a read open: past the length asked for, at most this many more packets
@@ -74,7 +74,7 @@ internal sealed class WinUsbTransport : IDeviceTransport {
     private OpenedInterface _opened;
 
     // Whether the last write's flush failed, and whether the last read drained packets beyond the
-    // length asked for, so a run of either is logged once rather than per transfer. Worker-thread
+    // length asked for, so a run of either is logged once, not per transfer. Worker-thread
     // only, like the handles.
     private bool _flushFailing;
     private bool _draining;
@@ -279,8 +279,8 @@ internal sealed class WinUsbTransport : IDeviceTransport {
         }
 
         // Nothing at all within the pipe timeout is a reply that did not come: L-Connect's ReadAll
-        // and Read hand back zeros for it and their callers ignore the reply, without closing
-        // anything. So is it here - the read fails, the handle stays; a device that has really
+        // and Read return zeros for it and their callers ignore the reply, without closing
+        // anything. So is it here - the read fails, the handle stays; a device that has
         // stopped also fails its writes, which do fault it. A caller for whom the reply is
         // optional tells this failure apart by its type.
         if (total == 0) {
@@ -315,7 +315,7 @@ internal sealed class WinUsbTransport : IDeviceTransport {
     // Read up to limit packets until the device has nothing more, keeping what fits in buffer and
     // returning how many bytes arrived in all. error is 0 unless a transfer failed for a reason other
     // than the end of the reply. Each packet is its own native call, so the token is checked before
-    // each: a read given up on stops rather than going on to a transfer the abort has already passed.
+    // each: a read given up on stops instead of going on to a transfer the abort has already passed.
     private int GatherPackets(OpenedInterface opened, byte[] buffer, int limit, CancellationToken token, out int error) {
         error = 0;
         byte[] packet = new byte[WirelessProtocol.PacketLength];
@@ -363,7 +363,7 @@ internal sealed class WinUsbTransport : IDeviceTransport {
     // Cancel a transfer that ran out its bound, and say how, for the fault line. Both pipes are
     // aborted because a write's call also flushes the IN pipe, so either may be the one stuck. The
     // abort runs bounded on its own; if it fails or stalls, the handle's pending I/O is cancelled
-    // outright, which never waits - and an abort given up on does not go on to the second pipe.
+    // at once, which never waits - and an abort given up on does not go on to the second pipe.
     private string CancelPendingTransfers(OpenedInterface opened) {
         bool aborted = false;
         int abortError = 0;
@@ -397,7 +397,7 @@ internal sealed class WinUsbTransport : IDeviceTransport {
             CultureInfo.InvariantCulture, "{0}, cancel of pending I/O failed (error {1})", abortOutcome, cancelError);
     }
 
-    // Gate every transfer exactly as HidTransport does: a healthy handle passes, a faulted one
+    // Gate every transfer as HidTransport does: a healthy handle passes, a faulted one
     // is reopened now or refused fast, and the refusal is an IOException the worker isolates.
     private void EnsureOpen(string operation) {
         if (!_faulted) {
@@ -414,7 +414,7 @@ internal sealed class WinUsbTransport : IDeviceTransport {
     }
 
     // Close the stale interface and open a fresh one on the same path, both under the reopen bound
-    // and handed back through OpenHandoff, for the same reasons HidTransport.Reopen gives.
+    // and returned through OpenHandoff, for the same reasons HidTransport.Reopen gives.
     private void Reopen(string operation) {
         OpenedInterface stale = _opened;
         var handoff = new OpenHandoff<OpenedInterface>();
@@ -527,7 +527,7 @@ internal sealed class WinUsbTransport : IDeviceTransport {
             closed = _calls.TryRunCleanup(
                 _devicePath, Describe("close"), _ => opened.Dispose(), CloseTimeoutMilliseconds, () => { });
         }
-#pragma warning disable CA1031 // host seam: Dispose runs on plugin-owned threads, where an exception ends the FanControl service; the failure is logged
+#pragma warning disable CA1031 // host boundary: Dispose runs on plugin-owned threads, where an exception ends the FanControl service; the failure is logged
         catch (Exception ex) {
             _log.Write(string.Format(
                 CultureInfo.InvariantCulture,

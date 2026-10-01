@@ -42,7 +42,7 @@ internal sealed class HidTransport : IDeviceTransport {
     // parameter, so on a stale handle (the device re-enumerated across sleep/wake) they block
     // forever - freezing the keepalive thread, which is the hibernate hang. So these transfers run
     // under a bounded wait, and on timeout the pending I/O is cancelled so the handle is released
-    // cleanly rather than pinned (a pinned handle blocks the next open after wake).
+    // instead of pinned (a pinned handle blocks the next open after wake).
     private const int ControlTransferTimeoutMilliseconds = 500;
 
     // A reopen is a CreateFile and one HIDCLASS IOCTL per handle: milliseconds on a healthy device, an
@@ -89,7 +89,7 @@ internal sealed class HidTransport : IDeviceTransport {
     // long, so a short command prefix (set-speed, manual-mode, primer) is padded up to it.
     private readonly int _featureReportLength;
 
-    // Replaced by Reopen() after a fault, so not readonly. Only ever touched from the worker thread
+    // Replaced by Reopen() after a fault, so not readonly. Only touched from the worker thread
     // (or the composition root before the worker starts), which is what lets the swap happen without
     // a lock.
     private OpenedHandles _handles;
@@ -179,7 +179,7 @@ internal sealed class HidTransport : IDeviceTransport {
     }
 
     // Always true: an open transport holds a stream handle opened for writing, and a write it cannot
-    // make fails loudly rather than being skipped.
+    // make fails loudly instead of being skipped.
     public bool CanWrite => true;
 
     public int Generation => _generation;
@@ -262,7 +262,7 @@ internal sealed class HidTransport : IDeviceTransport {
 
         // Interrupt-IN read for the 0x0416 command-packet family: after a command write the device
         // answers on its input endpoint. byte 0 of the reply is the report id (0x01). The HID class
-        // driver hands back whole input reports only, so the buffer holds at least one; the caller gets
+        // driver returns whole input reports only, so the buffer holds at least one; the caller gets
         // the length it asked for, zero-padded past what arrived.
         int inputReportLength = _device.Capabilities.InputReportLength;
         if (inputReportLength <= 0) {
@@ -329,7 +329,7 @@ internal sealed class HidTransport : IDeviceTransport {
     // aborted is a timeout, one that finished first is kept.
     // A transfer the driver does not complete even once cancelled counts, until it does, as a call
     // still out on the device (DeviceCallGate.HoldUntilComplete), so the next transfers fail fast
-    // rather than queue another request the driver will not finish either.
+    // instead of queuing another request the driver will not finish either.
     private int RunStreamTransfer(string operation, Func<IHidTransfer> begin, CancellationToken token) {
         token.ThrowIfCancellationRequested();
         using IHidTransfer transfer = begin();
@@ -363,7 +363,7 @@ internal sealed class HidTransport : IDeviceTransport {
     // Run a synchronous HID control transfer under a bounded wait. The native call has no timeout,
     // so on a stale handle it blocks forever; the bound runs it on a throwaway thread and, on
     // timeout, cancels the pending I/O via CancelIoEx so the abandoned thread unwinds and the handle
-    // is released (rather than pinned, which would block the next open after wake). A timeout, or
+    // is released (not pinned, which would block the next open after wake). A timeout, or
     // a device-gone Win32 error, latches the fault so later transfers fail fast until the backoff
     // reopens the device; the worker isolates the throw either way.
     private void RunControlTransfer(string operation, ControlTransfer transfer, byte[] buffer) {
@@ -428,7 +428,7 @@ internal sealed class HidTransport : IDeviceTransport {
 
     // Gate every transfer: a healthy handle passes straight through; a faulted one is either reopened
     // now (when the backoff says so) or refused fast. The refusal is an IOException so the worker's
-    // per-controller catch logs and isolates it exactly like any other transfer failure.
+    // per-controller catch logs and isolates it like any other transfer failure.
     private void EnsureOpen(string operation) {
         if (!_faulted) {
             return;
@@ -535,7 +535,7 @@ internal sealed class HidTransport : IDeviceTransport {
     // one of the plugin's own threads would end the FanControl service, so a close that fails is logged
     // and left to Windows like one that times out. The close does not stop for the token: a handle left
     // unclosed would be closed by its finalizer instead, on the one finalizer thread every object in the
-    // host shares, where the same wedged close would block for good.
+    // host shares, where the same wedged close would block indefinitely.
     public void Dispose() {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) {
             return;
@@ -547,7 +547,7 @@ internal sealed class HidTransport : IDeviceTransport {
             closed = _calls.TryRunCleanup(
                 _device.DevicePath, Describe("close"), _ => handles.Dispose(), CloseTimeoutMilliseconds, () => { });
         }
-#pragma warning disable CA1031 // host seam: Dispose runs on plugin-owned threads, where an exception ends the FanControl service; the failure is logged
+#pragma warning disable CA1031 // host boundary: Dispose runs on plugin-owned threads, where an exception ends the FanControl service; the failure is logged
         catch (Exception ex) {
             _log.Write(string.Format(
                 CultureInfo.InvariantCulture,

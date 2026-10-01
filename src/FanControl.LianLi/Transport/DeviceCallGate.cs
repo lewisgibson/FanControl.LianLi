@@ -9,7 +9,7 @@ namespace FanControl.LianLi.Transport;
 
 /// <summary>
 /// Every bounded device call goes through here, keyed by the device it reaches, so that a device that
-/// stays wedged costs at most one stuck thread rather than one per retry. A call the bound gave up on
+/// stays wedged costs at most one stuck thread , not one per retry. A call the bound gave up on
 /// is abandoned to its thread (see <see cref="BoundedDeviceCall"/>), and the cancels it sends usually
 /// unwind it within milliseconds - but a CreateFile or configuration manager call blocked inside the
 /// kernel may never return, and the reopen backoffs, the stand-in rebuilds and the host's retried
@@ -119,7 +119,7 @@ internal sealed class DeviceCallGate {
     /// Run a call that only releases or cancels what <paramref name="device"/> already holds - a close,
     /// a pipe abort - even while an earlier call to it is still out. Refusing a close would leave its
     /// handles to their finalizer, on the one finalizer thread the whole host shares, where the same
-    /// wedged close would block for good; refusing an abort would leave the transfer it cancels
+    /// wedged close would block indefinitely; refusing an abort would leave the transfer it cancels
     /// running. Neither can pile up: a transport closes once, and an abort runs only inside a
     /// transfer this gate let start. If one is itself abandoned, it holds back later calls like any
     /// other.
@@ -222,7 +222,7 @@ internal sealed class DeviceCallGate {
         }
 
         // Given up on. It may already have returned - it finished at the deadline, or the cancel
-        // unwound it before the bound handed back - in which case nothing is left out on the device.
+        // unwound it before the bound returned - in which case nothing is left out on the device.
         lock (_lock) {
             if (!pending.Returned) {
                 pending.AbandonedAt = _clock.NowMilliseconds;

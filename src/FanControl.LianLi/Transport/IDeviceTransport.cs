@@ -21,7 +21,7 @@ internal interface IDeviceTransport : IDisposable {
     /// identifies the device reads its identity first, whatever <see cref="IsFaulted"/> says, since
     /// that read is what reopens the path; one that sets the device up waits until
     /// <see cref="IsFaulted"/> is false again, so its setup writes (and any saved lighting) go to
-    /// a device that is actually back. Read on the worker thread only.
+    /// a device that is back. Read on the worker thread only.
     /// </summary>
     int Generation { get; }
 

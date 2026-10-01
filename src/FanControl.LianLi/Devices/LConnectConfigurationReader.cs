@@ -17,7 +17,7 @@ namespace FanControl.LianLi.Devices;
 /// reader keeps the look settings (<c>LightingPort*</c>, <c>FanQuantity</c>, <c>MergeOrder</c> and
 /// the other families' equivalents) and the per-controller <c>MotherboardARGBSync</c> switch, and
 /// ignores the rest (fan curves, screen settings). Files that are not device settings are skipped by
-/// content; a genuinely unreadable file throws and lets the caller disable lighting rather than
+/// content; an unreadable file throws and lets the caller disable lighting rather than
 /// apply a partial look.
 /// </summary>
 internal static class LConnectConfigurationReader
@@ -36,7 +36,7 @@ internal static class LConnectConfigurationReader
     /// <summary>
     /// Read every controller's saved look from <paramref name="directory"/>. Returns an empty
     /// list when the directory is absent (L-Connect not installed). Throws on a corrupt file so
-    /// the caller can disable lighting deliberately.
+    /// the caller can disable lighting on a known fault.
     /// </summary>
     public static IReadOnlyList<LConnectControllerConfiguration> Read(string directory)
     {
@@ -249,7 +249,7 @@ internal static class LConnectConfigurationReader
     // LightingConfigs[port] -> { PortType -> GroupElement[] }; the LED port (PortType 1) carries the
     // fan lighting. Only per-fan (non-grouped) elements give an absolute fan index - one Config per
     // fan, accumulated across groups. A grouped element holds a single whole-group look without a
-    // per-fan count here, so it is skipped rather than addressed by guesswork.
+    // per-fan count here, so it is skipped not addressed by guesswork.
     private static List<TlFanLightingState> ReadTlFans(JsonValue data)
     {
         var fans = new List<TlFanLightingState>();

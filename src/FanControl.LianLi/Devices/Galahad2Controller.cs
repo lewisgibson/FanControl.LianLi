@@ -9,9 +9,9 @@ namespace FanControl.LianLi.Devices;
 
 /// <summary>
 /// Coordinates one Galahad II Trinity AIO (vendor 0x0416): channel 0 is the fan, channel 1 the
-/// pump. Like <see cref="FanController"/> the FanControl-thread surface only mutates locked
+/// pump. Like <see cref="FanController"/> the FanControl-thread methods only mutate locked
 /// in-memory state and every USB transfer happens on the worker-thread methods, but the 0x0416
-/// family writes a command packet and reads its reply rather than pulling an input report: a
+/// family writes a command packet and reads its reply instead of pulling an input report: a
 /// keepalive write per channel, and an RPM poll that writes a handshake and reads the answer. The
 /// pump duty is floored in <see cref="Galahad2Protocol"/> so a curve can never stop the pump.
 /// </summary>
@@ -30,7 +30,7 @@ internal sealed class Galahad2Controller : IFanDevice {
 
     private readonly object _lock = new object();
     private readonly int[] _target = { -1, -1 };          // commanded duty %, -1 = unassigned
-    private readonly int[] _lastWritten = { -2, -2 };     // last duty actually written
+    private readonly int[] _lastWritten = { -2, -2 };     // last duty written
     private readonly DateTime[] _lastWriteUtc = { DateTime.MinValue, DateTime.MinValue };
     private readonly float[] _rpm = { 0f, 0f };           // last measured RPM
     private readonly bool[] _rpmImplausible = { false, false }; // last read rejected as garbage
@@ -77,7 +77,7 @@ internal sealed class Galahad2Controller : IFanDevice {
     /// <inheritdoc />
     public void ReplayOnReconnect(Func<bool> replay) => _reconnectReplay.Register(replay);
 
-    // ---------- FanControl-thread surface (no I/O) ----------
+    // ---------- FanControl-thread methods (no I/O) ----------
 
     /// <summary>Set the commanded duty for a channel. The worker pushes it to hardware.</summary>
     public void SetTarget(int channel, int duty) {

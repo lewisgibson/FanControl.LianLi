@@ -4,10 +4,10 @@ namespace FanControl.LianLi.Devices;
 
 /// <summary>
 /// One physical controllable device the worker drives: a fan/pump controller with a
-/// fixed set of channels. The FanControl-thread surface (<see cref="SetTarget"/>,
+/// fixed set of channels. The FanControl-thread methods (<see cref="SetTarget"/>,
 /// <see cref="ReleaseChannel"/>, <see cref="GetRpm"/>) only mutates in-memory state;
 /// every USB transfer happens on the worker-thread methods (<see cref="ApplyPending"/>,
-/// <see cref="PollRpm"/>). This is the seam the worker and the plugin's sensor wiring
+/// <see cref="PollRpm"/>). This is the interface the worker and the plugin's sensor wiring
 /// depend on, so a device family (the Uni 0x0CF2 controllers, the 0x0416 command-packet
 /// controllers) is plugged in without either of them knowing the family.
 /// </summary>
@@ -16,7 +16,7 @@ internal interface IFanDevice : IDisposable {
     int ChannelCount { get; }
 
     /// <summary>
-    /// Whether <paramref name="channel"/> has a fan attached and should be surfaced to the host.
+    /// Whether <paramref name="channel"/> has a fan attached and should be shown to the host.
     /// A device that cannot tell, or that knows every channel is real, returns <c>true</c> so the
     /// channel is shown; only a channel proven empty at startup returns <c>false</c>. The result is
     /// fixed before <see cref="Describe"/> is read, so it is stable across a run and safe to read

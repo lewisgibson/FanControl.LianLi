@@ -359,7 +359,7 @@ internal static class WirelessProtocol {
 
         // RefreshList takes ten off a count of ten or more (the right-attached end cap), and the
         // FanNum getter takes ten off again whatever is still ten or more. No device has more than
-        // the four slots its record carries, so anything beyond is clamped rather than trusted.
+        // the four slots its record carries, so anything beyond is clamped, not trusted.
         int fanCount = reply[offset + 19];
         bool rightAttached = fanCount >= RightAttachOffset;
         if (rightAttached) {
@@ -519,7 +519,7 @@ internal static class WirelessProtocol {
     /// ARGB colours (title, value, unit); 25 brightness; 26 always 1; 27 theme; 28-29 the pump timer;
     /// 30 rotation; 31 zero. Every saved setting comes from <paramref name="presentation"/>. The four
     /// live CPU and GPU figures are the one part the plugin has nothing to fill with, so they are
-    /// sent as zero and hidden rather than frozen on the screen at a wrong value.
+    /// sent as zero and hidden instead of frozen on the screen at a wrong value.
     /// A screen saved in advance mode keeps its saved settings too, with theme 0, as L-Connect's own
     /// setting handlers write it (<c>handleSetPumpLCDBrightness</c> and the rest call
     /// <c>SetAioParams</c> whatever the mode, and the wireless theme is applied only out of advance
@@ -700,7 +700,7 @@ internal static class WirelessProtocol {
     /// Encode the clock pulse: a broadcast carrying the master's address, which the devices use to
     /// keep their clocks, and so their effects, in step with the master's. L-Connect sends it every
     /// second whatever it is doing (<c>MasterDevice.SyncMasterClock</c>). Unlike every other payload
-    /// it addresses nobody - the device address stays all zero - because it is for whoever can hear it.
+    /// it addresses no device - the device address stays all zero - because it is for every device that can hear it.
     /// It also carries a 220-byte block at 14-233: the PC's figures for the LCD FLEX fans' screens,
     /// of which the plugin sends only the date and time (<paramref name="localTime"/>, local as
     /// <c>DateTime.Now</c> is: year big-endian at 46-47, then month, day, hour, minute and second

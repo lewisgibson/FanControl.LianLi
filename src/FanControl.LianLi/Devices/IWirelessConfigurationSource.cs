@@ -7,9 +7,9 @@ namespace FanControl.LianLi.Devices;
 /// What L-Connect saved about a wireless master and the devices bound to it, looked up by RF
 /// address: the master's RF channel, the lighting effect to replay to a device, whether a device's
 /// lighting was handed to the motherboard, how a water block's screen is set up, and how an LCD
-/// FLEX group's screens are. The plugin reads L-Connect's files rather than deriving any of these
+/// FLEX group's screens are. The plugin reads L-Connect's files instead of deriving any of these
 /// - it can neither render an effect nor invent a screen theme - and anything missing, or saved in
-/// a file that cannot be read, is simply absent so the caller falls back to L-Connect's own
+/// a file that cannot be read, is absent so the caller falls back to L-Connect's own
 /// default. No member throws for a bad file.
 /// </summary>
 internal interface IWirelessConfigurationSource {

@@ -8,7 +8,7 @@ namespace FanControl.LianLi.Transport;
 /// or older than it is.
 /// </summary>
 internal sealed class StopwatchDeviceCallClock : IDeviceCallClock {
-    /// <summary>The one instance; it holds no state.</summary>
+    /// <summary>The single instance; it holds no state.</summary>
     public static readonly StopwatchDeviceCallClock Instance = new StopwatchDeviceCallClock();
 
     private StopwatchDeviceCallClock() {

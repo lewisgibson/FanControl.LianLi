@@ -17,7 +17,7 @@ namespace FanControl.LianLi.Plugin;
 /// the assembly: it composes the transports, the per-device protocol encoders, the
 /// injectable clock and the keepalive worker, and exposes the
 /// <see cref="IPlugin3"/> surface to the host. FanControl creates a new one of these
-/// on every refresh, so what must outlive it lives in <see cref="PluginRuntime"/>.
+/// on every refresh, so what must outlive it is kept in <see cref="PluginRuntime"/>.
 /// The host's threads only touch in-memory state, apart from the bounded device
 /// scan and builds in <see cref="Initialize"/>; every other USB transfer happens on
 /// the worker thread.
@@ -38,7 +38,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     private readonly List<KeyValuePair<string, IFanDevice>> _controllers = new List<KeyValuePair<string, IFanDevice>>();
 
     // The stand-in registered for each plan whose build was still running at the deadline, so the
-    // controller that build produces is handed to it rather than opened a second time.
+    // controller that build produces is given to it instead of opened a second time.
     private readonly Dictionary<string, ReconnectingFanDevice> _lateStandIns = new Dictionary<string, ReconnectingFanDevice>(StringComparer.Ordinal);
 
     // Whether a sensor may still turn up after Load: a wireless pair is driven (built, stood in for,
@@ -56,7 +56,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     private readonly List<string> _standInKeys = new List<string>();
 
     // What must outlive this instance - the running worker and the controllers remembered across
-    // scans - lives in the process-wide runtime, because FanControl creates a new plugin object on
+    // scans - is kept in the process-wide runtime, because FanControl creates a new plugin object on
     // every refresh and never closes one that registered no sensors.
     private readonly PluginRuntime _runtime;
 
@@ -178,7 +178,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
 
         // Every build also locates the 0x0416 command-packet controllers (Uni Fan TL, Galahad II),
         // the wireless dongles, the HydroShift II OLED Curve's pump MCU and the FLEX receivers; the
-        // Lighting build additionally locates lighting-only products (Strimer Plus) to drive their
+        // Lighting build also locates lighting-only products (Strimer Plus) to drive their
         // RGB. The enumerator requires both vendor and product to match, so listing a product id
         // here is what opts a family into discovery.
         var productIds = new List<int>(_catalog.ProductIds);
@@ -195,12 +195,12 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
         try {
             located = _enumerator.Locate(_catalog.VendorIds, productIds);
         }
-#pragma warning disable CA1031 // host seam: a device scan failure must not crash FanControl
+#pragma warning disable CA1031 // host boundary: a device scan failure must not crash FanControl
         catch (Exception ex) {
             // The scan asks Windows' configuration manager and HID stack for every candidate
             // interface, any of which can fail in some host or session contexts. Degrade to the
-            // remembered controllers and log it rather than let the exception propagate into the
-            // host - the same host-seam resilience the per-device open catch below applies, one
+            // remembered controllers and log it instead of letting the exception propagate into the
+            // host - the same host-boundary resilience the per-device open catch below applies, one
             // level up.
             _log.Write(string.Format(
                 CultureInfo.InvariantCulture,
@@ -256,7 +256,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
                 case DeviceKind.LightingOnly:
                     // A lighting-only device (e.g. Strimer Plus) has no fan control: drive its saved
                     // look once, never registering a controller or worker for it. Nothing waits on
-                    // it, so it runs on a thread of its own rather than inside FanControl's
+                    // it, so it runs on a thread of its own instead of inside FanControl's
                     // Initialize, where a wedged one would hold the whole application up.
                     IReadOnlyList<LConnectControllerConfiguration> configurations = _lightingConfigurations;
                     new Thread(() => DriveLightingOnlyDevice(info, configurations)) { IsBackground = true, Name = "LianLiLightingOnly" }.Start();
@@ -328,7 +328,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     // failed, or a device that had not re-appeared yet - so the user's curves stay bound to it.
     // First, a planned device on a path nothing is remembered under takes over a remembered one
     // that is the same device moved (PluginRuntime.TakeOverMoved), so a move to another port keeps
-    // its sensors rather than registering them twice.
+    // its sensors instead of registering them twice.
     private void BuildAll(List<ControllerPlan> plans, bool scanFailed) {
         var plannedKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (ControllerPlan plan in plans) {
@@ -360,7 +360,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
         // read its list, since that is when whether the radio has the chain is known: a receiver
         // that decided earlier would take a chain the pair is about to record as its own, then hand
         // it back a tick later through a refresh. The wait ends however the pair's build ends; a
-        // pair that runs past the deadline takes the receivers past it too, and they are handed on
+        // pair that runs past the deadline takes the receivers past it too, and they are passed on
         // late like any other. A pair another scan is still building is not waited for (the gate
         // starts settled): what it has recorded so far decides, and its own report puts anything
         // else right (OnSensorsReported).
@@ -406,7 +406,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
         // Every controller built is remembered before any is registered: a sensor id belongs to one
         // controller (PluginRuntime.Remember), so a chain the wireless pair drives is taken from
         // its USB receiver's memory first, whichever is remembered first, and the receiver then
-        // registers without it rather than standing in with the pair's ids beside it. Whether each
+        // registers without it instead of standing in with the pair's ids beside it. Whether each
         // was new is read before anything is remembered.
         var currents = new RememberedController?[plans.Count];
         var wasNew = new bool[plans.Count];
@@ -432,7 +432,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
             // So is a FLEX receiver with no control yet: its chain has no fan reported, or is the
             // radio's for now. Each waits only while the controller is new to the plugin (IsNew): one
             // an earlier run remembered with nothing - a pair that only hears a neighbour's kit, say -
-            // must not show the placeholder for good. A failed open waits only for a pair, hub or
+            // must not show the placeholder indefinitely. A failed open waits only for a pair, hub or
             // receiver already remembered.
             bool isNew = wasNew[i];
             bool mayCheckIn = isNew && (outcome.Controller is WirelessController wireless
@@ -451,7 +451,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
             }
 
             // A build this scan did not start (another still had the device) was logged above; its
-            // result goes to whoever started it, and the stand-in rebuilds once that has finished.
+            // result goes to the scan that started it, and the stand-in rebuilds once that has finished.
             bool startedHere = owned.Contains(i);
             if (outcome.Error != null) {
                 _log.Write(string.Format(CultureInfo.InvariantCulture, "  open failed for {0}: {1}", plan.Key, outcome.Error.Message));
@@ -647,9 +647,9 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
             if (controller is FlexReceiverController && !_runtime.IsOwnedBy(this)) {
                 // A receiver finishing after this instance closed decided whose its chain is
                 // against a pair this instance may already have closed, which to the receiver looks
-                // exactly like the radio letting the chain go (as it does to one mid-poll, see
+                // just like the radio letting the chain go (as it does to one mid-poll, see
                 // OnFlexReceiverChanged). So nothing it decided is remembered, and the next
-                // instance's scan decides afresh. The index is let go of like any other late build's.
+                // instance's scan decides again. The index is let go of like any other late build's.
                 _runtime.EndBuild(plan.Key);
                 _log.Write("  " + plan.Key + " finished opening after this plugin instance closed; whose its chain is, is left to the next one");
             } else {
@@ -742,7 +742,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     // opens a device another build still has; that attempt fails, and the backoff tries again. It
     // runs on the stand-in's own thread, so it may reach here after FanControl has closed this
     // instance and the next one is scanning: then it opens nothing, since holding the device for
-    // an open nobody would adopt would make that scan stand in for the device instead.
+    // an open no scan would adopt would make that scan stand in for the device instead.
     internal IFanDevice Rebuild(ControllerPlan plan, int index) {
         if (!_runtime.TryBeginRebuild(this, _numberingEpoch, plan.Key, index)) {
             // Either another build still has the device, or this instance numbered it before the
@@ -809,7 +809,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     }
 
     // Open a Uni 0x0CF2 controller and apply its saved lighting (Lighting build). A device that
-    // fails to open throws to Register, which skips it rather than crashing the host; once the
+    // fails to open throws to Register, which skips it instead of crashing the host; once the
     // controller exists, its setup writes and population probe are guarded individually so a
     // rejected write degrades the feature, never the controller.
     private FanController BuildUniController(int index, LocatedDevice info, IFanProtocol protocol) {
@@ -822,7 +822,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
         var controller = new FanController(index, transport, protocol, startStopEnabled, _clock, _log);
 #if ENABLE_LIGHTING
         // Re-apply L-Connect's saved look before fan setup, for a controller that has a matching
-        // saved config. No match -> no lighting, leaving the device exactly as another tool
+        // saved config. No match -> no lighting, leaving the device as another tool
         // (OpenRGB, the motherboard) left it. The look is volatile on the device, so it is also
         // replayed whenever the transport reconnects a re-enumerated (possibly reset) controller -
         // the same guarded apply, driven on the worker thread through the controller's replay.
@@ -844,13 +844,13 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     // Assert manual (software) mode on the registered Uni controller so the host owns the speed. A
     // rejected setup write must not lose the controller: the worker re-asserts manual mode before
     // every speed write, so control recovers on the first accepted write. The fault is isolated here
-    // at the composition seam - the same host-seam resilience intent as the per-device open guard -
+    // at the composition root - the same host-boundary resilience intent as the per-device open guard -
     // and logged.
     private void AssertManualMode(FanController controller, LocatedDevice info) {
         try {
             controller.AssertManualMode();
         }
-#pragma warning disable CA1031 // host seam: a rejected setup write degrades to worker-time re-asserts, never loses the controller
+#pragma warning disable CA1031 // host boundary: a rejected setup write degrades to worker-time re-asserts, never loses the controller
         catch (Exception ex) {
             _log.Write(string.Format(
                 CultureInfo.InvariantCulture,
@@ -861,16 +861,16 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
 #pragma warning restore CA1031
     }
 
-    // Probe the Uni controller for which channels have a fan, so an empty slot is not surfaced as a
+    // Probe the Uni controller for which channels have a fan, so an empty slot is not shown as a
     // dead sensor. A probe read fault must not lose the controller (it stays with all channels
-    // shown), so the fault is isolated here at the composition seam - the same host-seam resilience
+    // shown), so the fault is isolated here at the composition root - the same host-boundary resilience
     // intent as the per-device open guard - and logged. The controller defaults to
     // all-populated until this narrows it.
     private void DetectPopulation(FanController controller, LocatedDevice info) {
         try {
             controller.DetectPopulation();
         }
-#pragma warning disable CA1031 // host seam: a probe read fault leaves all channels shown, never loses the controller
+#pragma warning disable CA1031 // host boundary: a probe read fault leaves all channels shown, never loses the controller
         catch (Exception ex) {
             _log.Write(string.Format(
                 CultureInfo.InvariantCulture,
@@ -884,7 +884,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     // Read L-Connect's per-group start/stop toggle for this Uni controller. A missing profile is
     // the normal "L-Connect not installed / no saved profile" case and yields all-off; a corrupt
     // profile must not stop the controller loading, so it degrades to all-off and logs - the same
-    // isolate-the-fault intent as the lighting guard, applied at the composition seam.
+    // isolate-the-fault intent as the lighting guard, applied at the composition root.
     private bool[] ReadStartStop(LocatedDevice info, int channelCount) {
         try {
             // Log whether the profile file was located, so "start/stop does nothing" can be told apart
@@ -948,12 +948,12 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     // Assert software control of the HydroShift II OLED Curve's pump, the counterpart of the Uni
     // manual-mode assert: a rejected setup write must not lose the controller, and the worker
     // sends it again when the pump reports it is following the header, and after every reconnect.
-    // The fault is isolated here at the composition seam and logged.
+    // The fault is isolated here at the composition root and logged.
     private void AssertSoftwareControl(HydroShiftCurveController controller, LocatedDevice info) {
         try {
             controller.AssertSoftwareControl();
         }
-#pragma warning disable CA1031 // host seam: a rejected setup write degrades to worker-time re-asserts, never loses the controller
+#pragma warning disable CA1031 // host boundary: a rejected setup write degrades to worker-time re-asserts, never loses the controller
         catch (Exception ex) {
             _log.Write(string.Format(
                 CultureInfo.InvariantCulture,
@@ -966,8 +966,8 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
 
     // Open a FLEX or P28 V2 chain's USB receiver, a WinUSB device. The controller's constructor
     // reads the receiver's status for its RF address and fan count, so a receiver that does not
-    // answer, or answers with something else, throws here and is skipped rather than crashing the
-    // host; it owns the transport from there. Whether the chain is driven here is settled only
+    // answer, or answers with something else, throws here and is skipped instead of crashing the
+    // host; it owns the transport from there. Whether the chain is driven here is decided only
     // once awaitWirelessPlan returns (see BuildAll). No lighting is driven for it in any build:
     // L-Connect renders a FLEX look on the PC and saves only its settings, so there is no look to
     // replay.
@@ -1001,13 +1001,13 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     // A receiver noticed something on a poll. A chain the radio took, or let go, means the host's
     // control for it may be on the wrong controller now: a refresh is asked for when Load has the
     // chain's ids on the controller that no longer drives it (nothing before Load, which registers
-    // them under whoever drives the chain by then). A chain driven here again is remembered first,
+    // them under whichever controller drives the chain by then). A chain driven here again is remembered first,
     // which takes its ids from the pair's memory; a chain the radio took is remembered by the pair
     // when it hears it, and asked for from that side as well. A fan reported later is a new sensor
     // only if the host does not already have it, which OnSensorsReported checks. Another receiver
-    // answering on the path needs the path planned afresh, once. Nothing is done for an instance
+    // answering on the path needs the path planned again, once. Nothing is done for an instance
     // that no longer runs the worker: its controllers are being closed for the refresh that
-    // replaces it, and the wireless controller closing looks, to a receiver mid-poll, exactly like
+    // replaces it, and the wireless controller closing looks, to a receiver mid-poll, just like
     // the radio letting the chain go. Runs on the worker's thread, so nothing may escape it.
     internal void OnFlexReceiverChanged(
         ControllerPlan plan, int index, FlexReceiverController controller, FlexReceiverChange change) {
@@ -1071,7 +1071,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
 
     // Open a 0x0416 command-packet controller (Uni Fan TL or Galahad II). The controller's
     // constructor performs the discovery handshake, so a wrong interface or an absent device
-    // surfaces here as a read timeout, thrown to Register, which skips it rather than crashing the host.
+    // shows up here as a read timeout, thrown to Register, which skips it instead of crashing the host.
     private IFanDevice BuildCommandPacketController(ControllerPlan plan, int index, LocatedDevice info) {
         DeviceKind kind = plan.Kind;
         IDeviceTransport? transport = null;
@@ -1140,11 +1140,11 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
             Registering?.Invoke(entry.Key);
             IFanDevice controller = entry.Value;
             for (int ch = 0; ch < controller.ChannelCount; ch++) {
-                // Skip a channel with no fan attached so an empty slot is not surfaced as a dead
+                // Skip a channel with no fan attached so an empty slot is not shown as a dead
                 // sensor. The sensor id is keyed to the physical channel (see Describe), so the
                 // populated channels keep their ids and the user's saved curve bindings survive;
                 // FanControl greys out a binding whose sensor is absent and re-links it if the fan
-                // reappears, rather than discarding the rest of the config.
+                // reappears, instead of discarding the rest of the config.
                 if (!controller.IsChannelPopulated(ch) || !Registers(entry.Key, controller.Describe(ch).ControlId, owners, registered)) {
                     continue;
                 }
@@ -1203,7 +1203,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
 
         // An id that changed hands while the pass ran (the radio took the chain, or let it go,
         // between the snapshot and its registration) is registered under the controller that no
-        // longer drives it, and nobody asked for the refresh: the claim found nothing registered.
+        // longer drives it, and nothing asked for the refresh: the claim found nothing registered.
         foreach (string id in registered.Keys) {
             if (_runtime.OwnerOf(id) is string owner && !string.Equals(owner, owners[id], StringComparison.Ordinal)) {
                 _runtime.RequestRefresh("a FLEX chain changed hands while the sensors were being registered", _log);
@@ -1227,7 +1227,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     // memory, as read once for the pass (owners), gives the id to another controller. The memory
     // holds each id under one key (PluginRuntime.Remember), and an id under no key goes to the
     // first controller to report it for the rest of the pass, so an id is registered under one
-    // key, once. Add rather than the indexer: an id reaching here twice would mean that rule
+    // key, once. Add, not the indexer: an id reaching here twice would mean that rule
     // failed, and a loud failure is better than a duplicate control the host cannot tell apart.
     private bool Registers(string key, string id, Dictionary<string, string> owners, Dictionary<string, string> registered) {
         if (!owners.TryGetValue(id, out string? owner)) {
@@ -1276,7 +1276,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     // The product ids this build drives lighting for: the Uni fan families (SL, AL, SL-Infinity,
     // SL v2, AL v2, and the Redragon SL variant), the lighting-only Strimer Plus, and the 0x0416
     // controllers (Uni Fan TL, Galahad II Trinity and Vision, HydroShift LCD). A located device of
-    // any other family is left untouched rather than driven with unverified bytes.
+    // any other family is left untouched, not driven with unverified bytes.
     private const int SlProductId = 0xA100;
     private const int AlProductId = 0xA101;
     private const int SlInfinityProductId = 0xA102;
@@ -1295,8 +1295,8 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     private const int HydroShiftLcdThirdProductId = 0x739A;
 
     // Read L-Connect's saved look directly from its own config directory. Opt-in and
-    // best-effort: if L-Connect is not installed the directory is absent and no lighting is
-    // driven; an unreadable config is logged and lighting is disabled rather than risk a
+    // optional: if L-Connect is not installed the directory is absent and no lighting is
+    // driven; an unreadable config is logged and lighting is disabled instead of risking a
     // wrong look. Fan control is never affected either way.
     private IReadOnlyList<LConnectControllerConfiguration> ReadLConnectLighting()
     {
@@ -1332,7 +1332,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     // and get whichever halves of their look were saved; a Vision screen ring that follows a live
     // sensor in L-Connect is left as found, since the plugin has no sensor reading to colour it
     // from. The same runs on every reconnect, as L-Connect's resume does. Returns true once the
-    // device's lighting is settled - applied, or nothing to apply - and false when the writes
+    // device's lighting is done - applied, or nothing to apply - and false when the writes
     // failed, so the controller's reconnect replay keeps the look owed and tries it again.
     private bool ApplyLighting(
         IDeviceTransport transport, LocatedDevice info, IReadOnlyList<LConnectControllerConfiguration> configurations)
@@ -1353,7 +1353,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
         }
 
         // Choose the encoder by the located device's hardware-read product id (authoritative),
-        // not one parsed from the config file. An unsupported family is left exactly as-is.
+        // not one parsed from the config file. An unsupported family is left as-is.
         IReadOnlyList<LightingTransfer> transfers;
         switch (info.ProductId)
         {
@@ -1508,7 +1508,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
             transport = _enumerator.Open(info);
             _ = ApplyLighting(transport, info, configurations);
         }
-#pragma warning disable CA1031 // host seam: a lighting-only device that fails to open is skipped, never fatal
+#pragma warning disable CA1031 // host boundary: a lighting-only device that fails to open is skipped, never fatal
         catch (Exception ex)
         {
             _log.Write(string.Format(
@@ -1523,7 +1523,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
         {
             transport?.Dispose();
         }
-#pragma warning disable CA1031 // host seam: this runs on the plugin's own thread, where an escaping exception would end FanControl's process
+#pragma warning disable CA1031 // host boundary: this runs on the plugin's own thread, where an escaping exception would end FanControl's process
         catch (Exception ex)
         {
             _log.Write(string.Format(

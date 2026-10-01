@@ -8,7 +8,7 @@ namespace FanControl.LianLi.Transport;
 /// the device it paces.
 /// </summary>
 internal sealed class ThreadTransferDelay : ITransferDelay {
-    /// <summary>The one instance; it holds no state.</summary>
+    /// <summary>The single instance; it holds no state.</summary>
     public static readonly ThreadTransferDelay Instance = new ThreadTransferDelay();
 
     private ThreadTransferDelay() {

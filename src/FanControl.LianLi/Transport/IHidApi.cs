@@ -40,7 +40,7 @@ internal interface IHidApi {
 
     /// <summary>
     /// <c>HidD_GetPreparsedData</c>: the interface's report descriptor, parsed, in memory hid.dll
-    /// allocates. The one step of reading the capabilities that reaches the device; what it returns is
+    /// allocates. The only step of reading the capabilities that reaches the device; what it returns is
     /// released with <see cref="FreePreparsedData"/>.
     /// </summary>
     bool GetPreparsedData(SafeHandle handle, out IntPtr preparsed, out int error);
@@ -74,7 +74,7 @@ internal interface IHidApi {
 
     /// <summary>
     /// Start an overlapped <c>WriteFile</c> of <paramref name="report"/> (one whole output report) on a
-    /// stream handle. Never blocks on the device; a write the driver refused outright comes back as a
+    /// stream handle. Never blocks on the device; a write the driver refused at once comes back as a
     /// transfer that has already completed with that error.
     /// </summary>
     IHidTransfer BeginWrite(SafeHandle stream, byte[] report);

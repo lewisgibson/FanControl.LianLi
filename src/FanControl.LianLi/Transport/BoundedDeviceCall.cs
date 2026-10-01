@@ -26,7 +26,7 @@ namespace FanControl.LianLi.Transport;
 /// <see cref="OperationCanceledException"/> that check throws is the call unwinding as asked, not a
 /// failure, so it is never reported.
 ///
-/// A new thread per call, rather than a pooled or long-lived one, is deliberate. Creating one costs
+/// A new thread per call, not a pooled or long-lived one, is the choice here. Creating one costs
 /// in the order of a tenth of a millisecond, so even the few hundred transfers of a lighting stream
 /// add up to milliseconds; and a thread used only once can be abandoned at the deadline with nothing
 /// queued behind it, and cancelled by handle without any risk of reaching a later call that a reused
@@ -37,7 +37,7 @@ namespace FanControl.LianLi.Transport;
 /// and the reopen backoffs keep retrying such a device for the life of the process. So the bound
 /// reports when an abandoned call is finally done with, and <see cref="DeviceCallGate"/> uses that to
 /// start nothing more on a device while an earlier call to it is still out: at most one stuck thread
-/// per device, rather than one per retry.
+/// per device, , not one per retry.
 /// </summary>
 internal static class BoundedDeviceCall {
     // Marks the thread-handle slot as claimed by the caller (see TryRun). Never a valid handle.
@@ -59,7 +59,7 @@ internal static class BoundedDeviceCall {
     /// having first cancelled the token <paramref name="call"/> was handed, then invoked
     /// <paramref name="onTimeout"/> to cancel the stuck transfer by handle, then cancelled the
     /// abandoned thread's synchronous I/O, so it can unwind either way and stops before any further
-    /// native call. An exception the abandoned call throws once the caller has given up has nobody
+    /// native call. An exception the abandoned call throws once the caller has given up has no caller
     /// left to rethrow it to, so it is handed to <paramref name="onLateFailure"/> instead - on
     /// whichever thread noticed it last, so the callback must not throw (the transports route it to an
     /// <c>ILog</c>, which never does) - unless it is the cancellation that token raised.
@@ -121,7 +121,7 @@ internal static class BoundedDeviceCall {
         // cancels through a handle that pins the thread object: cancelling by id instead would race
         // the thread exiting and Windows reusing its id for another thread, whose I/O would then be
         // cancelled. The slot holds 0 until the thread has opened it, and Taken once the caller has
-        // claimed it; whoever finds the other side's mark closes the handle.
+        // claimed it; whichever side finds the other's mark closes the handle.
         IntPtr threadHandle = IntPtr.Zero;
 
         var thread = new Thread(() => {
@@ -190,7 +190,7 @@ internal static class BoundedDeviceCall {
             }
         }
 
-        // The thread has terminated without the call being marked abandoned, so nobody else reports it.
+        // The thread has terminated without the call being marked abandoned, so nothing else reports it.
         onReturned();
         failure?.Throw();
         return true;

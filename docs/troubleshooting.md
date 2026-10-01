@@ -48,7 +48,7 @@ The Lighting build reads L-Connect's own saved settings under `C:\ProgramData\Li
 
 The wireless fans pair with the L-Wireless SYNC controller, whose two dongles Windows binds to its WinUSB driver. The log shows the dongles being found, as `controller wireless master=... devices=...`, or why not:
 
-- `has no WinUSB interface registered`: Windows has not bound the dongle to WinUSB. In Device Manager it should sit under Universal Serial Bus devices. The plugin reaches the dongles exactly the way L-Connect does, so if L-Connect can see them, the plugin should too.
+- `has no WinUSB interface registered`: Windows has not bound the dongle to WinUSB. In Device Manager it should sit under Universal Serial Bus devices. The plugin reaches the dongles the way L-Connect does, so if L-Connect can see them, the plugin should too.
 - `open failed`: L-Connect's service is still running and has the dongles open. Switch it off ([Using it with L-Connect](../README.md#using-it-with-l-connect)).
 - `master=not answering yet` or `devices=0`: the dongle has not finished starting, or nothing is paired to it yet. The plugin keeps listening and adds the fans as soon as they check in. Pairing is done in L-Connect; the plugin never pairs or unpairs anything.
 
@@ -62,7 +62,7 @@ Its pump rides on the cooler's lighting device, which Windows binds to WinUSB li
 
 The receiver is a WinUSB device like the dongles, so the same log lines apply: `UNI FAN TL FLEX receiver ... has no WinUSB interface registered` means Windows has not bound Lian Li's driver to it, and `open failed` means L-Connect's service still has it open. Two more lines are specific to the receivers:
 
-- `left to the radio`: the chain is also paired to your L-Wireless dongle, and the dongle drives it, exactly as in L-Connect. Unpair it in L-Connect if you want it driven over USB.
+- `left to the radio`: the chain is also paired to your L-Wireless dongle, and the dongle drives it, as in L-Connect. Unpair it in L-Connect if you want it driven over USB.
 - `now answers as`: another receiver is answering on that USB port (two swapped between ports while the PC slept, say). Nothing is sent to it, and it is picked up under its own address on the refresh that follows.
 
 The plain SL-INF FLEX, SL FLEX and CL FLEX receivers are not driven over USB at all, because L-Connect gives them no fan control there either. Pair them to the L-Wireless SYNC controller instead.
@@ -73,7 +73,7 @@ Each build shows up in FanControl under its own name (Lian Li Uni, Lian Li Uni (
 
 ## Where the plugin log is
 
-FanControl loads plugins in its background service (`FanControl.Service`), which runs as SYSTEM, so the plugin's log is under the SYSTEM profile rather than your own:
+FanControl loads plugins in its background service (`FanControl.Service`), which runs as SYSTEM, so the plugin's log is under the SYSTEM profile , not your own:
 
 ```
 C:\Windows\System32\config\systemprofile\AppData\Local\FanControl.LianLi\plugin.log

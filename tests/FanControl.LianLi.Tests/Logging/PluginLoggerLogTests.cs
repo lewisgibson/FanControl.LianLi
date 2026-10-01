@@ -8,7 +8,7 @@ using Xunit;
 
 namespace FanControl.LianLi.Tests.Logging;
 
-/// <summary>The adapter onto FanControl's logger: every line handed on in order, and the host never waited on.</summary>
+/// <summary>The adapter onto FanControl's logger: every line passed on in order, and the host never waited on.</summary>
 public sealed class PluginLoggerLogTests {
     [Fact]
     public void EveryLine_ReachesTheHostLogger_InOrder() {

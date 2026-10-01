@@ -16,7 +16,7 @@ namespace FanControl.LianLi.Tests.Devices;
 /// A FLEX or P28 V2 chain driven through its USB receiver: the status read at build for the
 /// address and fans, the sensors keyed on that address as the wireless controller keys them and
 /// given only once whose the chain is has been settled, the speed command on change and on the
-/// keepalive cadence with the reply checked, the readings from each poll, a fan reported later,
+/// keepalive interval with the reply checked, the readings from each poll, a fan reported later,
 /// the identification and re-send after a reopen, the chain changing hands with the wireless
 /// controller either way - decided from the shared state at every write, never from a flag - and
 /// another receiver answering on the path.
@@ -159,7 +159,7 @@ public sealed class FlexReceiverControllerTests {
         IOException wrongEcho = Assert.Throws<IOException>(() => rig.Build());
         Assert.Equal("the receiver answered the status request with 13, not its status", wrongEcho.Message);
 
-        // Nothing queued: the fake answers zeros, as L-Connect's own read hands back for a reply
+        // Nothing queued: the fake answers zeros, as L-Connect's own read returns for a reply
         // that timed out. The real transport throws DeviceReplyMissingException ("returned no
         // data") from Read instead, which fails the build the same way.
         Assert.Contains("with 00, not its status", Assert.Throws<IOException>(() => rig.Build()).Message);
@@ -241,7 +241,7 @@ public sealed class FlexReceiverControllerTests {
         Assert.Contains("Set F0:a1b2c3d4e5f6 = 50% (PWM 128 to 3 fan(s))", rig.Logger.Messages);
     }
 
-    // The duty lives in the shared state, keyed on the chain's address: one the host handed to
+    // The duty is kept in the shared state, keyed on the chain's address: one the host gave to
     // the chain's other controller, or to a stand-in's control, is sent all the same.
     [Fact]
     public void ApplyPending_SendsTheDutyKeptForTheChainInTheSharedState_WhoeverPutItThere() {
@@ -285,7 +285,7 @@ public sealed class FlexReceiverControllerTests {
     }
 
     [Fact]
-    public void ApplyPending_ResendsOnTheKeepaliveCadence_WithoutLoggingTheResend() {
+    public void ApplyPending_ResendsOnTheKeepaliveInterval_WithoutLoggingTheResend() {
         Rig rig = NewRig(Status(2, 1, 1));
         FlexReceiverController controller = rig.Build();
         controller.SetTarget(0, 40);
@@ -369,7 +369,7 @@ public sealed class FlexReceiverControllerTests {
     // the identified path with the keepalive re-send, until it reports itself done; the duty is
     // not held up by it.
     [Fact]
-    public void ApplyPending_AfterAReopen_RegisteredWorkThatReportsFailure_IsTriedAgainOnTheKeepaliveCadence() {
+    public void ApplyPending_AfterAReopen_RegisteredWorkThatReportsFailure_IsTriedAgainOnTheKeepaliveInterval() {
         Rig rig = NewRig(Status(2, 1, 1));
         FlexReceiverController controller = rig.Build();
         int replays = 0;
@@ -540,7 +540,7 @@ public sealed class FlexReceiverControllerTests {
     }
 
     // The path carries another receiver now (two swapped between ports while the host slept):
-    // said once, reported once so the plugin can plan the path afresh, the readings are not the
+    // said once, reported once so the plugin can plan the path again, the readings are not the
     // chain's any more, and nothing is ever sent on the path again - not the duty the host set,
     // not a keepalive, not after a further reopen.
     [Fact]
@@ -557,7 +557,7 @@ public sealed class FlexReceiverControllerTests {
 
         Assert.Equal(new[] { FlexReceiverChange.AnotherReceiverAnswered }, rig.Changes);
         Assert.Contains(
-            "F0:a1b2c3d4e5f6: the receiver on its path now answers as a1b2c3d4e500; nothing more is sent on it, and a refresh is asked for to plan it afresh",
+            "F0:a1b2c3d4e5f6: the receiver on its path now answers as a1b2c3d4e500; nothing more is sent on it, and a refresh is asked for to plan it again",
             rig.Logger.Messages);
         Assert.False(controller.IsDrivingChain);
         Assert.Empty(controller.DrivenSensorIds);

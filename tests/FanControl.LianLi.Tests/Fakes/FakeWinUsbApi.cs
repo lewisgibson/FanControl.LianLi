@@ -8,7 +8,7 @@ namespace FanControl.LianLi.Tests.Fakes;
 
 /// <summary>
 /// A scripted winusb.dll. Every call is appended to <see cref="Calls"/> as text, so a test asserts
-/// the exact native sequence a transport makes. Each open hands out fresh <see cref="FakeSafeHandle"/>s
+/// the exact native sequence a transport makes. Each open returns fresh <see cref="FakeSafeHandle"/>s
 /// kept in <see cref="Devices"/> and <see cref="Interfaces"/>. Reads come from <see cref="Replies"/>;
 /// once it is empty a read ends the reply the way the pipe timeout does (ERROR_SEM_TIMEOUT).
 /// <see cref="OnCall"/> runs with each call's text as it is recorded, so a test can land a deadline

@@ -5,9 +5,9 @@ using FanControl.Plugins;
 namespace FanControl.LianLi.Plugin;
 
 /// <summary>
-/// Writable control for one channel. <see cref="Set"/> only hands the target to
+/// Writable control for one channel. <see cref="Set"/> only passes the target to
 /// the controller's in-memory state and, when it changed, wakes the worker so the
-/// USB write happens at once rather than at the next tick; <see cref="Reset"/>
+/// USB write happens at once instead of at the next tick; <see cref="Reset"/>
 /// releases the channel so the keepalive stops asserting it. Its id is distinct
 /// from the matching fan sensor's to avoid a registry collision. The control of a
 /// fan group keyed on an RF address also keeps its target in the shared state

@@ -451,7 +451,7 @@ public sealed class LianLiPluginFlexChainTests {
     }
 
     // After a reopen the receiver's path answers as another chain. Nothing is sent on it again, one
-    // refresh is asked for to plan the path afresh, and the log does not fill with a failed poll a second.
+    // refresh is asked for to plan the path again, and the log does not fill with a failed poll a second.
     [Fact]
     public void AReceiverThatAnswersAsAnotherChainAfterAReopen_AsksForOneRefresh_AndIsQuiet() {
         var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()) { WorkerTickIntervalMilliseconds = 20 };
@@ -764,7 +764,7 @@ public sealed class LianLiPluginFlexChainTests {
         Assert.Single(sensors.ControlSensors).Set(60);
         Assert.False(runtime.TryTakeRefresh(plugin, out _));
 
-        // The radio lets go; nobody drives the chain, nothing is asked for.
+        // The radio lets go; no controller drives the chain, nothing is asked for.
         Volatile.Write(ref released, 1);
         clock.Advance(TimeSpan.FromSeconds(2));
         Assert.True(SpinWait.SpinUntil(() => !runtime.WirelessState.IsBoundToMaster(ChainText), TimeSpan.FromSeconds(5)));

@@ -14,7 +14,7 @@ namespace FanControl.LianLi.Plugin;
 /// plugin's own record of what it has seen, not a setting: nothing in it is meant to be edited,
 /// and a file that is missing, unreadable or not what this writes is logged and treated as empty,
 /// costing nothing but the head start it gives after a reboot. Written whole to a temporary file
-/// and then swapped in, so a power cut mid-write leaves the previous file rather than half of one.
+/// and then swapped in, so a power cut mid-write leaves the previous file, not half of one.
 /// </summary>
 internal sealed class RememberedControllerFile : IRememberedControllerStore {
     // Bumped when the layout changes; a file of another version is not read.
@@ -35,7 +35,7 @@ internal sealed class RememberedControllerFile : IRememberedControllerStore {
         _path = Path.Combine(directory, FileName);
     }
 
-    /// <summary>The file beside the plugin's log, under the local application data of whoever runs FanControl.</summary>
+    /// <summary>The file beside the plugin's log, under the local application data of the account that runs FanControl.</summary>
     public static RememberedControllerFile Machine => new RememberedControllerFile(Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FanControl.LianLi"));
 

@@ -52,7 +52,7 @@ internal static class CommandPacket {
 
     /// <summary>
     /// Copy <paramref name="count"/> payload bytes out of a received packet, starting at the
-    /// payload offset (byte 6). Reads only what the packet actually holds.
+    /// payload offset (byte 6). Reads only what the packet holds.
     /// </summary>
     public static byte[] Payload(byte[] packet, int count) {
         if (packet is null) {

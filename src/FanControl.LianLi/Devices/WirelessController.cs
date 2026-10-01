@@ -20,7 +20,7 @@ namespace FanControl.LianLi.Devices;
 /// one control per fan group (L-Connect repeats one duty across the group's four slots), the water
 /// block's pump, the Lancool 217's and the V150's front pair and rear fan, one RPM reading per fan
 /// and a water block's coolant temperature - and <see cref="TopologyChanged"/> tells the plugin to
-/// ask the host for a refresh. Sensors are only ever added, so an index always names the same
+/// ask the host for a refresh. Sensors are only added, so an index always names the same
 /// thing; a device that goes unheard keeps them and reads 0 rpm and no temperature until it is
 /// heard again, whether the table has dropped it meanwhile, as L-Connect's does, or not.</para>
 ///
@@ -41,8 +41,8 @@ namespace FanControl.LianLi.Devices;
 /// the master a few times and, once it answers, reads the list until two reads in a row agree - at
 /// most two and a half seconds of waiting. A master that never answered leaves a controller with no
 /// sensors that keeps asking every second. Every piece of per-device work is isolated, so one
-/// device's failure is logged and costs only that device that second. The FanControl-thread surface
-/// only touches locked state; all I/O is on the worker-thread methods and the constructor.</para>
+/// device's failure is logged and costs only that device that second. The FanControl-thread methods
+/// only touch locked state; all I/O is on the worker-thread methods and the constructor.</para>
 /// </summary>
 internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanSpeedSource, IDrivenSensorSource {
     // MasterDevice.Run's one-second block.
@@ -52,8 +52,8 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
     // still changing: at most three queries, then at most four list reads, half a second apart -
     // two and a half seconds of waiting in all, well inside the host's deadline for the whole of
     // Initialize. MasterDevice.Run reads the list at that pace (once more than 500 ms have passed).
-    // L-Connect itself does not wait - Run simply keeps going - so the wait is the plugin's, there so
-    // the host's first load has the devices that are already there rather than one refresh each.
+    // L-Connect itself does not wait - Run keeps going - so the wait is the plugin's, there so
+    // the host's first load has the devices that are already there , not one refresh each.
     private static readonly TimeSpan StartupInterval = TimeSpan.FromMilliseconds(500);
     private const int StartupMasterQueries = 3;
     private const int StartupListReads = 4;
@@ -72,7 +72,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
     // least three streams without taking it - whether a stream was refused or failed to send - so a
     // device whose firmware never reports the effect, or a dongle that drops a long stream, still
     // leaves the fans driven and stops costing a stream a second. Lighting never costs fan control.
-    // A dongle that recovers by resetting, and a device heard again, are tried afresh. Time, not a
+    // A dongle that recovers by resetting, and a device heard again, are tried again. Time, not a
     // count of calls, because every control change wakes the worker and so brings streams forward.
     private static readonly TimeSpan GiveUpLightingAfter = TimeSpan.FromSeconds(10);
     private const int MinimumUntakenStreams = 3;
@@ -90,7 +90,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
     // that carries it, sleeps 1200 ms once the broadcast has returned and only then queues the fan's
     // colours (UpdateSensorColors), so a screen has 1.2 s with its theme before its palette arrives.
     // Measured from the broadcast that completed carrying the entry the group needs now
-    // (WirelessScreenEntryPublication), as a due time on the injected clock rather than a wait on
+    // (WirelessScreenEntryPublication), as a due time on the injected clock not a wait on
     // the worker, so the second's other work goes on meanwhile.
     private static readonly TimeSpan ColoursAfterScreenTable = TimeSpan.FromMilliseconds(1200);
 
@@ -119,7 +119,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
     private readonly List<Temperature> _temperatures = new List<Temperature>();
     private readonly Dictionary<string, DeviceSensors> _sensorsByDevice = new Dictionary<string, DeviceSensors>(StringComparer.Ordinal);
 
-    // The devices driven at the last list read: those whose sensors are driven rather than retained.
+    // The devices driven at the last list read: those whose sensors are driven, not retained.
     private readonly HashSet<string> _drivenMacs = new HashSet<string>(StringComparer.Ordinal);
     private int _drivenDevices;
     private int _litDevices;
@@ -191,9 +191,9 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
     /// Raised on the worker thread when a device is heard that needs sensors the host has not
     /// loaded yet (a newly bound device, or a group whose fan count grew), and when a device whose
     /// sensors this controller retained is driven again (a FLEX chain bound to the master once
-    /// more, back from its USB receiver), since whoever has those sensors registered elsewhere
+    /// more, back from its USB receiver), since the plugin instance that has those sensors registered elsewhere
     /// needs to know. The plugin answers it by remembering the controller, which claims the ids it
-    /// drives from whoever else is remembered with them, and then, where the host's sensors no
+    /// drives from any other controller remembered with them, and then, where the host's sensors no
     /// longer match, asking it to refresh (FanControl's <c>IPlugin3.RefreshRequested</c>).
     /// </summary>
     public event EventHandler? TopologyChanged;
@@ -336,7 +336,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
     /// <inheritdoc />
     public void ReplayOnReconnect(Func<bool> replay) => _reconnectReplay.Register(replay);
 
-    // ---------- FanControl-thread surface (no I/O) ----------
+    // ---------- FanControl-thread methods (no I/O) ----------
 
     /// <summary>
     /// Set the commanded duty for a control. The worker applies it on its next cycle. A fan group's
@@ -446,7 +446,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
         // L-Connect's service asks every device to save when it stops (MainService's stop calls
         // RFController.SaveCfg). The plugin's close also runs on every FanControl refresh - every
         // wake, logon and unlock - so it saves only when a streamed look is still waiting for its
-        // debounced save, rather than write the devices' flash on every refresh.
+        // debounced save, instead of writing the devices' flash on every refresh.
         byte[]? master = _masterMac;
         if (master != null && _saves.HasPendingSave) {
             SaveConfiguration(master);
@@ -478,7 +478,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
         _processState.TransmitterLost();
         _log.Write(string.Format(
             CultureInfo.InvariantCulture,
-            "W{0}: the transmitter was lost (generation {1}); every device is owed its screen switch or screen colours again once it is back, as L-Connect's service sends them again when the transmitter is plugged in again",
+            "W{0}: the transmitter was lost (generation {1}); every device will be sent its screen switch or screen colours again once it is back, as L-Connect's service sends them again when the transmitter is plugged in again",
             _index,
             generation));
     }
@@ -539,7 +539,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
     // A look begins only while the transmitter can carry it: under a lost transmitter nothing
     // reaches the air, ten refused sends would mark it sent, and L-Connect has no controller at all
     // while its transmitter is off the bus. The look takes the lifetime its pass works under as it
-    // begins, and hands it back with its mark, so a look begun before a loss marks nothing after
+    // begins, and returns it with its mark, so a look begun before a loss marks nothing after
     // it. A round already begun is the device's to finish (ServiceRounds), loss or no loss.
     private bool MayBeginLook(WirelessDeviceCommand command, int lifetime) {
         if (command.Rounds > 0) {
@@ -556,7 +556,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
 
     // One list read applied to the table and the sensors. Whether a sensor was added or a device
     // that retained its sensors is driven again; the list read's own success is left in _listRead
-    // for the startup wait. Construction calls this rather than PollRpm, so what it finds is part of
+    // for the startup wait. Construction calls this , not PollRpm, so what it finds is part of
     // the first load and raises no TopologyChanged.
     private bool Refresh() {
         byte[]? master = _masterMac;
@@ -577,7 +577,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
         WirelessDeviceList? list = ReadList();
         _listRead = list != null;
         _table.Apply(list, master, _masterClock);
-        // Only a device this pair drives and has heard settles the wait: an entry from L-Connect's locked
+        // Only a device this pair drives and has heard ends the wait: an entry from L-Connect's locked
         // list stays unheard until it answers, and a device of another master never registers here.
         if (_table.Devices.Any(device => IsDriven(device, master))) {
             Volatile.Write(ref _heardDevices, true);
@@ -649,7 +649,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
     // SendAioInfo, SyncMasterClock. The commands SyncControlInfo sends under a sequence are begun
     // beside the work they belong to (the lighting source with the speeds, the screens after the
     // table that goes out in the clock), and every round already under way is serviced first, as
-    // SyncControlInfo services every pending command in the one place.
+    // SyncControlInfo services every pending command in one place.
     private void RunCycle() {
         byte[]? master = _masterMac;
         if (master != null) {
@@ -763,10 +763,10 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
     // MasterDevice.CheckChannelConflict: every master in radio range takes a channel by its place
     // among them in address order, 8 for the first, then 12, 16 and so on, so two L-Wireless
     // controllers near each other do not share one. When this master reports an even channel other
-    // than its own place's (the even channels are the ones L-Connect hands out; one the user chose in
+    // than its own place's (the even channels are the ones L-Connect assigns; one the user chose in
     // L-Connect is odd and never moved), it moves there for this run, and its devices follow through
     // the ordinary re-homing (MasterDevice.SwitchChannel). The move is not saved, as L-Connect does
-    // not save it, and it is made once rather than again on every read until it shows. Run skips
+    // not save it, and it is made once, not again on every read until it shows. Run skips
     // the check while the list is locked.
     private void CheckChannelConflict() {
         if (_table.IsLocked) {
@@ -906,7 +906,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
             _dongles.WriteReceiver(WirelessProtocol.EncodeDeviceListRequest(_pages));
             list = WirelessProtocol.DecodeDeviceList(_dongles.ReadReceiver(WirelessProtocol.DeviceListReplyLength(_pages)), _pages);
         }
-#pragma warning disable CA1031 // resilience: a failed read counts as a read nobody was heard in, as RefreshList counts it
+#pragma warning disable CA1031 // resilience: a failed read counts as a read in which nothing was heard, as RefreshList counts it
         catch (Exception ex) {
             _faults.Failed("list", ex.Message);
             return null;
@@ -1049,7 +1049,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
     }
 
     // MasterDevice.SendAioInfo: every bound water block, every second. The plugin sends only to one
-    // it drives whose pump FanControl has set, so a pump nobody controls is left as it was.
+    // it drives whose pump FanControl has set, so a pump no control has set is left as it was.
     private void SendAioInfo(byte[] master) {
         foreach (WirelessDevice device in _table.Devices) {
             if (!device.IsBound || device.Kind != WirelessDeviceKind.WaterBlock || !IsDriven(device, master)) {
@@ -1234,7 +1234,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
     // now, under the transmitter lifetime the pass works under and on the transmitter handle as it
     // is now, has completed, and 1.2 s have passed since. An entry the group no longer needs, or
     // one that went out under a lifetime or handle since passed, is no publication: the next
-    // broadcast that completes with the current entry publishes afresh, and the wait runs from that.
+    // broadcast that completes with the current entry publishes again, and the wait runs from that.
     private bool AreColoursDue(WirelessDevice device, byte[] entry, int lifetime) {
         WirelessScreenEntryPublication? published = device.ScreenEntryPublication;
         return published != null
@@ -1301,7 +1301,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
     // the record is clear onto its wireless theme (a screen left on PC-streamed content by a mode
     // change cut short, or a reset). The plugin does the same for every driven group with a saved,
     // non-advance configuration; a group whose colours are owed this cycle and not yet done is not
-    // switched yet, as the switch follows the colours in L-Connect. Nothing holds it for good: once
+    // switched yet, as the switch follows the colours in L-Connect. Nothing holds it indefinitely: once
     // their interval has passed the colours are done within ten sends a screen, and a group whose
     // colours are owed in no cycle is not held behind them at all.
     private void RestoreThemeSwitches(byte[] master, List<(WirelessDevice Device, byte[] Entry)> carried) {
@@ -1417,7 +1417,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
     // the command for the pass that services it (ServiceCommand). The device decides that from its
     // own record and count (WirelessDevice.NextSend), so a round is carried to its end however the
     // conditions that began it have changed meanwhile, and the device's one sequence is never held
-    // for good by a round nothing finishes. Nothing is sent to a device that is not driven; its
+    // indefinitely by a round nothing finishes. Nothing is sent to a device that is not driven; its
     // round resumes when it is driven again.
     private void ServiceRounds(byte[] master) {
         foreach (WirelessDevice device in _table.Devices) {
@@ -1614,10 +1614,10 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
 
     // A dongle the transport lost its handle to and has reopened may have come back reset. Nothing
     // is replayed while either handle is still faulted: the dongle is off the bus, a transfer of
-    // the cycle is what reopens it, and a saved look tried afresh then would be sent, and given up
+    // the cycle is what reopens it, and a saved look tried again then would be sent, and given up
     // on, against a dead transmitter, and a command's round acknowledged by a record no read has
     // refreshed. Once both are back, the master's channel is re-asserted by the next master query,
-    // sent now rather than at the next second, and every device's speed and effect are resent by
+    // sent now instead of at the next second, and every device's speed and effect are resent by
     // the ordinary comparison against what it reports. The registered replay runs first; a throw
     // leaves the generations unrecorded, so it is retried next tick, and one that reports failure
     // stays owed and is tried again on its own.
@@ -1636,7 +1636,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
         _reconnectReplay.Owe();
         _reconnectReplay.Apply();
 
-        // A reset dongle, or devices that came back with it, get their saved look tried afresh. A
+        // A reset dongle, or devices that came back with it, get their saved look tried again. A
         // screen switch or colouring marked for the process keeps its mark after the receiver's
         // reopen, as L-Connect repeats neither on a resume; after the transmitter's, every mark was
         // dropped when its loss was counted, so both are begun again with the rest.
@@ -1694,7 +1694,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
         return changed;
     }
 
-    // Caller holds _lock. What each kind of device is given (see the class summary), only ever added to.
+    // Caller holds _lock. What each kind of device is given (see the class summary), only added to.
     private bool EnsureSensors(WirelessDevice device) {
         WirelessDeviceRecord record = device.Record;
         if (!_sensorsByDevice.TryGetValue(device.MacText, out DeviceSensors? sensors)) {
@@ -1739,7 +1739,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
             // fitted (fans_type[2] == 1, the Lancool 217's rule). The front control takes the
             // device's plain control id, as a group's does, so an existing curve bound to the V150
             // stays bound; its speed is slot 0's when that fan is fitted and slot 1's otherwise
-            // (V150SubProfile.UpdateFrom), read afresh from every record. A reading is registered
+            // (V150SubProfile.UpdateFrom), read again from every record. A reading is registered
             // for every slot 0-2 that reports a fitted fan, as the app reads them, and for the first
             // fan_num slots, so a V150 that reports its fans either way has them.
             Control front = AddControl(sensors, ControlKind.V150Front, FrontRpmSlot(record));

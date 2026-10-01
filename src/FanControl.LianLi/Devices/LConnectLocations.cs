@@ -7,7 +7,7 @@ namespace FanControl.LianLi.Devices;
 /// <summary>
 /// Where L-Connect keeps each document the plugin reads, all under one data directory
 /// (<c>%ProgramData%\Lian-Li\L-Connect 3</c> on a real machine). The layout is L-Connect's, not the
-/// plugin's, so it is written down once here; the plugin is handed one of these so a test can point
+/// plugin's, so it is written down once here; the plugin is given one of these so a test can point
 /// every reader at a fixture directory instead of the machine's own.
 /// </summary>
 internal sealed class LConnectLocations {

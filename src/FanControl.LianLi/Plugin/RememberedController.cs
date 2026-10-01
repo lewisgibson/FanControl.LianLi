@@ -105,7 +105,7 @@ internal sealed class RememberedController {
     /// <summary>
     /// The ids of the sensors whose device the controller was driving when it was remembered: what
     /// is added to its memory, and what it may claim from another remembered controller with the
-    /// same ids. A sensor it merely retained (<see cref="IDrivenSensorSource"/>) is neither; a
+    /// same ids. A sensor it only retained (<see cref="IDrivenSensorSource"/>) is neither; a
     /// controller made from its saved parts counts every sensor as driven.
     /// </summary>
     public IReadOnlyCollection<string> DrivenIds { get; }

@@ -6,7 +6,7 @@ namespace FanControl.LianLi.Protocol;
 /// Pure encoder/decoder for the Galahad II Trinity AIO (vendor 0x0416, pids 0x7371/0x7373) and
 /// the screen-less parts of its HydroShift siblings. Like the Uni Fan TL it speaks the 64-byte
 /// <see cref="CommandPacket"/> protocol and reports RPM via a handshake reply, but it is a single
-/// fan plus a pump rather than a multi-fan hub. The fan duty is the percent 1:1; the pump duty is
+/// fan and a pump, not a multi-fan hub. The fan duty is the percent 1:1; the pump duty is
 /// floored for safety (see <see cref="PumpDutyFloor"/>). No I/O and no state.
 /// </summary>
 internal static class Galahad2Protocol {

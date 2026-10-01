@@ -11,7 +11,7 @@ namespace FanControl.LianLi.Tests.Plugin;
 
 /// <summary>
 /// The scan's controllers build side by side under one deadline, and whatever finishes after it is
-/// handed to a callback rather than leaked.
+/// handed to a callback , not leaked.
 /// </summary>
 public sealed class ControllerBuilderTests {
     private static void NoLateController(int build, IFanDevice controller)

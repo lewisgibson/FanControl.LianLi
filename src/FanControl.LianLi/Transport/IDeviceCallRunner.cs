@@ -5,7 +5,7 @@ namespace FanControl.LianLi.Transport;
 
 /// <summary>
 /// The bounded wait every call that reaches a device goes through (see <see cref="BoundedDeviceCall"/>).
-/// A seam so the transports' timeout decisions - which handle faults, what is cancelled, what a late
+/// An interface so the transports' timeout decisions - which handle faults, what is cancelled, what a late
 /// result becomes - are tested deterministically, without real threads racing real deadlines.
 /// </summary>
 internal interface IDeviceCallRunner {

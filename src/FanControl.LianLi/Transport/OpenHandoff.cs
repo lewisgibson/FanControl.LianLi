@@ -5,7 +5,7 @@ namespace FanControl.LianLi.Transport;
 /// <summary>
 /// Carries what a bounded open produced - a device handle, a transport - from the throwaway thread that
 /// ran it (see <see cref="BoundedDeviceCall"/>) to the caller that waited for it. The two race at the
-/// deadline: when the caller gives up first, a result the thread finishes afterwards belongs to nobody
+/// deadline: when the caller gives up first, a result the thread finishes afterwards has no owner
 /// and would leak an open handle on the device, so the handoff disposes it on that thread instead; when
 /// the thread finishes first, the caller takes it. Pure and lock-guarded so the race is unit-tested.
 /// </summary>
@@ -37,7 +37,7 @@ internal sealed class OpenHandoff<T> where T : class, IDisposable {
     /// <summary>
     /// Called once by the waiting caller after its bounded wait ended, either way. Returns the result
     /// if the open has completed, else null - and from then on the handoff is abandoned, so a result
-    /// completed later is disposed on its thread rather than leaked.
+    /// completed later is disposed on its thread , not leaked.
     /// </summary>
     public T? Take() {
         lock (_gate) {

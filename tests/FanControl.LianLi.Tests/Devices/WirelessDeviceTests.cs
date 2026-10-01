@@ -117,7 +117,7 @@ public sealed class WirelessDeviceTests {
 
     // SyncControlInfo's ten sends: the round's payload goes out under its sequence until the tenth,
     // and the pass after that ends the round with its sends out. The device does this itself, from
-    // the payload it was handed, so nothing else has to keep calling for the round to end.
+    // the payload it was given, so nothing else has to keep calling for the round to end.
     [Fact]
     public void NextSend_SendsARoundTenTimes_ThenEndsItExhausted() {
         var device = new WirelessDevice(Record(1, 0, 0, 0, 0));
@@ -158,7 +158,7 @@ public sealed class WirelessDeviceTests {
 
     // The clock goes out every second carrying the same entry: the first broadcast's time stands
     // for as long as the entry, its slot and the transmitter lifetime and handle it went out under
-    // are the same, and a change of any of them is published afresh, from that broadcast. A device
+    // are the same, and a change of any of them is published again, from that broadcast. A device
     // or dongle back after a loss starts the group's commands over, and the publication with them.
     [Fact]
     public void PublishScreenEntry_KeepsTheFirstTimeOfTheSameEntry_AndStartsOverForAnother() {
@@ -189,7 +189,7 @@ public sealed class WirelessDeviceTests {
     }
 
     // A clock broadcast that completes without the group's entry withdraws the publication: the
-    // next broadcast that carries the entry publishes it afresh, from then, the same entry or not.
+    // next broadcast that carries the entry publishes it again, from then, the same entry or not.
     [Fact]
     public void WithdrawScreenEntry_LeavesNoPublication_AndTheNextIsFresh() {
         var device = new WirelessDevice(Record(1, 0, 0, 0, 0));

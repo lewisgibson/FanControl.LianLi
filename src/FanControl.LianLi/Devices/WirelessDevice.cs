@@ -165,7 +165,7 @@ internal sealed class WirelessDevice {
 
     /// <summary>
     /// A clock broadcast completed carrying no entry for the group, so whatever was published is
-    /// withdrawn: the next broadcast that carries the entry publishes it afresh, from then.
+    /// withdrawn: the next broadcast that carries the entry publishes it again, from then.
     /// </summary>
     public void WithdrawScreenEntry() => ScreenEntryPublication = null;
 
@@ -175,7 +175,7 @@ internal sealed class WirelessDevice {
     /// <paramref name="transmitterLifetime"/> on the transmitter handle of
     /// <paramref name="transmitterGeneration"/>. The same entry published the same way keeps its
     /// earlier time, since the clock goes out every second carrying it and the screens have had it
-    /// since the first; anything else is published afresh, from now.
+    /// since the first; anything else is published again, from now.
     /// </summary>
     public void PublishScreenEntry(int receiverType, byte[] entry, int transmitterLifetime, int transmitterGeneration, DateTime completedUtc) {
         if (ScreenEntryPublication is null || !ScreenEntryPublication.Carries(receiverType, entry, transmitterLifetime, transmitterGeneration)) {
@@ -232,9 +232,9 @@ internal sealed class WirelessDevice {
     /// when the record reports its sequence (acknowledged) or its sends are out (exhausted), which
     /// frees the device's sequence and leaves how it ended on the command
     /// (<see cref="WirelessDeviceCommand.Ended"/>) for the pass that next services it; otherwise the
-    /// round's next send is handed back, counted. Null when no round is under way or it has just
+    /// round's next send is returned, counted. Null when no round is under way or it has just
     /// ended. The device does this, not the command's caller, so the device's one sequence is never
-    /// held for good by a round nothing finishes.
+    /// held indefinitely by a round nothing finishes.
     /// </summary>
     public byte[]? NextSend() {
         Round? round = _round;

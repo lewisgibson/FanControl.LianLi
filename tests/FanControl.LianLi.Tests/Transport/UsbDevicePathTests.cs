@@ -8,7 +8,7 @@ namespace FanControl.LianLi.Tests.Transport;
 /// <summary>
 /// The pure string handling behind the WinUSB locator: pulling the ids out of the two shapes of
 /// Windows device identifier, and splitting the null-terminated lists the configuration manager and
-/// the registry hand back.
+/// the registry return.
 /// </summary>
 public class UsbDevicePathTests {
     [Theory]

@@ -10,7 +10,7 @@ namespace FanControl.LianLi.Devices;
 /// waited out. A device with no fans is never sent one, except the Lancool 217 and the V150, which
 /// L-Connect drives whatever fan count they report; and a V150 is resent every second while any
 /// target is at or below 10. The plugin adds one condition L-Connect does not need: only the slots a
-/// FanControl control is actually driving are compared, because a slot nobody asked for is never
+/// FanControl control is driving are compared, because a slot no control has set is never
 /// the reason to send.
 /// </summary>
 internal static class WirelessSpeedSyncDecision {

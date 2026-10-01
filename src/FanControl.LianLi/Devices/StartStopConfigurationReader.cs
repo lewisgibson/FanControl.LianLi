@@ -8,9 +8,9 @@ namespace FanControl.LianLi.Devices;
 /// L-Connect exposes a start/stop switch on the start/stop-capable families; when it is on, the
 /// controller sends its stop value at the bottom of the curve, which physically stops 0rpm-capable
 /// fans (controllers that cannot stop, such as SL-Infinity, floor instead and ignore it). The plugin
-/// honors that switch so a 0% request only stops a fan the user actually enabled it for.
+/// honors that switch so a 0% request only stops a fan the user enabled it for.
 ///
-/// The toggle lives in <c>...\Lian-Li\L-Connect 3\profile\{md5}</c> - a gzip-compressed JSON profile
+/// The toggle is in <c>...\Lian-Li\L-Connect 3\profile\{md5}</c> - a gzip-compressed JSON profile
 /// named MD5(devicePath.ToLowerInvariant()). Each <c>SubProfiles</c> entry is one fan group whose
 /// <c>RPMSetting.Mode</c> selects the active profile; that profile's <c>IsStartStop</c> is the switch.
 /// This is a sink for the config only - no HID and no device state.
@@ -21,7 +21,7 @@ internal static class StartStopConfigurationReader {
     /// Returns a <paramref name="channelCount"/>-length array, <c>false</c> on every channel with no
     /// saved profile (directory or file absent - e.g. L-Connect not installed). Throws
     /// <see cref="FormatException"/> / <see cref="IOException"/> on a corrupt profile so the caller
-    /// can log it and degrade deliberately.
+    /// can log it and fall back.
     /// </summary>
     public static bool[] Read(string profileDirectory, string devicePath, int channelCount) {
         var flags = new bool[Math.Max(channelCount, 0)]; // default: start/stop off on every channel
@@ -44,7 +44,7 @@ internal static class StartStopConfigurationReader {
         }
 
         // Map each group to its physical channel by GroupIndex, so a reordered or partial profile
-        // still lands on the right channel rather than shifting the whole set.
+        // still lands on the right channel instead of shifting the whole set.
         foreach (JsonValue group in subProfiles.Elements) {
             if (group.Member("GroupIndex")?.AsInt() is int groupIndex
                 && groupIndex >= 0

@@ -8,7 +8,7 @@ namespace FanControl.LianLi.Protocol;
 /// L-Connect puts these into a per-receiver-slot table inside the clock broadcast, from what the
 /// user saved for the group (<c>LWirelessLCDConfig.TemplateParams</c>, applied by
 /// <c>LWirelessController.applyWirelessLCDMode</c>); the plugin carries the saved values through
-/// the same table rather than blank the screens (see <see cref="WirelessScreenTable"/>).
+/// the same table instead of blanking the screens (see <see cref="WirelessScreenTable"/>).
 /// </summary>
 internal sealed class WirelessFanScreenPresentation {
     /// <summary>The theme byte L-Connect writes for a fan it has no saved theme for: no wireless theme.</summary>

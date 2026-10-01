@@ -47,7 +47,7 @@ public class HidDeviceLocatorTests {
 
         LocatedDevice located = Assert.Single(Locator().Locate(Vendors, Products, CancellationToken.None));
 
-        // CM_GET_DEVICE_INTERFACE_LIST_PRESENT for the HID class, the whole class rather than one device.
+        // CM_GET_DEVICE_INTERFACE_LIST_PRESENT for the HID class, the whole class, not one device.
         Assert.Equal(FakeHidApi.HidClass + "  0x00000000", _configurationManager.InterfaceListQueries[0]);
         Assert.Equal(
             new[] { "HidD_GetHidGuid", "OpenQueryHandle " + UniPath, "HidD_GetAttributes query 0", "HidD_GetPreparsedData query 0" },

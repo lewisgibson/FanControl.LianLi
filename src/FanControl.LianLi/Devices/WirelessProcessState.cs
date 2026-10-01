@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace FanControl.LianLi.Devices;
 
 /// <summary>
-/// What the wireless controller keeps for the whole process rather than for itself, because
+/// What the wireless controller keeps for the whole process not for itself, because
 /// FanControl builds a new controller on every refresh - each wake, logon and unlock - where
 /// L-Connect's service runs one from start to stop, and does some things only when it starts:
 ///
@@ -17,7 +17,7 @@ namespace FanControl.LianLi.Devices;
 /// <item>the water blocks whose screens have been switched to their wireless theme, and the LCD
 /// FLEX groups whose screens have been given their themes' colours. L-Connect sends both when its
 /// service starts and relies on the device keeping them: it repeats neither when a device drops
-/// off its table and returns, nor on a resume. The one thing that does repeat them is the
+/// off its table and returns, nor on a resume. The only thing that does repeat them is the
 /// transmitter dongle leaving the USB bus, since L-Connect's service builds a new controller when
 /// it returns, whose <c>ApplyAll</c> sends both again to every bound device. So the marks belong
 /// to a <em>transmitter lifetime</em>: the moment any controller of the process sees the
@@ -29,7 +29,7 @@ namespace FanControl.LianLi.Devices;
 /// after FanControl's refresh does not take the set of the one built in its place with it;</item>
 /// <item>the duty FanControl last commanded for each fan group, keyed on the group's RF address. A
 /// FLEX chain can be driven by two controllers under one set of sensor ids, and the host's control
-/// for it is registered on one of them, so the duty is kept here by whichever the host hands it to
+/// for it is registered on one of them, so the duty is kept here by whichever the host gives it to
 /// (either controller, or the stand-in's control, <c>Plugin/ControlSensor</c>, while it stands in
 /// for one) and read by whichever drives the chain now.</item>
 /// </list>
@@ -85,7 +85,7 @@ internal sealed class WirelessProcessState {
     /// <summary>
     /// How many times a controller of this process has seen the transmitter's handle lost: the
     /// lifetime the screen switch and screen colour marks belong to. A look takes it as it begins
-    /// and hands it back when it is marked, so a look begun under an earlier lifetime marks nothing.
+    /// and returns it when it is marked, so a look begun under an earlier lifetime marks nothing.
     /// </summary>
     public int TransmitterLifetime {
         get {

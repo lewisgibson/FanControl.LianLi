@@ -103,7 +103,7 @@ Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains how to bu
 
 ## Acknowledgements
 
-Most of the device support is now taken directly from Lian Li's own L-Connect 3 by decompiling it and reimplementing what it sends. No Lian Li code is shipped, only the protocol facts. The original UNI FAN protocol work came from prior open-source projects, and this plugin reuses their protocol facts (report ids, byte offsets, duty formulas) rather than their source code:
+Most of the device support is now taken directly from Lian Li's own L-Connect 3 by decompiling it and reimplementing what it sends. No Lian Li code is shipped, only the protocol facts. The original UNI FAN protocol work came from prior open-source projects, and this plugin reuses their protocol facts (report ids, byte offsets, duty formulas) , not their source code:
 
 - [uni-sync](https://github.com/EightB1ts/uni-sync) by Cameron Halter, the Rust sync tool the protocol facts were first taken from (MIT).
 - [FanControl.LianLi](https://github.com/EightB1ts/FanControl.LianLi) by Cameron Halter, the original FanControl plugin that inspired this one (LGPL-2.1).

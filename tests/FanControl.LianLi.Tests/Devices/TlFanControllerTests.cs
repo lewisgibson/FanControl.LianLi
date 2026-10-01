@@ -109,9 +109,9 @@ public class TlFanControllerTests {
     }
 
     // A look the hub refused stays owed on its own: software control and the duty are replayed
-    // regardless, and the look is tried again on the keepalive cadence.
+    // regardless, and the look is tried again on the keepalive interval.
     [Fact]
-    public void ApplyPending_ALookTheHubRefused_StaysOwed_AndIsTriedAgainOnTheKeepaliveCadence() {
+    public void ApplyPending_ALookTheHubRefused_StaysOwed_AndIsTriedAgainOnTheKeepaliveInterval() {
         var (controller, transport, clock) = NewController((0, 0, 1000));
         int replays = 0;
         controller.ReplayOnReconnect(() => ++replays >= 2);

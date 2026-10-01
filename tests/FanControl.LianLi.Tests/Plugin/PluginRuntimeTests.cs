@@ -71,8 +71,8 @@ public sealed class PluginRuntimeTests {
 
     // The wireless controller keeps a group's sensors after the group is unbound; a receiver keeps
     // its chain's after the radio takes it. What a controller only retains is not added to its
-    // memory and is not taken from another controller: only what it drives is. A chain nobody
-    // drives stays with whoever drove it last.
+    // memory and is not taken from another controller: only what it drives is. A chain no controller
+    // drives stays with the one that drove it last.
     [Fact]
     public void Remember_AddsAndClaimsOnlyTheSensorsAControllerDrives_NotThoseItRetains() {
         var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore());
@@ -100,7 +100,7 @@ public sealed class PluginRuntimeTests {
         Assert.Empty(runtime.Recall("usb")!.Ids);
         Assert.Equal(new[] { "LianLi/wa/ctl", "LianLi/wa/f0/fan" }, runtime.Recall("dongles")!.Ids);
 
-        // Nobody drives it now: it stays where it was.
+        // Nothing drives it now: it stays where it was.
         pair.Retained.UnionWith(new[] { "LianLi/wa/ctl", "LianLi/wa/f0/fan" });
         _ = runtime.Remember("dongles", new RememberedController(PairPlan("dongles"), 0, pair, new FakeClock().UtcNow), out claimed);
         Assert.Empty(claimed);
@@ -599,7 +599,7 @@ public sealed class PluginRuntimeTests {
         Assert.True(runtime.TryBeginBuildUnder(1, "a", 1));
     }
 
-    // What Load registered is published under the memory's lock and handed to whoever remembers a
+    // What Load registered is published under the memory's lock and handed to each instance that remembers a
     // controller, so a claim and the publication are ordered: one remembered before is in the
     // memory Load reads after publishing, one remembered after is handed the published set.
     [Fact]

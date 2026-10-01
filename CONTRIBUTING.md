@@ -20,24 +20,22 @@ Thanks for your interest in improving FanControl.LianLi. This is a small project
 
 `./build.ps1` mirrors what CI runs (it builds and tests all three variants - standard, ARGB, and Lighting); run it before opening a PR. To target a single variant yourself, pass the matching flag: `-p:EnableArgb=true` for ARGB or `-p:EnableLighting=true` for Lighting (for example `dotnet test -c Release -p:EnableLighting=true`). The two flags are mutually exclusive - never combine them. Add `-p:AssemblyName=FanControl.LianLi.Argb` or `-p:AssemblyName=FanControl.LianLi.Lighting` to a build to get the DLL name the release ships.
 
-Every line and every branch of the plugin that a variant compiles has to run under that variant's tests; CI and `./build.ps1` fail the build otherwise, and the report lands in `coverage/coverage.cobertura.xml`. The only exemption is `[ExcludeFromCodeCoverage]`, which is reserved for the P/Invoke seams that need a real Windows device; everything they decide is pulled out into plain code so it can be tested.
+Every line and every branch of the plugin that a variant compiles has to run under that variant's tests; CI and `./build.ps1` fail the build otherwise, and the report lands in `coverage/coverage.cobertura.xml`. The only exemption is `[ExcludeFromCodeCoverage]`, which is reserved for the P/Invoke adapters that need a real Windows device; everything they decide is pulled out into plain code so it can be tested.
 
 ## Project layout
 
-```
-src/FanControl.LianLi/      The plugin (netstandard2.0). Builds the DLL FanControl loads.
-tests/FanControl.LianLi.Tests/  xUnit tests (net8.0).
-docs/                       Architecture, device protocol, deployment notes.
-```
+- `src/FanControl.LianLi/`: the plugin (netstandard2.0). Builds the DLL FanControl loads.
+- `tests/FanControl.LianLi.Tests/`: xUnit tests (net8.0).
+- `docs/`: architecture, device protocol, deployment notes.
 
-See [docs/architecture.md](docs/architecture.md) for the layering, and [docs/protocol.md](docs/protocol.md) for the byte-level device contract. The detailed internal coding standards live under [.claude/rules/](.claude/rules/).
+See [docs/architecture.md](docs/architecture.md) for the layering, and [docs/protocol.md](docs/protocol.md) for the byte-level device contract. The detailed internal coding standards are under [.claude/rules/](.claude/rules/).
 
-## Coding standards (the load-bearing ones)
+## Coding standards (the ones that matter most)
 
 - **netstandard2.0 only in the plugin.** The DLL must load into FanControl's runtime, so do not use APIs unavailable on `netstandard2.0`, even if the SDK offers them. Test code (net8.0) may use newer APIs.
 - **One public type.** Only the `IPlugin3` implementation (`LianLiPlugin`) is `public`; everything else is `internal`. Tests see internals via `InternalsVisibleTo`.
-- **Native USB calls stay behind the seam.** Every `hid.dll`, `winusb.dll`, `cfgmgr32.dll` and `kernel32.dll` call lives in one of `Transport/`'s thin adapters (`WindowsHidApi`, `WindowsWinUsbApi`, `WindowsConfigurationManagerApi`, `WindowsThreadCanceller`), behind an interface the transports are tested through; the rest of the code knows only `IDeviceTransport` and byte buffers. The plugin does not use HidSharp, the host's shared HID library (see `docs/architecture.md`).
-- **Protocol encoders are pure.** Device state in, exact byte buffer out - no I/O and no clock. Any change to an encoder must be covered by a test that asserts the exact bytes, byte for byte.
+- **Native USB calls stay behind the transport interface.** Every `hid.dll`, `winusb.dll`, `cfgmgr32.dll` and `kernel32.dll` call is in one of `Transport/`'s thin adapters (`WindowsHidApi`, `WindowsWinUsbApi`, `WindowsConfigurationManagerApi`, `WindowsThreadCanceller`), behind an interface the transports are tested through; the rest of the code knows only `IDeviceTransport` and byte buffers. The plugin does not use HidSharp, the host's shared HID library (see `docs/architecture.md`).
+- **Protocol encoders are pure.** Device state in, exact byte buffer out - no I/O and no clock. Any change to an encoder must be covered by a test that asserts the exact bytes.
 - **Analyzer-clean.** The build treats warnings as errors and requires XML docs on public members. Keep it green; justify any suppression inline.
 
 ## Pull requests

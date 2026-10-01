@@ -9,7 +9,7 @@ namespace FanControl.LianLi.Tests.Fakes;
 /// <summary>
 /// A scripted hid.dll and kernel32. Every call is appended to <see cref="Calls"/> as text, so a test
 /// asserts the exact native sequence, and <see cref="OnCall"/> runs with each call's name as it is
-/// entered, so a test can land a deadline inside any one of them. Each open hands out a fresh
+/// entered, so a test can land a deadline inside any one of them. Each open returns a fresh
 /// <see cref="FakeSafeHandle"/> named for its kind and path, kept in <see cref="Handles"/>. An interface
 /// reports the ids in <see cref="Attributes"/> and the capabilities in <see cref="Capabilities"/> (a
 /// 65-byte report of each kind on the vendor page when none are set); each open, attribute or capability

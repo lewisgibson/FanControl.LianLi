@@ -229,9 +229,9 @@ public class WindowsNativeApiTests {
 
     [WindowsFact]
     public void ThreadCanceller_CancelsASynchronousReadBlockedOnAPipe_ByThread() {
-        // An anonymous pipe nobody writes to blocks a synchronous ReadFile for good: the shape of a
+        // An anonymous pipe nothing writes to blocks a synchronous ReadFile indefinitely: the shape of a
         // wedged device's synchronous IOCTL. The bound gives up, CancelSynchronousIo reaches the
-        // blocked read, and the abandoned call's failure is reported rather than lost.
+        // blocked read, and the abandoned call's failure is reported, not lost.
         AbandonedCallScenario.Run(() => {
             using var server = new AnonymousPipeServerStream(PipeDirection.In);
             using var client = new AnonymousPipeClientStream(PipeDirection.Out, server.ClientSafePipeHandle);

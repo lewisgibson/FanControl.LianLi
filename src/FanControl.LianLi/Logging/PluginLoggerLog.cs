@@ -7,14 +7,14 @@ using FanControl.Plugins;
 namespace FanControl.LianLi.Logging;
 
 /// <summary>
-/// Adapts the host-supplied <see cref="IPluginLogger"/> to the internal <see cref="ILog"/> seam so
+/// Adapts the host-supplied <see cref="IPluginLogger"/> to the internal <see cref="ILog"/> interface so
 /// the rest of the plugin depends only on <see cref="ILog"/>. The host logger is treated as
 /// optional: a null logger or a throwing one is swallowed, because logging must never disrupt fan
 /// control. It is also never waited on. The plugin logs from several threads at once - FanControl's
 /// own among them - and the host's logger makes no promise about concurrent calls, or about how
 /// long a call takes (it hands each line to whatever FanControl has listening). So a message is
-/// queued and handed on, one at a time and in order, by a thread of the adapter's own that runs only
-/// while there is something to hand on. A host logger that stops returning costs only the copies it
+/// queued and passed on, one at a time and in order, by a thread of the adapter's own that runs only
+/// while there is something to pass on. A host logger that stops returning costs only the copies it
 /// would have received; the plugin's own file log still has every line.
 /// </summary>
 internal sealed class PluginLoggerLog : ILog {

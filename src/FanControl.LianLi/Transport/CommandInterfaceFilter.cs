@@ -20,7 +20,7 @@ internal static class CommandInterfaceFilter {
     /// <summary>
     /// Whether an interface should be located. A command-packet interface is kept only when its
     /// usage page is the command page; an unknown page (the probe failed) is kept so location falls
-    /// back to the output-report de-duplication rather than dropping an otherwise usable device.
+    /// back to the output-report de-duplication instead of dropping an otherwise usable device.
     /// </summary>
     public static bool Keep(int vendorId, int? usagePage) {
         if (!RequiresUsageFilter(vendorId)) {

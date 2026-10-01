@@ -5,12 +5,12 @@ namespace FanControl.LianLi.Transport;
 
 /// <summary>
 /// Collapses the several HID interfaces a single physical controller can expose into one
-/// logical device. A composite USB controller surfaces one <see cref="LocatedDevice"/> per
+/// logical device. A composite USB controller exposes one <see cref="LocatedDevice"/> per
 /// HID interface/top-level collection, so without this step the plugin would register a
 /// duplicate set of channel sensors per interface for one physical controller.
 ///
 /// De-duplication groups by the Windows ContainerId: every HID interface a single controller
-/// exposes shares it, and it differs across physical controllers. The USB serial is deliberately
+/// exposes shares it, and it differs across physical controllers. The USB serial is
 /// not the key - the Lian Li Uni controllers all report the same firmware-fixed serial, so a
 /// serial key wrongly collapses every distinct controller into one (the ContainerId does not). A
 /// device whose ContainerId could not be resolved is never collapsed (it keys on its per-interface

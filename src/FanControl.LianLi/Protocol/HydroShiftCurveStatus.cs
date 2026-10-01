@@ -15,6 +15,6 @@ internal readonly struct HydroShiftCurveStatus {
     /// <summary>The liquid temperature in whole degrees Celsius.</summary>
     public int LiquidTemperature { get; }
 
-    /// <summary>Whether the pump follows the motherboard's PWM header rather than the speed it was sent.</summary>
+    /// <summary>Whether the pump follows the motherboard's PWM header and not the speed it was sent.</summary>
     public bool FollowsMotherboard { get; }
 }

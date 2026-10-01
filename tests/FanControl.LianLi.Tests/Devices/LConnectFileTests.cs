@@ -9,7 +9,7 @@ namespace FanControl.LianLi.Tests.Devices;
 
 /// <summary>
 /// Reading one of L-Connect's saved documents: they are all gzipped UTF-8 JSON, and they are all
-/// named by an MD5 of the key L-Connect used, so both live here rather than in each reader.
+/// named by an MD5 of the key L-Connect used, so both are here, not in each reader.
 /// </summary>
 public sealed class LConnectFileTests : IDisposable {
     private readonly string _dir;
@@ -75,7 +75,7 @@ public sealed class LConnectFileTests : IDisposable {
     }
 
     [Theory]
-    // L-Connect's own names, so the plugin finds the files it actually wrote.
+    // L-Connect's own names, so the plugin finds the files it wrote.
     [InlineData("LWireless-Controller", "137b3f244d3c5d1568121556b5b076e5")]
     [InlineData("Pump", "cf82720db122ae41719df5b05503b749")]
     [InlineData("Fan", "50bd8c21bfafa6e4e962f6a948b1ef92")]

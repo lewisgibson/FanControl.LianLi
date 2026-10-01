@@ -7,7 +7,7 @@ namespace FanControl.LianLi.Protocol;
 /// Pure encoder/decoder for the Uni Fan TL controller (vendor 0x0416, pid 0x7372). Unlike the
 /// Uni 0xCF2 families this controller speaks the 64-byte <see cref="CommandPacket"/> protocol over
 /// output reports, and reports RPM by replying to a handshake command on the interrupt-IN endpoint
-/// rather than through a pulled input report. Each fan is addressed by (port, fan-index); the duty
+/// not through a pulled input report. Each fan is addressed by (port, fan-index); the duty
 /// byte is the percent clamped to the firmware's 12-100 window, with a 0% command sent as the idle
 /// value 1. No I/O and no state - the byte math is testable in isolation.
 /// </summary>

@@ -11,7 +11,7 @@ namespace FanControl.LianLi.Transport;
 // their results is ContainerIdResolver's or WinUsbDeviceLocator's, unit-tested through a fake.
 [ExcludeFromCodeCoverage]
 internal sealed class WindowsConfigurationManagerApi : IConfigurationManagerApi {
-    /// <summary>The one instance; it holds no state.</summary>
+    /// <summary>The single instance; it holds no state.</summary>
     public static readonly WindowsConfigurationManagerApi Instance = new WindowsConfigurationManagerApi();
 
     private WindowsConfigurationManagerApi() {

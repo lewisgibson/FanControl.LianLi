@@ -21,7 +21,7 @@ namespace FanControl.LianLi.Devices;
 /// from the status reply, is its identity in both modes; so every sensor id is the one the
 /// wireless controller gives the same chain (<see cref="WirelessSensorIds"/>), and a chain moved
 /// between its receiver's USB port and the dongles keeps its curves. One address is never driven
-/// both ways, and which way is decided afresh from the shared state at every write: a speed goes
+/// both ways, and which way is decided again from the shared state at every write: a speed goes
 /// out over USB only while <see cref="WirelessProcessState"/> says no wireless controller has the
 /// chain bound to its master (L-Connect's <c>IsWirelessBound</c> rule), the duty comes from the
 /// same state (<see cref="WirelessProcessState.ChainTarget"/>, so the host's curve reaches the
@@ -29,11 +29,11 @@ namespace FanControl.LianLi.Devices;
 /// answered the status request with this address since the transport last lost its handle to it.
 /// A device that answers with another address is never written to again.</para>
 ///
-/// <para>Sensors are only ever added, so an index keeps naming the same fan, and they are added
+/// <para>Sensors are only added, so an index keeps naming the same fan, and they are added
 /// only while the chain is driven here: a receiver built while the radio has the chain has none
 /// until the radio lets it go. A change of hands either way, a fan reported later and another
-/// receiver answering raise <see cref="Changed"/> for the plugin. The FanControl-thread surface
-/// only mutates locked state; the constructor and the worker-thread methods are the only places
+/// receiver answering raise <see cref="Changed"/> for the plugin. The FanControl-thread methods
+/// only mutate locked state; the constructor and the worker-thread methods are the only places
 /// the receiver is touched.</para>
 /// </summary>
 internal sealed class FlexReceiverController : IFanDevice, IFanSpeedSource, IDrivenSensorSource {
@@ -55,7 +55,7 @@ internal sealed class FlexReceiverController : IFanDevice, IFanSpeedSource, IDri
     private readonly List<float> _speeds = new List<float>();
     private bool _hasControl;
     private int _fanCount;
-    private int _lastWritten = -2;             // last duty actually written; -2 forces the next write
+    private int _lastWritten = -2;             // last duty written; -2 forces the next write
     private DateTime _lastWriteUtc = DateTime.MinValue;
     private int _loggedDuty = -1;
     private bool _resendAfterReconnect;
@@ -71,7 +71,7 @@ internal sealed class FlexReceiverController : IFanDevice, IFanSpeedSource, IDri
     // been power-cycled, and the path may even carry another receiver.
     private int _identifiedGeneration;
 
-    // Set for good once the device on the path answered with another address.
+    // Set, and never cleared, once the device on the path answered with another address.
     private volatile bool _anotherReceiver;
     private readonly ReconnectReplay _reconnectReplay;
 
@@ -212,7 +212,7 @@ internal sealed class FlexReceiverController : IFanDevice, IFanSpeedSource, IDri
         Publish(_lastStatus);
     }
 
-    // ---------- FanControl-thread surface (no I/O) ----------
+    // ---------- FanControl-thread methods (no I/O) ----------
 
     /// <summary>Set the commanded duty for the chain, kept for it in the shared state: whichever controller drives the chain pushes it.</summary>
     public void SetTarget(int channel, int duty) => _processState.SetChainTarget(MacText, duty);
@@ -236,7 +236,7 @@ internal sealed class FlexReceiverController : IFanDevice, IFanSpeedSource, IDri
     /// Send the chain its duty when it changed or is due its re-send, if a speed may go to it over
     /// USB at this moment (<see cref="IsDrivingChain"/>). L-Connect sends a speed only when the user
     /// changes something and relies on the receiver holding it; the plugin re-asserts it on the
-    /// usual keepalive cadence, the same command, so a receiver that reset or reconnected is driven
+    /// usual keepalive interval, the same command, so a receiver that reset or reconnected is driven
     /// again within it.
     /// </summary>
     public void ApplyPending() {
@@ -401,7 +401,7 @@ internal sealed class FlexReceiverController : IFanDevice, IFanSpeedSource, IDri
     }
 
     // The status of the receiver on the path, which must name this address: false, with the
-    // receiver given up for good, when it names another (two receivers swapped between ports while
+    // receiver given up on permanently, when it names another (two receivers swapped between ports while
     // the host slept, say), so nothing is sent to it again, its readings read 0 and the plugin is
     // told once. When the transport has reopened the device since it was last identified, the same
     // read identifies it again, and the registered replay and the duty follow. A read that throws
@@ -419,7 +419,7 @@ internal sealed class FlexReceiverController : IFanDevice, IFanSpeedSource, IDri
 
             _log.Write(string.Format(
                 CultureInfo.InvariantCulture,
-                "F{0}:{1}: the receiver on its path now answers as {2}; nothing more is sent on it, and a refresh is asked for to plan it afresh",
+                "F{0}:{1}: the receiver on its path now answers as {2}; nothing more is sent on it, and a refresh is asked for to plan it again",
                 _index,
                 MacText,
                 status.MacText));
@@ -459,7 +459,7 @@ internal sealed class FlexReceiverController : IFanDevice, IFanSpeedSource, IDri
 
     // Give the chain the sensors its fan count now needs: the control once a fan is reported (a
     // chain without fans is never written, as NeedSyncPwm never writes a device without fans), and a
-    // reading per reported fan. Only ever added to. Returns whether any was added.
+    // reading per reported fan. Only added to. Returns whether any was added.
     private bool EnsureSensors() {
         lock (_lock) {
             int before = (_hasControl ? 1 : 0) + _speeds.Count;

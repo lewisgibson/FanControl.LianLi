@@ -7,7 +7,7 @@ namespace FanControl.LianLi.Devices;
 /// (0x28), its screens switched onto their themes (0x29) - with the state L-Connect's
 /// <c>RfDevice</c> keeps for it: the sequence a round of sends carries and how many of the ten
 /// sends <c>MasterDevice.SyncControlInfo</c> makes have gone out. A round, once begun, is carried
-/// to its end by the device (<see cref="WirelessDevice.NextSend"/>), not by whoever began it, and
+/// to its end by the device (<see cref="WirelessDevice.NextSend"/>), not by the caller that began it, and
 /// how it ended waits in <see cref="Ended"/> for the pass that next services the command. A
 /// command whose result the record reports is confirmed by that result, read back after each
 /// round, with one more round when it is missing, as

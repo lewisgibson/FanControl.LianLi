@@ -21,7 +21,7 @@ CI (`.github/workflows/`) runs the same steps on `windows-latest`.
 
 ## Conventions
 
-The binding engineering standards live in `.claude/rules/` (architecture seams, the device protocol, the review checklist) and the contributor guide is `CONTRIBUTING.md`. Read those before making changes. Key invariants: one public type, native USB calls confined to `Transport/`'s adapters (no HidSharp), pure protocol encoders covered by byte-level tests, keepalive driven by an injected clock, and the `netstandard2.0` API limit.
+The binding engineering standards are in `.claude/rules/` (the layering, the device protocol, the review checklist) and the contributor guide is `CONTRIBUTING.md`. Read those before making changes. Key invariants: one public type, native USB calls confined to `Transport/`'s adapters (no HidSharp), pure protocol encoders covered by byte-level tests, keepalive driven by an injected clock, and the `netstandard2.0` API limit.
 
 ## Deployment
 
@@ -31,7 +31,7 @@ Ship only `FanControl.LianLi.dll` (or `FanControl.LianLi.Argb.dll` for the ARGB 
 
 The binding rules live in `.claude/rules/`. Claude Code loads them by itself; any other agent must read all four before changing code:
 
-- `.claude/rules/dotnet-architecture.md`: the layering, the transport seam, pure encoders, the clock, the sanctioned exception swallows
+- `.claude/rules/dotnet-architecture.md`: the layering, the transport interface, pure encoders, the clock, the permitted exception swallows
 - `.claude/rules/dotnet-consistency.md`: match the closest existing file exactly
 - `.claude/rules/dotnet-review-checklist.md`: what every change is reviewed against
 - `.claude/rules/operational-awareness.md`: the host contract, deployment and breaking changes

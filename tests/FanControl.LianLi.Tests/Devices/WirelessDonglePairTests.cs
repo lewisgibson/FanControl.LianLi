@@ -172,7 +172,7 @@ public sealed class WirelessDonglePairTests {
     }
 
     // iReadErr = 0 on a reply that carries anything; a read that throws counts like an empty one,
-    // since ReadAll hands back the zeros it got, and still throws to the caller.
+    // since ReadAll returns the zeros it got, and still throws to the caller.
     [Fact]
     public void ANonEmptyRead_StartsTheCountAgain_AndAFailedReadCounts() {
         bool answer = false;

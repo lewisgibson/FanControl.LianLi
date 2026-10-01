@@ -8,7 +8,7 @@ namespace FanControl.LianLi.Tests.Protocol;
 
 /// <summary>
 /// The lighting encoders against their released v1.1.34 sources, kept verbatim under
-/// <c>Released/</c>: a user of that release gets every transfer they got before, byte for byte and
+/// <c>Released/</c>: a user of that release gets every transfer they got before, the same bytes and
 /// in order, with the merge-order register appended where the family gained it since.
 /// </summary>
 public sealed class ReleasedLightingEncoderTests
@@ -104,7 +104,7 @@ public sealed class ReleasedLightingEncoderTests
         port, mode, 1, 0, 0,
         new[] { new RgbColor((byte)(7 + seed), 13, 19), new RgbColor(37, 101, 229), new RgbColor(211, 23, 79), new RgbColor(11, 31, 53) });
 
-    // Every released transfer first, byte for byte, then the suffix the family gained and nothing else.
+    // Every released transfer first, unchanged, then the suffix the family gained and nothing more.
     private static void Compare(IReadOnlyList<LightingTransfer> released, IReadOnlyList<LightingTransfer> current, byte[]? suffix)
     {
         Assert.Equal(released.Count + (suffix is null ? 0 : 1), current.Count);

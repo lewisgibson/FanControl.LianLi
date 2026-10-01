@@ -127,9 +127,9 @@ internal static class ReleasedSlInfinityLightingEncoder
 
     /// <summary>
     /// Encode the full apply sequence for one controller: fan-quantity for groups 0-3, each
-    /// present port (in reverse order) as a colour output report plus an effect feature
+    /// present port (in reverse order) as a colour output report and an effect feature
     /// report, then the frame latch. Ports whose mode L-Connect does not recognise are
-    /// skipped, exactly as L-Connect skips them.
+    /// skipped, as L-Connect skips them.
     /// </summary>
     public static IReadOnlyList<LightingTransfer> Encode(IReadOnlyList<LightingPortState> ports, IReadOnlyList<int>? quantity)
     {

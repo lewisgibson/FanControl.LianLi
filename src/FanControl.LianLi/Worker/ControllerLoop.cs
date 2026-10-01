@@ -15,7 +15,7 @@ namespace FanControl.LianLi.Worker;
 /// <see cref="SignalStop"/> tells the loop to finish, <see cref="WaitForStop"/> waits a bounded
 /// time. The loop's own thread disposes the controller as its last act, so that wait covers the
 /// disposal too - closing a device can itself take seconds after a wake - and a caller that runs out
-/// of time simply stops waiting while the thread finishes the job.
+/// of time stops waiting while the thread finishes the job.
 /// </summary>
 internal sealed class ControllerLoop : IDisposable {
     // How long Dispose waits for the loop on its own.
@@ -61,7 +61,7 @@ internal sealed class ControllerLoop : IDisposable {
     }
 
     /// <summary>
-    /// Tick now rather than at the next interval. Safe from any thread at any time; a loop that is
+    /// Tick now instead of at the next interval. Safe from any thread at any time; a loop that is
     /// stopping or has stopped ignores it.
     /// </summary>
     public void Wake() {

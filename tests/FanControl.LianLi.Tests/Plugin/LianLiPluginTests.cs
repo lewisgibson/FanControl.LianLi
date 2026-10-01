@@ -239,9 +239,9 @@ public class LianLiPluginTests {
     [Fact]
     public void InitializeThenLoad_SkipsChannelsWithNoFanAttached() {
         // The controller's startup probe reads a spinning fan on ch0 and ch2 only; the two empty
-        // channels are not surfaced, so a controller with two fans registers two controls and two
-        // rpm sensors rather than four. FanControl greys out (and later re-links) any saved binding
-        // to a hidden channel rather than rejecting the whole config, so hiding an empty slot never
+        // channels are not shown, so a controller with two fans registers two controls and two
+        // rpm sensors , not four. FanControl greys out (and later re-links) any saved binding
+        // to a hidden channel instead of rejecting the whole config, so hiding an empty slot never
         // orphans the user's other curves.
         var rpm = new byte[65];
         rpm[1] = 0x05; rpm[2] = 0xDC; // ch0 -> 1500 rpm
@@ -598,7 +598,7 @@ public class LianLiPluginTests {
 
         // What the stand-in then does with that registration - rebuilding on the backoff, matching
         // the channels back up - is ReconnectingFanDeviceTests' business, and is asserted there
-        // against a clock the test drives rather than the live keepalive loop.
+        // against a clock the test drives , not the live keepalive loop.
     }
 
     [Fact]

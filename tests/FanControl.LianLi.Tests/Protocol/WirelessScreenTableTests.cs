@@ -5,7 +5,7 @@ using Xunit;
 namespace FanControl.LianLi.Tests.Protocol;
 
 /// <summary>
-/// The clock broadcast's per-receiver-slot screen table, byte for byte against
+/// The clock broadcast's per-receiver-slot screen table, every byte checked against
 /// RFController.UpdateSensorDataByWiredLess: slot s at (s - 1) * 12, themes at 0-3, direction and
 /// data source at 4-7 as (direction &lt;&lt; 5) | source, brightness at 8.
 /// </summary>

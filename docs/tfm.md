@@ -20,7 +20,7 @@ So neither concrete-runtime target satisfies both hosts. Picking either one brea
 
 ## Why netstandard2.0 works
 
-`netstandard2.0` is the API contract that both runtimes implement. An assembly compiled against `netstandard2.0` loads into the .NET Framework 4.8 CLR and into modern CoreCLR alike, because both expose the netstandard2.0 surface. That is the whole point of the standard: one binary, both worlds.
+`netstandard2.0` is the API contract that both runtimes implement. An assembly compiled against `netstandard2.0` loads into the .NET Framework 4.8 CLR and into modern CoreCLR alike, because both expose the netstandard2.0 surface. That is the point of the standard: one binary, both worlds.
 
 This is also why the FanControl SDK contract assembly itself (`FanControl.Plugins.dll`) targets `netstandard2.0`. The host author made the same decision for the same reason - the reference assembly that plugins compile against has to be loadable into both host builds, so it too is netstandard2.0. The plugin follows the SDK's lead.
 

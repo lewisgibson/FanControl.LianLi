@@ -2,9 +2,9 @@ namespace FanControl.LianLi.Protocol;
 
 /// <summary>
 /// How a wireless water block's screen is set up: every part of its parameter block that is a
-/// saved setting rather than the pump or a live reading. The block is written as one unit, so
+/// saved setting not the pump or a live reading. The block is written as one unit, so
 /// driving the pump means restating all of this - the plugin carries the user's own settings
-/// through rather than flattening their screen (see <see cref="WirelessProtocol.EncodeAioParameters"/>).
+/// through instead of flattening their screen (see <see cref="WirelessProtocol.EncodeAioParameters"/>).
 /// Each value is narrowed to its byte exactly as L-Connect's <c>RFController.SetAioParams</c>
 /// narrows it (a plain cast), and the theme as <c>RFController.SetAioThemeIndex</c> accepts it.
 /// </summary>

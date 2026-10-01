@@ -88,7 +88,7 @@ internal sealed class FileLogger : ILog {
         }
 #pragma warning disable CA1031 // logging must never throw
         catch (Exception) {
-            // Intentionally swallowed: a logging failure must never disrupt fan control.
+            // Swallowed here: a logging failure must never disrupt fan control.
         }
 #pragma warning restore CA1031
     }
