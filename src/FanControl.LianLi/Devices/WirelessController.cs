@@ -129,7 +129,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
     private bool _listRead;
     private int _setUpTransmitterGeneration;
     private int _setUpReceiverGeneration;
-    private Action? _reconnectReplay;
+    private readonly ReconnectReplay _reconnectReplay;
 
     /// <summary>
     /// Take ownership of both dongles of one master and discover what is bound to it. Never throws
@@ -155,6 +155,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
         _table = new WirelessDeviceTable(index, log);
         _saves = processState.SaveSchedule(clock.UtcNow);
         _faults = new FaultLog(index, log);
+        _reconnectReplay = new ReconnectReplay(_clock);
 
         Discover();
         _setUpTransmitterGeneration = _dongles.TransmitterGeneration;
@@ -271,9 +272,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
     }
 
     /// <inheritdoc />
-    public void ReplayOnReconnect(Action replay) {
-        _reconnectReplay = replay ?? throw new ArgumentNullException(nameof(replay));
-    }
+    public void ReplayOnReconnect(Func<bool> replay) => _reconnectReplay.Register(replay);
 
     // ---------- FanControl-thread surface (no I/O) ----------
 
@@ -1003,18 +1002,28 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
 #pragma warning restore CA1031
     }
 
-    // A reopened dongle may have come back reset. Its channel is re-asserted by the next master
-    // query, which is sent now rather than at the next second, and every device's speed and effect
-    // are resent by the ordinary comparison against what it reports. The registered replay runs
-    // first; a throw leaves the generations unrecorded, so it is retried next tick.
+    // A dongle the transport lost its handle to and has reopened may have come back reset. Nothing
+    // is replayed while either handle is still faulted: the dongle is off the bus, a transfer of
+    // the cycle is what reopens it, and a saved look tried afresh then would be sent, and given up
+    // on, against a dead transmitter. Once both are back, the master's channel is re-asserted by the
+    // next master query, sent now rather than at the next second, and every device's speed and
+    // effect are resent by the ordinary comparison against what it reports. The registered replay
+    // runs first; a throw leaves the generations unrecorded, so it is retried next tick, and one
+    // that reports failure stays owed and is tried again on its own.
     private void ReplaySetupIfReconnected() {
-        int transmitterGeneration = _dongles.TransmitterGeneration;
-        int receiverGeneration = _dongles.ReceiverGeneration;
-        if (transmitterGeneration == _setUpTransmitterGeneration && receiverGeneration == _setUpReceiverGeneration) {
+        if (_dongles.IsFaulted) {
             return;
         }
 
-        _reconnectReplay?.Invoke();
+        int transmitterGeneration = _dongles.TransmitterGeneration;
+        int receiverGeneration = _dongles.ReceiverGeneration;
+        if (transmitterGeneration == _setUpTransmitterGeneration && receiverGeneration == _setUpReceiverGeneration) {
+            _reconnectReplay.Apply();
+            return;
+        }
+
+        _reconnectReplay.Owe();
+        _reconnectReplay.Apply();
 
         // A reset dongle, or devices that came back with it, get their saved lighting tried afresh.
         foreach (WirelessDevice device in _table.Devices) {

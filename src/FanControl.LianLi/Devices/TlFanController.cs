@@ -51,18 +51,19 @@ internal sealed class TlFanController : IFanDevice {
     private readonly Dictionary<int, int> _unconfirmed = new Dictionary<int, int>();
 
     // The transport generation this hub last took software control under. A newer one means the
-    // transport reopened the device after a handle fault, and a re-enumerated hub may have been
-    // power-cycled and reverted to motherboard sync with its saved look lost, so both are replayed
-    // and every duty re-sent before the next write. Worker-thread only; the replay is registered
-    // before the worker starts.
+    // transport lost its handle to the device after that, and a re-enumerated hub may have been
+    // power-cycled and reverted to motherboard sync with its saved look lost, so once the transport
+    // has reopened it, both are replayed and every duty re-sent before the next write.
+    // Worker-thread only; the replay is registered before the worker starts.
     private int _setUpGeneration;
-    private Action? _reconnectReplay;
+    private readonly ReconnectReplay _reconnectReplay;
 
     public TlFanController(int index, IDeviceTransport transport, IClock clock, ILog log) {
         _index = index;
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _log = log ?? throw new ArgumentNullException(nameof(log));
+        _reconnectReplay = new ReconnectReplay(_clock);
 
         // Discover the fans once. Order by (port, fan-index) so the channel order - and therefore the
         // sensor ids below - is deterministic regardless of the reply's record order.
@@ -123,9 +124,7 @@ internal sealed class TlFanController : IFanDevice {
     }
 
     /// <inheritdoc />
-    public void ReplayOnReconnect(Action replay) {
-        _reconnectReplay = replay ?? throw new ArgumentNullException(nameof(replay));
-    }
+    public void ReplayOnReconnect(Func<bool> replay) => _reconnectReplay.Register(replay);
 
     // ---------- FanControl-thread surface (no I/O) ----------
 
@@ -290,18 +289,27 @@ internal sealed class TlFanController : IFanDevice {
         }
     }
 
-    // A reopened transport means the hub was re-enumerated and may have come back reset. Redo what
-    // construction and Initialize did for it, in the same order - software control, then the saved
-    // look - and forget every last-written duty so the loop that follows re-sends each fan now. A
-    // throw leaves the generation unrecorded, so the replay is retried on the next tick.
+    // A reopened transport means the hub was re-enumerated and may have come back reset. Nothing is
+    // replayed while the handle is still faulted: the hub is off the bus, and the next poll's
+    // handshake is what reopens it, on the backoff. Once it is back, redo what construction and
+    // Initialize did for it, in the same order - software control, then the saved look - and forget
+    // every last-written duty so the loop that follows re-sends each fan now. A throw leaves the
+    // generation unrecorded, so the replay is retried on the next tick; a look that reports failure
+    // stays owed and is tried again on its own.
     private void ReplaySetupIfReconnected() {
+        if (_transport.IsFaulted) {
+            return;
+        }
+
         int generation = _transport.Generation;
         if (generation == _setUpGeneration) {
+            _reconnectReplay.Apply();
             return;
         }
 
         TakeSoftwareControl();
-        _reconnectReplay?.Invoke();
+        _reconnectReplay.Owe();
+        _reconnectReplay.Apply();
         lock (_lock) {
             foreach (Channel channel in _channels) {
                 channel.LastWritten = -2;

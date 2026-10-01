@@ -194,12 +194,12 @@ public class ReconnectingFanDeviceTests {
     public void AReplayRegisteredBeforeTheRebuildIsHandedToTheController() {
         var built = new FakeFanDevice("ctl/0", "ctl/1");
         var device = NewDevice(() => built);
-        void Replay() { }
+        bool Replay() => true;
 
         device.ReplayOnReconnect(Replay);
         device.ApplyPending();
 
-        Assert.Equal((Action)Replay, built.Replay);
+        Assert.Equal((Func<bool>)Replay, built.Replay);
     }
 
     [Fact]
@@ -207,11 +207,11 @@ public class ReconnectingFanDeviceTests {
         var built = new FakeFanDevice("ctl/0", "ctl/1");
         var device = NewDevice(() => built);
         device.ApplyPending();
-        void Replay() { }
+        bool Replay() => true;
 
         device.ReplayOnReconnect(Replay);
 
-        Assert.Equal((Action)Replay, built.Replay);
+        Assert.Equal((Func<bool>)Replay, built.Replay);
     }
 
     [Fact]
@@ -501,7 +501,7 @@ public class ReconnectingFanDeviceTests {
             }
         }
 
-        public void ReplayOnReconnect(Action replay) {
+        public void ReplayOnReconnect(Func<bool> replay) {
         }
 
         public void Dispose() {

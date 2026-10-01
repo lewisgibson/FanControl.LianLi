@@ -108,8 +108,10 @@ internal sealed class HidTransport : IDeviceTransport {
     private readonly DoublingBackoff _reopenBackoff = new DoublingBackoff(10, 640);
     private int _faultedTransfers;
 
-    // Bumped by every successful Reopen so the controller above can tell the device may have reset
-    // and replay its setup. Worker-thread only, like the handles it tracks.
+    // Moved on by every fault - when the handle is lost, not when it is reopened - so the controller
+    // above sees it before its next transfer reopens the device inside its own call, and replays
+    // its setup on the first tick after the reopen (IsFaulted says when that is), since the device
+    // may have reset. Worker-thread only, like the handles it tracks.
     private int _generation;
 
     // int (not bool) so the idempotency guard is a lock-free Interlocked.Exchange, as in the worker.
@@ -181,6 +183,8 @@ internal sealed class HidTransport : IDeviceTransport {
     public bool CanWrite => true;
 
     public int Generation => _generation;
+
+    public bool IsFaulted => _faulted;
 
     public void Write(byte[] report) {
         if (report is null) {
@@ -302,13 +306,13 @@ internal sealed class HidTransport : IDeviceTransport {
             completed = _calls.TryRun(
                 _device.DevicePath, Describe(operation), call, StreamCallTimeoutMilliseconds, () => cancelOutcome = CancelPendingTransfer(stream));
         } catch (IOException ex) {
-            _faulted = true;
+            Fault();
             throw new IOException(string.Format(
                 CultureInfo.InvariantCulture, "{0} failed, handle faulted: {1}", operation, ex.Message), ex);
         }
 
         if (!completed) {
-            _faulted = true;
+            Fault();
             throw new IOException(string.Format(
                 CultureInfo.InvariantCulture,
                 "{0} did not return within {1} ms; {2}; device unresponsive, handle faulted.",
@@ -379,7 +383,7 @@ internal sealed class HidTransport : IDeviceTransport {
             () => cancelOutcome = CancelPendingTransfer(control));
 
         if (!completed) {
-            _faulted = true;
+            Fault();
             throw new IOException(string.Format(
                 CultureInfo.InvariantCulture,
                 "{0} timed out after {1} ms; {2}; device unresponsive (re-enumerating?), handle faulted.",
@@ -393,7 +397,7 @@ internal sealed class HidTransport : IDeviceTransport {
         }
 
         if (lastError == ErrorInvalidHandle || lastError == ErrorDeviceNotConnected) {
-            _faulted = true;
+            Fault();
             throw new IOException(string.Format(
                 CultureInfo.InvariantCulture, "{0} failed (error {1}); device gone, handle faulted.", operation, lastError));
         }
@@ -413,6 +417,13 @@ internal sealed class HidTransport : IDeviceTransport {
 
         return string.Format(
             CultureInfo.InvariantCulture, "cancel of the pending transfer failed (error {0})", error);
+    }
+
+    // The handle no longer reaches the device: latch the fault and move the generation on, so the
+    // controller sets the device up again once it is reopened.
+    private void Fault() {
+        _faulted = true;
+        _generation++;
     }
 
     // Gate every transfer: a healthy handle passes straight through; a faulted one is either reopened
@@ -479,7 +490,6 @@ internal sealed class HidTransport : IDeviceTransport {
         _handles = handles;
         _faulted = false;
         _reopenBackoff.Reset();
-        _generation++;
         _log.Write(string.Format(
             CultureInfo.InvariantCulture,
             "  reopened {0} after {1} faulted transfer(s)",

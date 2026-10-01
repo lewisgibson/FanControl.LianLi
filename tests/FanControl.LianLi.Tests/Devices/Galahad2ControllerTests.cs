@@ -39,14 +39,17 @@ public class Galahad2ControllerTests {
     public void ApplyPending_AfterTransportReopened_ReplaysLookThenResendsFanAndPump() {
         var (controller, transport, _) = NewController();
         var replayedAt = new List<int>();
-        controller.ReplayOnReconnect(() => replayedAt.Add(transport.Writes.Count));
+        controller.ReplayOnReconnect(() => {
+            replayedAt.Add(transport.Writes.Count);
+            return true;
+        });
         controller.SetTarget(FanChannel, 50);
         controller.SetTarget(PumpChannel, 70);
         controller.ApplyPending();
         transport.Clear();
 
-        // The transport reopened the cooler (a wake): no setup writes of its own, so the saved look
-        // replays first, then both unchanged duties are re-sent - the cooler may have reset.
+        // The transport lost and reopened the cooler (a wake): no setup writes of its own, so the
+        // saved look replays first, then both unchanged duties are re-sent - the cooler may have reset.
         transport.Generation = 1;
         controller.ApplyPending();
 
@@ -54,6 +57,62 @@ public class Galahad2ControllerTests {
         Assert.Equal(2, transport.Writes.Count);
         Assert.Equal(0x8B, transport.Writes[0][1]); // fan
         Assert.Equal(0x8A, transport.Writes[1][1]); // pump
+    }
+
+    // While the handle is still faulted the cooler is off the bus: the look is not replayed (it
+    // would be refused, or reopen the path itself and be lost on it), and the duties go out as
+    // usual, one of them being what reopens the cooler on the backoff. The look follows once it
+    // is back.
+    [Fact]
+    public void ApplyPending_WhileTheTransportIsStillFaulted_ReplaysNothing_UntilTheCoolerIsBack() {
+        var (controller, transport, _) = NewController();
+        int replays = 0;
+        controller.ReplayOnReconnect(() => {
+            replays++;
+            return true;
+        });
+        controller.SetTarget(FanChannel, 50);
+        controller.ApplyPending();
+        transport.Clear();
+
+        transport.Generation = 1;
+        transport.IsFaulted = true;
+        controller.ApplyPending();
+
+        Assert.Equal(0, replays);
+        Assert.Empty(transport.Writes); // the duty is fresh, and nothing was replayed
+
+        transport.IsFaulted = false;
+        controller.ApplyPending();
+
+        Assert.Equal(1, replays);
+        Assert.Single(transport.Writes); // the fan, re-sent after the look
+    }
+
+    // A look the cooler refused stays owed on its own and is tried again on the keepalive
+    // cadence; the duties are re-sent regardless, and the reconnect is recorded.
+    [Fact]
+    public void ApplyPending_ALookTheCoolerRefused_StaysOwed_AndIsTriedAgainOnTheKeepaliveCadence() {
+        var (controller, transport, clock) = NewController();
+        int replays = 0;
+        controller.ReplayOnReconnect(() => ++replays >= 2);
+        controller.SetTarget(PumpChannel, 70);
+        controller.ApplyPending();
+        transport.Clear();
+
+        transport.Generation = 1;
+        controller.ApplyPending();
+        Assert.Equal(1, replays);
+        Assert.Single(transport.Writes);
+
+        controller.ApplyPending();
+        Assert.Equal(1, replays);
+        clock.Advance(ChannelWriteDecision.RefreshInterval);
+        controller.ApplyPending();
+        Assert.Equal(2, replays);
+        clock.Advance(ChannelWriteDecision.RefreshInterval);
+        controller.ApplyPending();
+        Assert.Equal(2, replays);
     }
 
     [Fact]

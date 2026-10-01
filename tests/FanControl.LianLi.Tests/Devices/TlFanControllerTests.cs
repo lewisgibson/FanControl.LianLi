@@ -56,14 +56,18 @@ public class TlFanControllerTests {
     public void ApplyPending_AfterTransportReopened_RetakesSoftwareControlThenResendsEveryFan() {
         var (controller, transport, _) = NewController((0, 0, 1000), (0, 1, 1100));
         var replayedAt = new List<int>();
-        controller.ReplayOnReconnect(() => replayedAt.Add(transport.Writes.Count));
+        controller.ReplayOnReconnect(() => {
+            replayedAt.Add(transport.Writes.Count);
+            return true;
+        });
         controller.SetTarget(0, 50);
         controller.SetTarget(1, 60);
         controller.ApplyPending();
         transport.Clear();
 
-        // The transport reopened the hub (a wake): motherboard sync is switched off per fan again,
-        // then the saved look replays, then both unchanged duties are re-sent - the hub may have reset.
+        // The transport lost and reopened the hub (a wake): motherboard sync is switched off per fan
+        // again, then the saved look replays, then both unchanged duties are re-sent - the hub may
+        // have reset.
         transport.Generation = 1;
         controller.ApplyPending();
 
@@ -72,6 +76,59 @@ public class TlFanControllerTests {
         Assert.Equal(0xB1, transport.Writes[1][1]);
         Assert.Equal(new[] { 2 }, replayedAt);
         Assert.Equal(4, transport.Writes.Count); // two sync-off, two set-speed
+    }
+
+    // While the handle is still faulted the hub is off the bus: neither software control nor the
+    // look is replayed, and the duty writes go out as usual, one of them being what reopens the
+    // hub on the backoff. Both follow once it is back.
+    [Fact]
+    public void ApplyPending_WhileTheTransportIsStillFaulted_ReplaysNothing_UntilTheHubIsBack() {
+        var (controller, transport, _) = NewController((0, 0, 1000));
+        int replays = 0;
+        controller.ReplayOnReconnect(() => {
+            replays++;
+            return true;
+        });
+        controller.SetTarget(0, 50);
+        controller.ApplyPending();
+        transport.Clear();
+
+        transport.Generation = 1;
+        transport.IsFaulted = true;
+        controller.ApplyPending();
+
+        Assert.Equal(0, replays);
+        Assert.Empty(transport.Writes);
+
+        transport.IsFaulted = false;
+        controller.ApplyPending();
+
+        Assert.Equal(1, replays);
+        Assert.Equal(0xB1, transport.Writes[0][1]); // software control first
+        Assert.Equal(2, transport.Writes.Count);    // then the duty
+    }
+
+    // A look the hub refused stays owed on its own: software control and the duty are replayed
+    // regardless, and the look is tried again on the keepalive cadence.
+    [Fact]
+    public void ApplyPending_ALookTheHubRefused_StaysOwed_AndIsTriedAgainOnTheKeepaliveCadence() {
+        var (controller, transport, clock) = NewController((0, 0, 1000));
+        int replays = 0;
+        controller.ReplayOnReconnect(() => ++replays >= 2);
+        controller.SetTarget(0, 50);
+        controller.ApplyPending();
+        transport.Clear();
+
+        transport.Generation = 1;
+        controller.ApplyPending();
+        Assert.Equal(1, replays);
+        Assert.Equal(2, transport.Writes.Count);
+
+        controller.ApplyPending();
+        Assert.Equal(1, replays);
+        clock.Advance(ChannelWriteDecision.RefreshInterval);
+        controller.ApplyPending();
+        Assert.Equal(2, replays);
     }
 
     [Fact]

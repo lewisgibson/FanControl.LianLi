@@ -1246,6 +1246,8 @@ public sealed class LianLiPluginLifecycleTests {
 
         public int Generation => 0;
 
+        public bool IsFaulted => false;
+
         public void Write(byte[] report) {
         }
 

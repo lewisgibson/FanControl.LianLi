@@ -143,6 +143,8 @@ internal sealed class WinUsbTransport : IDeviceTransport {
 
     public int Generation => _generation;
 
+    public bool IsFaulted => _faulted;
+
     public void Write(byte[] report) {
         if (report is null) {
             throw new ArgumentNullException(nameof(report));
@@ -255,7 +257,7 @@ internal sealed class WinUsbTransport : IDeviceTransport {
             () => cancelOutcome = CancelPendingTransfers(opened));
 
         if (!completed) {
-            _faulted = true;
+            Fault();
             throw new IOException(string.Format(
                 CultureInfo.InvariantCulture,
                 "WinUsb_ReadPipe timed out after {0} ms; {1}; dongle unresponsive, handle faulted.",
@@ -264,7 +266,7 @@ internal sealed class WinUsbTransport : IDeviceTransport {
         }
 
         if (error != 0) {
-            _faulted = true;
+            Fault();
             throw new IOException(string.Format(
                 CultureInfo.InvariantCulture, "WinUsb_ReadPipe failed (error {0}); handle faulted.", error));
         }
@@ -338,8 +340,16 @@ internal sealed class WinUsbTransport : IDeviceTransport {
     // fault so the next transfer reopens the dongle, and report the failure with the device.
     private IOException FailedWrite(string failure) {
         _delay.Wait(FailedWriteSettleMilliseconds);
-        _faulted = true;
+        Fault();
         return new IOException(failure + "; handle faulted.");
+    }
+
+    // The handle no longer reaches the device: latch the fault and move the generation on, as
+    // HidTransport does and for the same reason - the next transfer reopens the device inside its
+    // own call, and the controller above must see the loss before that transfer goes out.
+    private void Fault() {
+        _faulted = true;
+        _generation++;
     }
 
     // Cancel a transfer that ran out its bound, and say how, for the fault line. Both pipes are
@@ -434,7 +444,6 @@ internal sealed class WinUsbTransport : IDeviceTransport {
         _opened = reopened;
         _faulted = false;
         _reopenBackoff.Reset();
-        _generation++;
         _log.Write(string.Format(
             CultureInfo.InvariantCulture, "  reopened {0} after {1} faulted transfer(s)", _devicePath, _faultedTransfers));
         _faultedTransfers = 0;

@@ -25,6 +25,8 @@ internal sealed class FakeWirelessDongle : IDeviceTransport {
 
     public int Generation { get; set; }
 
+    public bool IsFaulted { get; set; }
+
     public int DisposeCount { get; private set; }
 
     public int ReadCount { get; private set; }

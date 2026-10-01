@@ -26,6 +26,8 @@ internal sealed class ClaimedTransport : IDeviceTransport {
 
     public int Generation => _inner.Generation;
 
+    public bool IsFaulted => _inner.IsFaulted;
+
     public void Write(byte[] report) => _inner.Write(report);
 
     public void SetFeature(byte[] report) => _inner.SetFeature(report);

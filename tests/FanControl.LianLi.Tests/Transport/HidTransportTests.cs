@@ -53,6 +53,7 @@ public class HidTransportTests {
             _hid.Calls);
         Assert.True(transport.CanWrite);
         Assert.Equal(0, transport.Generation);
+        Assert.False(transport.IsFaulted);
     }
 
     [Fact]
@@ -170,8 +171,10 @@ public class HidTransportTests {
         IOException failure = Assert.Throws<IOException>(() => transport.SetFeature(new byte[] { 0xE0 }));
 
         Assert.Equal($"HidD_SetFeature failed (error {error}); device gone, handle faulted.", failure.Message);
+        Assert.True(transport.IsFaulted);
         transport.SetFeature(new byte[] { 0xE0 });
         Assert.Equal(1, transport.Generation);
+        Assert.False(transport.IsFaulted); // reopened inside that transfer
         Assert.Equal("HidD_SetFeature " + Control(1) + " 33", _hid.Calls.Last());
     }
 
@@ -374,6 +377,7 @@ public class HidTransportTests {
         IOException failure = Assert.Throws<IOException>(() => transport.Write(new byte[] { 0x01 }));
 
         Assert.Equal("WriteFile failed, handle faulted: WriteFile failed (error 31)", failure.Message);
+        Assert.Equal(1, transport.Generation); // moved on at the fault, before the reopen
         transport.Write(new byte[] { 0x01 });
         Assert.Equal(1, transport.Generation);
         Assert.Equal("WriteFile " + Stream(1) + " 64", _hid.Calls.Last());
@@ -612,7 +616,8 @@ public class HidTransportTests {
             "HidD_SetFeature skipped: reopen of " + Path + " failed: Failed to open HID input handle at " + Path + " (error 2).",
             failure.Message);
         Assert.Equal(1, Stream(1).Releases);
-        Assert.Equal(0, transport.Generation);
+        Assert.Equal(1, transport.Generation); // the handle was lost; the reopen that failed changes nothing
+        Assert.True(transport.IsFaulted);
     }
 
     [Fact]
@@ -632,7 +637,7 @@ public class HidTransportTests {
         Assert.Single(_calls.Abandoned)(CancellationToken.None);
         Assert.Equal(1, Stream(1).Releases);
         Assert.Equal(1, Control(1).Releases);
-        Assert.Equal(0, transport.Generation);
+        Assert.Equal(1, transport.Generation); // the handle was lost; the reopen that failed changes nothing
     }
 
     [Fact]

@@ -97,6 +97,94 @@ public sealed class LianLiPluginLightingTests : IDisposable
         Assert.True(IndexOfSequence(transport, expected) >= 0, "saved look was not replayed after the reconnect");
     }
 
+    // The same through the real HID transport, with the worker running: the controller drops off
+    // the bus on a poll and refuses one reopen, so the replay is not tried while it is gone - it
+    // would be refused, and the look then lost - and the saved look, the manual-mode assert and
+    // the duty reach the reopened handle once it is back.
+    [Fact]
+    public void Reconnect_OverTheRealTransport_ReappliesSavedLook_OnceTheDeviceIsBack()
+    {
+        WriteSavedLook();
+        var hid = new FakeHidApi();
+        var logger = new FakeLogger();
+        var gate = new DeviceCallGate(new FakeDeviceCallRunner(), new FakeDeviceCallClock(), logger);
+        HidTransport transport = HidTransport.Open(
+            new HidInterface(0x0CF2, 0xA102, DevicePath, new HidCapabilities(0xFF72, 65, 353, 65)),
+            hid, logger, gate, new FakeTransferDelay(), CancellationToken.None);
+        var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()) { WorkerTickIntervalMilliseconds = 20 };
+        using var plugin = new LianLiPlugin(
+            new OpenedEnumerator(Device(0xA102, DevicePath), transport), new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, _lConnect.Locations, runtime);
+
+        // The population probe reads the input report six times at Initialize; the ninth read is
+        // the worker's third poll, which loses the device. Everything runs on the worker's thread
+        // from there, the scripting included.
+        int reads = 0;
+        int featuresAtReopen = -1;
+        int writesAtReopen = -1;
+        hid.OnCall = call =>
+        {
+            if (call.StartsWith("HidD_GetInputReport", StringComparison.Ordinal) && ++reads == 9)
+            {
+                hid.TransferResults.Enqueue(1167);
+                hid.StreamOpenErrors.Enqueue(2);
+            }
+            else if (call.StartsWith("OpenStreamHandle", StringComparison.Ordinal) && reads >= 9 && hid.StreamOpenErrors.Count == 0 && featuresAtReopen < 0)
+            {
+                featuresAtReopen = hid.Features.Count;
+                writesAtReopen = hid.Written.Count;
+            }
+        };
+        plugin.Initialize();
+        var sensors = new FakeSensorsContainer();
+        plugin.Load(sensors);
+        sensors.ControlSensors[0].Set(40f);
+
+        Assert.True(SpinWait.SpinUntil(() => logger.Messages.Contains("C0 reconnected: setup replayed (transport generation 1)"), TimeSpan.FromSeconds(10)),
+            string.Join("\n", logger.Messages));
+        plugin.Close();
+
+        Assert.True(featuresAtReopen >= 0);
+        Assert.Contains(logger.Messages, m => m.StartsWith("  reopened " + DevicePath + " after ", StringComparison.Ordinal));
+        Assert.DoesNotContain(logger.Messages, m => m.Contains("lighting apply failed"));
+        IReadOnlyList<LightingTransfer> expected = SlInfinityLightingEncoder.Encode(
+            new[] { new LightingPortState(0, 26, 0, 0, 0, new[] { new RgbColor(255, 0, 0) }) },
+            new[] { 4, 4, 4, 4 });
+        int feature = hid.Features.FindIndex(featuresAtReopen, f => f[0] == 0xE0 && f[1] == 0x10 && f[2] == 0x60);
+        int write = writesAtReopen;
+        Assert.True(feature >= 0, "no look after the reopen");
+        foreach (LightingTransfer transfer in expected)
+        {
+            if (transfer.IsFeature)
+            {
+                Assert.Equal(transfer.Report, hid.Features[feature++].Take(transfer.Report.Length));
+            }
+            else
+            {
+                Assert.Equal(transfer.Report, hid.Written[write++]);
+            }
+        }
+
+        Assert.Contains(hid.Features.Skip(feature), f => f[0] == 0xE0 && f[1] == 0x20 && f[3] == 40); // the duty, re-sent after the look and the manual-mode assert
+    }
+
+    // An enumerator handing out a transport opened by the test, so the plugin drives a controller
+    // over the real HID transport.
+    private sealed class OpenedEnumerator : IDeviceEnumerator
+    {
+        private readonly LocatedDevice _device;
+        private readonly IDeviceTransport _transport;
+
+        public OpenedEnumerator(LocatedDevice device, IDeviceTransport transport)
+        {
+            _device = device;
+            _transport = transport;
+        }
+
+        public IReadOnlyList<LocatedDevice> Locate(IReadOnlyList<int> vendorIds, IReadOnlyList<int> productIds) => new[] { _device };
+
+        public IDeviceTransport Open(LocatedDevice info) => _transport;
+    }
+
     private static int IndexOfSequence(FakeDeviceTransport transport, IReadOnlyList<LightingTransfer> expected)
     {
         KeyValuePair<bool, byte[]>[] transfers = transport.SnapshotTransfers();

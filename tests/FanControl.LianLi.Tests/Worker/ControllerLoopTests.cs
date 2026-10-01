@@ -133,7 +133,7 @@ public sealed class ControllerLoopTests {
         public void PollRpm() {
         }
 
-        public void ReplayOnReconnect(Action replay) {
+        public void ReplayOnReconnect(Func<bool> replay) {
         }
 
         public void Dispose() {

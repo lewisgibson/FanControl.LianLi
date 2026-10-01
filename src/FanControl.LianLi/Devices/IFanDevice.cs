@@ -47,12 +47,15 @@ internal interface IFanDevice : IDisposable {
     void PollRpm();
 
     /// <summary>
-    /// Register work to replay whenever the transport reports it reopened the device (its
-    /// <c>Generation</c> moved on after a handle fault). A re-enumerated device may have been
-    /// power-cycled and lost its volatile state, so the Lighting build registers its saved-look
-    /// replay here; the device's own setup writes are replayed regardless. Runs on the worker
-    /// thread, in the same order Initialize used, before the next duty write. Holds at most one
-    /// replay; the standard build registers none.
+    /// Register work to replay whenever the transport has reopened the device after losing its
+    /// handle (its <c>Generation</c> moved on at the fault, and its <c>IsFaulted</c> is false
+    /// again). A re-enumerated device may have been power-cycled and lost its volatile state, so
+    /// the Lighting build registers its saved-look replay here; the device's own setup writes are
+    /// replayed regardless. Runs on the worker thread, in the same order Initialize used, before
+    /// the next duty write, and only once the device is back. The replay returns whether it was
+    /// done: one that returns false stays owed and is run again (see <see cref="ReconnectReplay"/>),
+    /// so a look the device refused, or that was cut short by the device going away again, is never
+    /// recorded as replayed. Holds at most one replay; the standard build registers none.
     /// </summary>
-    void ReplayOnReconnect(Action replay);
+    void ReplayOnReconnect(Func<bool> replay);
 }

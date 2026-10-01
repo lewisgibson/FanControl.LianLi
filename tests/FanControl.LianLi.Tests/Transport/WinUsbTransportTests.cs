@@ -60,6 +60,7 @@ public class WinUsbTransportTests {
             _api.Calls);
         Assert.True(transport.CanWrite);
         Assert.Equal(0, transport.Generation);
+        Assert.False(transport.IsFaulted);
     }
 
     [Fact]
@@ -225,10 +226,13 @@ public class WinUsbTransportTests {
 
         Assert.Equal($"WinUsb_WritePipe failed (error {error}); handle faulted.", failure.Message);
         Assert.Equal(new[] { 300 }, _delay.Waits);
+        Assert.Equal(1, transport.Generation); // moved on at the fault, before the reopen, so a controller sees it before its next transfer
+        Assert.True(transport.IsFaulted);
 
         transport.Write(Packet(2));
         Assert.Equal(2, OpenCount);
         Assert.Equal(1, transport.Generation);
+        Assert.False(transport.IsFaulted);
     }
 
     [Fact]
@@ -578,7 +582,8 @@ public class WinUsbTransportTests {
         Assert.Single(_calls.Abandoned)(CancellationToken.None);
         Assert.Equal(1, _api.Interfaces[1].Releases);
         Assert.Equal(1, _api.Devices[1].Releases);
-        Assert.Equal(0, transport.Generation);
+        Assert.Equal(1, transport.Generation); // the handle was lost; the reopen that timed out changes nothing
+        Assert.True(transport.IsFaulted);
     }
 
     [Fact]

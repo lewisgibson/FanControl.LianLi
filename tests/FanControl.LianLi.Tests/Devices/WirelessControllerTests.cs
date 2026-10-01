@@ -1824,7 +1824,10 @@ public sealed class WirelessControllerTests : IDisposable {
     public void AReopenedDongle_RunsTheReplayAndTheCycleAtOnce() {
         Build();
         int replays = 0;
-        Controller.ReplayOnReconnect(() => replays++);
+        Controller.ReplayOnReconnect(() => {
+            replays++;
+            return true;
+        });
         Tick();
         ClearWrites();
 
@@ -1839,6 +1842,63 @@ public sealed class WirelessControllerTests : IDisposable {
         Assert.Equal(1, replays);
     }
 
+    // While either dongle's handle is still faulted nothing is replayed: the dongle is off the
+    // bus, and the cycle's own transfers are what reopen it. A device's effect tried afresh then
+    // would be sent, and given up on, against a dead transmitter. Once both are back the replay
+    // runs and the cycle follows at once.
+    [Fact]
+    public void AFaultedDongle_HasNothingReplayed_UntilBothDonglesAreBack() {
+        Build();
+        int replays = 0;
+        Controller.ReplayOnReconnect(() => {
+            replays++;
+            return true;
+        });
+        Tick();
+        ClearWrites();
+
+        _rig.Transmitter.Generation = 1;
+        _rig.Transmitter.IsFaulted = true;
+        Controller.ApplyPending();
+        _rig.Receiver.IsFaulted = true;
+        _rig.Transmitter.IsFaulted = false;
+        Controller.ApplyPending();
+
+        Assert.Equal(0, replays);
+        Assert.DoesNotContain(_log.Messages, m => m.Contains("W4 reconnected"));
+
+        _rig.Receiver.IsFaulted = false;
+        Controller.ApplyPending();
+
+        Assert.Equal(1, replays);
+        Assert.Contains("W4 reconnected (transmitter generation 1, receiver generation 0)", _log.Messages);
+        Assert.Contains(_rig.Transmitter.Writes, w => w[0] == 0x11);
+    }
+
+    // A replay that reports failure stays owed and is tried again on the keepalive cadence; the
+    // reconnect itself is recorded and the cycle runs.
+    [Fact]
+    public void AReplayThatReportsFailure_StaysOwed_AndIsTriedAgainOnTheKeepaliveCadence() {
+        Build();
+        int replays = 0;
+        Controller.ReplayOnReconnect(() => ++replays >= 2);
+        Tick();
+        _rig.Transmitter.Generation = 1;
+
+        Controller.ApplyPending();
+        Assert.Equal(1, replays);
+        Assert.Contains("W4 reconnected (transmitter generation 1, receiver generation 0)", _log.Messages);
+        Controller.ApplyPending();
+        Assert.Equal(1, replays);
+
+        _clock.Advance(ChannelWriteDecision.RefreshInterval);
+        Controller.ApplyPending();
+        Assert.Equal(2, replays);
+        _clock.Advance(ChannelWriteDecision.RefreshInterval);
+        Controller.ApplyPending();
+        Assert.Equal(2, replays);
+    }
+
     [Fact]
     public void AReplayThatThrows_IsTriedAgainNextTick() {
         Build();
@@ -1847,6 +1907,8 @@ public sealed class WirelessControllerTests : IDisposable {
             if (++attempts == 1) {
                 throw new IOException("replay failed");
             }
+
+            return true;
         });
         _rig.Transmitter.Generation = 2;
 

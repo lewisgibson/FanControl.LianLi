@@ -38,11 +38,14 @@ internal sealed class WirelessDonglePair : IDisposable {
         _log = log ?? throw new ArgumentNullException(nameof(log));
     }
 
-    /// <summary>How many times the transmitter's transport has reopened its handle.</summary>
+    /// <summary>How many times the transmitter's transport has lost its handle.</summary>
     public int TransmitterGeneration => _transmitter.Generation;
 
-    /// <summary>How many times the receiver's transport has reopened its handle.</summary>
+    /// <summary>How many times the receiver's transport has lost its handle.</summary>
     public int ReceiverGeneration => _receiver.Generation;
+
+    /// <summary>Whether either dongle's handle is known not to reach it at the moment (see <see cref="IDeviceTransport.IsFaulted"/>).</summary>
+    public bool IsFaulted => _transmitter.IsFaulted || _receiver.IsFaulted;
 
     /// <summary>Write one packet to the transmitter. A failure is counted, then rethrown.</summary>
     public void WriteTransmitter(byte[] packet) {

@@ -36,6 +36,12 @@ public sealed class WirelessDonglePairTests {
         Assert.Equal(new byte[] { 9, 0, 0 }, pair.ReadReceiver(3));
         Assert.Equal(3, pair.TransmitterGeneration);
         Assert.Equal(5, pair.ReceiverGeneration);
+        Assert.False(pair.IsFaulted);
+        receiver.IsFaulted = true;
+        Assert.True(pair.IsFaulted);
+        receiver.IsFaulted = false;
+        transmitter.IsFaulted = true;
+        Assert.True(pair.IsFaulted);
     }
 
     // WinUsb.RfSend: five failed sends in a row on the transmitter call RFController.ResetTx, which

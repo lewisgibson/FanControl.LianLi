@@ -52,7 +52,7 @@ internal sealed class FakeFanDevice : IFanDevice, ITemperatureSource {
     public Exception? DisposeFault { get; set; }
 
     /// <summary>The replay the owner registered, if any.</summary>
-    public Action? Replay { get; private set; }
+    public Func<bool>? Replay { get; private set; }
 
     /// <summary>When set, a channel whose index is in here reports as unpopulated.</summary>
     public HashSet<int> UnpopulatedChannels { get; } = new HashSet<int>();
@@ -88,7 +88,7 @@ internal sealed class FakeFanDevice : IFanDevice, ITemperatureSource {
 
     public void PollRpm() => PollCount++;
 
-    public void ReplayOnReconnect(Action replay) => Replay = replay;
+    public void ReplayOnReconnect(Func<bool> replay) => Replay = replay;
 
     public void Dispose() {
         IsDisposed = true;

@@ -47,13 +47,13 @@ internal sealed class FanController : IFanDevice {
     private bool[] _populated = { true, true, true, true };
 
     // The transport generation this controller last set the device up under. A newer one means
-    // the transport reopened the device after a handle fault, and a re-enumerated device may have
+    // the transport lost its handle to the device after that, and a re-enumerated device may have
     // been power-cycled (hibernate does this) and lost manual mode, the ARGB sync, and its saved
-    // look - all volatile. So the setup is replayed and every duty re-sent before the next write.
-    // Worker-thread only, like the transport it mirrors; the replay is registered before the
-    // worker starts.
+    // look - all volatile. So once the transport has reopened it, the setup is replayed and every
+    // duty re-sent before the next write. Worker-thread only, like the transport it mirrors; the
+    // replay is registered before the worker starts.
     private int _setUpGeneration;
-    private Action? _reconnectReplay;
+    private readonly ReconnectReplay _reconnectReplay;
 
     public FanController(
         int index,
@@ -79,6 +79,7 @@ internal sealed class FanController : IFanDevice {
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _setUpGeneration = _transport.Generation;
+        _reconnectReplay = new ReconnectReplay(_clock);
     }
 
     /// <summary>The Uni controllers expose four fan channels.</summary>
@@ -161,9 +162,7 @@ internal sealed class FanController : IFanDevice {
     }
 
     /// <inheritdoc />
-    public void ReplayOnReconnect(Action replay) {
-        _reconnectReplay = replay ?? throw new ArgumentNullException(nameof(replay));
-    }
+    public void ReplayOnReconnect(Func<bool> replay) => _reconnectReplay.Register(replay);
 
     // ---------- FanControl-thread surface (no I/O) ----------
 
@@ -266,18 +265,27 @@ internal sealed class FanController : IFanDevice {
         _transport.Dispose();
     }
 
-    // A reopened transport means the device was re-enumerated and may have come back reset. Redo
-    // what Initialize did for it, in the same order - the saved look first, then manual mode - and
-    // forget every last-written duty so the loop that follows re-sends each channel now rather than
-    // at its next refresh. A throw leaves the generation unrecorded, so the replay is retried on
-    // the next tick and the worker isolates the fault as usual.
+    // A reopened transport means the device was re-enumerated and may have come back reset. Nothing
+    // is replayed while the handle is still faulted: the device is off the bus, and a transfer of
+    // the loop below is what reopens it, on the backoff. Once it is back, redo what Initialize did
+    // for it, in the same order - the saved look first, then manual mode - and forget every
+    // last-written duty so the loop that follows re-sends each channel now rather than at its next
+    // refresh. A throw leaves the generation unrecorded, so the replay is retried on the next tick
+    // and the worker isolates the fault as usual; a look that reports failure stays owed on its
+    // own and is tried again, without holding up fan control.
     private void ReplaySetupIfReconnected() {
-        int generation = _transport.Generation;
-        if (generation == _setUpGeneration) {
+        if (_transport.IsFaulted) {
             return;
         }
 
-        _reconnectReplay?.Invoke();
+        int generation = _transport.Generation;
+        if (generation == _setUpGeneration) {
+            _reconnectReplay.Apply();
+            return;
+        }
+
+        _reconnectReplay.Owe();
+        _reconnectReplay.Apply();
         AssertManualMode();
         lock (_lock) {
             for (int ch = 0; ch < Channels; ch++) {

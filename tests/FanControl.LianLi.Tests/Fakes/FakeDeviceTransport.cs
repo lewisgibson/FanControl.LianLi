@@ -66,6 +66,12 @@ internal sealed class FakeDeviceTransport : IDeviceTransport {
     /// </summary>
     public int Generation { get; set; }
 
+    /// <summary>
+    /// Settable so a test can simulate the transport having lost its handle and not reopened it yet
+    /// (the device is off the bus), and assert that the controller replays nothing until it is back.
+    /// </summary>
+    public bool IsFaulted { get; set; }
+
     public void Write(byte[] report) {
         if (FailWrites || (FailWrite?.Invoke(report) ?? false)) {
             throw new IOException("simulated device write failure");

@@ -218,7 +218,7 @@ public class KeepAliveWorkerTests {
         public void PollRpm() {
         }
 
-        public void ReplayOnReconnect(Action replay) {
+        public void ReplayOnReconnect(Func<bool> replay) {
         }
 
         // Each close waits until both are closing, which they can only do if they overlap.

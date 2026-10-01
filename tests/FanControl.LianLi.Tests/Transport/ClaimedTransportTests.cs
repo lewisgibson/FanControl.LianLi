@@ -20,6 +20,8 @@ public sealed class ClaimedTransportTests {
         Assert.Equal(new byte[] { 7 }, claimed.Read(1));
         Assert.Equal(inner.CanWrite, claimed.CanWrite);
         Assert.Equal(inner.Generation, claimed.Generation);
+        inner.IsFaulted = true;
+        Assert.True(claimed.IsFaulted);
         Assert.Same(inner, claimed.Inner);
 
         claimed.Dispose();

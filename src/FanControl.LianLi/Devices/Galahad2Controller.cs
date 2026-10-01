@@ -36,12 +36,12 @@ internal sealed class Galahad2Controller : IFanDevice {
     private readonly bool[] _rpmImplausible = { false, false }; // last read rejected as garbage
 
     // The transport generation this cooler was last set up under. A newer one means the transport
-    // reopened the device after a handle fault; the cooler needs no setup writes of its own, but a
-    // re-enumerated one may have been power-cycled and lost its saved look, so that is replayed and
-    // both duties re-sent before the next write. Worker-thread only; the replay is registered
-    // before the worker starts.
+    // lost its handle to the device after that; the cooler needs no setup writes of its own, but a
+    // re-enumerated one may have been power-cycled and lost its saved look, so once the transport
+    // has reopened it, that is replayed and both duties re-sent before the next write.
+    // Worker-thread only; the replay is registered before the worker starts.
     private int _setUpGeneration;
-    private Action? _reconnectReplay;
+    private readonly ReconnectReplay _reconnectReplay;
 
     public Galahad2Controller(int index, IDeviceTransport transport, IClock clock, ILog log) {
         _index = index;
@@ -49,6 +49,7 @@ internal sealed class Galahad2Controller : IFanDevice {
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _setUpGeneration = _transport.Generation;
+        _reconnectReplay = new ReconnectReplay(_clock);
     }
 
     /// <summary>The Galahad exposes two channels: the fan and the pump.</summary>
@@ -74,9 +75,7 @@ internal sealed class Galahad2Controller : IFanDevice {
     }
 
     /// <inheritdoc />
-    public void ReplayOnReconnect(Action replay) {
-        _reconnectReplay = replay ?? throw new ArgumentNullException(nameof(replay));
-    }
+    public void ReplayOnReconnect(Func<bool> replay) => _reconnectReplay.Register(replay);
 
     // ---------- FanControl-thread surface (no I/O) ----------
 
@@ -164,17 +163,25 @@ internal sealed class Galahad2Controller : IFanDevice {
         _transport.Dispose();
     }
 
-    // A reopened transport means the cooler was re-enumerated and may have come back reset. Replay
-    // the saved look (if the Lighting build registered one) and forget every last-written duty so
-    // the loop that follows re-sends the fan and pump now. A throw leaves the generation
-    // unrecorded, so the replay is retried on the next tick.
+    // A reopened transport means the cooler was re-enumerated and may have come back reset. Nothing
+    // is replayed while the handle is still faulted: the cooler is off the bus, and the next poll's
+    // handshake is what reopens it, on the backoff. Once it is back, replay the saved look (if the
+    // Lighting build registered one) and forget every last-written duty so the loop that follows
+    // re-sends the fan and pump now. A throw leaves the generation unrecorded, so the replay is
+    // retried on the next tick; a look that reports failure stays owed and is tried again on its own.
     private void ReplaySetupIfReconnected() {
-        int generation = _transport.Generation;
-        if (generation == _setUpGeneration) {
+        if (_transport.IsFaulted) {
             return;
         }
 
-        _reconnectReplay?.Invoke();
+        int generation = _transport.Generation;
+        if (generation == _setUpGeneration) {
+            _reconnectReplay.Apply();
+            return;
+        }
+
+        _reconnectReplay.Owe();
+        _reconnectReplay.Apply();
         lock (_lock) {
             for (int ch = 0; ch < Channels; ch++) {
                 _lastWritten[ch] = -2;

@@ -194,13 +194,17 @@ public class FanControllerTests {
     public void ApplyPending_AfterTransportReopened_ReplaysSetupThenResendsEveryChannel() {
         var (controller, transport, _) = NewSlController();
         var replayedAt = new List<int>();
-        controller.ReplayOnReconnect(() => replayedAt.Add(transport.Features.Count));
+        controller.ReplayOnReconnect(() => {
+            replayedAt.Add(transport.Features.Count);
+            return true;
+        });
         controller.SetTarget(0, 50);
         controller.ApplyPending();
         transport.Clear();
 
-        // The transport reopened the device (a wake): the saved-look replay runs first, then the
-        // setup writes, then the unchanged-and-fresh duty is re-sent anyway - the device may have reset.
+        // The transport lost and reopened the device (a wake): the saved-look replay runs first,
+        // then the setup writes, then the unchanged-and-fresh duty is re-sent anyway - the device
+        // may have reset.
         transport.Generation = 1;
         controller.ApplyPending();
 
@@ -216,7 +220,10 @@ public class FanControllerTests {
     public void ApplyPending_SameTransportGeneration_DoesNotReplaySetup() {
         var (controller, transport, _) = NewSlController();
         int replays = 0;
-        controller.ReplayOnReconnect(() => replays++);
+        controller.ReplayOnReconnect(() => {
+            replays++;
+            return true;
+        });
         controller.SetTarget(0, 50);
         controller.ApplyPending();
         transport.Clear();
@@ -231,7 +238,10 @@ public class FanControllerTests {
     public void ApplyPending_ReplayFaults_RetriesOnTheNextTick() {
         var (controller, transport, _) = NewSlController();
         int replays = 0;
-        controller.ReplayOnReconnect(() => replays++);
+        controller.ReplayOnReconnect(() => {
+            replays++;
+            return true;
+        });
         controller.SetTarget(0, 50);
         controller.ApplyPending();
         transport.Clear();
@@ -246,6 +256,70 @@ public class FanControllerTests {
 
         Assert.Equal(2, replays);
         Assert.Equal(SetupWrites + 2, transport.Features.Count);
+    }
+
+    // While the handle is still faulted the device is off the bus: nothing is replayed (a look sent
+    // then would be refused, or reopen the path itself), and the fan writes go out as usual, since
+    // one of them is what reopens the device on the backoff. The replay follows once it is back.
+    [Fact]
+    public void ApplyPending_WhileTheTransportIsStillFaulted_ReplaysNothing_UntilTheDeviceIsBack() {
+        var transport = new FakeDeviceTransport();
+        var logger = new FakeLogger();
+        var clock = new FakeClock();
+        var controller = new FanController(0, transport, new SlProtocol(), NoStartStop, clock, logger);
+        int replays = 0;
+        controller.ReplayOnReconnect(() => {
+            replays++;
+            return true;
+        });
+        controller.SetTarget(0, 50);
+        controller.ApplyPending();
+        transport.Clear();
+
+        transport.Generation = 1;
+        transport.IsFaulted = true;
+        clock.Advance(ChannelWriteDecision.RefreshInterval);
+        controller.ApplyPending();
+
+        Assert.Equal(0, replays);
+        Assert.Equal(new[] { SlManualCh0, SlSpeedCh0Duty50 }, transport.Features); // the duty's own refresh, nothing replayed
+        Assert.DoesNotContain(logger.Messages, m => m.Contains("reconnected"));
+
+        transport.IsFaulted = false;
+        transport.Clear();
+        controller.ApplyPending();
+
+        Assert.Equal(1, replays);
+        Assert.Equal(SetupWrites + 2, transport.Features.Count);
+        Assert.Contains("C0 reconnected: setup replayed (transport generation 1)", logger.Messages);
+    }
+
+    // A look the device refused (the replay reports failure) does not hold up fan control: the
+    // setup is replayed and recorded, and the look alone stays owed, tried again with the next
+    // keepalive re-send until it succeeds.
+    [Fact]
+    public void ApplyPending_ALookTheDeviceRefused_StaysOwedOnItsOwn_AndIsTriedAgainOnTheKeepaliveCadence() {
+        var (controller, transport, clock) = NewSlController();
+        int replays = 0;
+        controller.ReplayOnReconnect(() => ++replays >= 2);
+        controller.SetTarget(0, 50);
+        controller.ApplyPending();
+        transport.Clear();
+
+        transport.Generation = 1;
+        controller.ApplyPending();
+
+        Assert.Equal(1, replays);
+        Assert.Equal(SetupWrites + 2, transport.Features.Count); // manual mode and the duty went out regardless
+        controller.ApplyPending();
+        Assert.Equal(1, replays); // not every tick
+
+        clock.Advance(ChannelWriteDecision.RefreshInterval);
+        controller.ApplyPending();
+        Assert.Equal(2, replays);
+        clock.Advance(ChannelWriteDecision.RefreshInterval);
+        controller.ApplyPending();
+        Assert.Equal(2, replays); // done
     }
 
     [Fact]
@@ -411,7 +485,7 @@ public class FanControllerTests {
         controller.ApplyPending();
         transport.Clear();
 
-        transport.Generation = 1; // reopened; the standard build registers no lighting replay
+        transport.Generation = 1; // lost and reopened; the standard build registers no lighting replay
         controller.ApplyPending();
 
         Assert.NotEmpty(transport.Features); // manual mode and the duty went out again

@@ -696,7 +696,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
         // (OpenRGB, the motherboard) left it. The look is volatile on the device, so it is also
         // replayed whenever the transport reconnects a re-enumerated (possibly reset) controller -
         // the same guarded apply, driven on the worker thread through the controller's replay.
-        ApplyLighting(transport, info, _lightingConfigurations);
+        _ = ApplyLighting(transport, info, _lightingConfigurations);
         controller.ReplayOnReconnect(() => ApplyLighting(transport, info, _lightingConfigurations));
 #endif
         AssertManualMode(controller, info);
@@ -821,7 +821,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
             // corrupt fan discovery; a later RPM poll self-corrects. ApplyLighting never throws.
             IDeviceTransport ownedTransport = transport;
             transport = null;
-            ApplyLighting(ownedTransport, info, _lightingConfigurations);
+            _ = ApplyLighting(ownedTransport, info, _lightingConfigurations);
             // And again whenever the transport reconnects a re-enumerated (possibly reset) device.
             controller.ReplayOnReconnect(() => ApplyLighting(ownedTransport, info, _lightingConfigurations));
 #else
@@ -974,8 +974,11 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
 
     // Re-apply the saved look for one located controller, matched to its L-Connect config by
     // instance token. No match -> no lighting. A matched controller of an unsupported family
-    // is logged and skipped (its lighting is left as-is), never driven with guessed bytes.
-    private void ApplyLighting(
+    // is logged and skipped (its lighting is left as-is), never driven with guessed bytes. The
+    // same runs on every reconnect, as L-Connect's resume does. Returns true once the device's
+    // lighting is settled - applied, or nothing to apply - and false when the writes failed, so
+    // the controller's reconnect replay keeps the look owed and tries it again.
+    private bool ApplyLighting(
         IDeviceTransport transport, LocatedDevice info, IReadOnlyList<LConnectControllerConfiguration> configurations)
     {
         LConnectControllerConfiguration? match = null;
@@ -990,7 +993,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
 
         if (match is null)
         {
-            return;
+            return true;
         }
 
         // Choose the encoder by the located device's hardware-read product id (authoritative),
@@ -1025,7 +1028,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
                     // per-fan address here, so there is nothing to drive.
                     _log.Write(string.Format(
                         CultureInfo.InvariantCulture, "  lighting skipped for {0}: no per-fan TL look saved", match.InstanceToken));
-                    return;
+                    return true;
                 }
 
                 transfers = TlFanLightingEncoder.Encode(match.TlFans);
@@ -1036,7 +1039,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
                 {
                     _log.Write(string.Format(
                         CultureInfo.InvariantCulture, "  lighting skipped for {0}: incomplete Galahad look saved", match.InstanceToken));
-                    return;
+                    return true;
                 }
 
                 transfers = Galahad2LightingEncoder.Encode(match.GalahadFan, match.GalahadPump);
@@ -1047,7 +1050,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
                     "  lighting skipped for {0}: family pid=0x{1:x4} not supported",
                     match.InstanceToken,
                     info.ProductId));
-                return;
+                return true;
         }
 
         // A lighting write the device rejects must not drop the device: lighting is opt-in and
@@ -1060,6 +1063,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
                 "  lighting applied for {0} ({1} writes)",
                 match.InstanceToken,
                 transfers.Count));
+            return true;
         }
 #pragma warning disable CA1031 // opt-in feature: a lighting write fault disables lighting for this controller, never breaks its fan control
         catch (Exception ex)
@@ -1069,6 +1073,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
                 "  lighting apply failed for {0}, fan control continues: {1}",
                 match.InstanceToken,
                 ex.Message));
+            return false;
         }
 #pragma warning restore CA1031
     }
@@ -1081,7 +1086,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
         try
         {
             transport = _enumerator.Open(info);
-            ApplyLighting(transport, info, configurations);
+            _ = ApplyLighting(transport, info, configurations);
         }
 #pragma warning disable CA1031 // host seam: a lighting-only device that fails to open is skipped, never fatal
         catch (Exception ex)

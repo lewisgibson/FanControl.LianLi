@@ -34,7 +34,7 @@ internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IF
     private readonly int[] _target;          // commanded duty %, -1 = unassigned, forwarded on build
     private Connection? _connection;         // null until the controller has been rebuilt
     private readonly Action<ThreadStart> _runInBackground;
-    private Action? _reconnectReplay;
+    private Func<bool>? _reconnectReplay;
     private int _attempts;
     private bool _building;
     private bool _disposed;
@@ -188,7 +188,7 @@ internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IF
     }
 
     /// <inheritdoc />
-    public void ReplayOnReconnect(Action replay) {
+    public void ReplayOnReconnect(Func<bool> replay) {
         if (replay is null) {
             throw new ArgumentNullException(nameof(replay));
         }

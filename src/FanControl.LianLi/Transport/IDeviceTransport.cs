@@ -12,13 +12,25 @@ internal interface IDeviceTransport : IDisposable {
     bool CanWrite { get; }
 
     /// <summary>
-    /// How many times the transport has reopened the device after a handle fault (a USB
-    /// re-enumeration across sleep/wake or hibernate); <c>0</c> for a handle that has never
-    /// faulted. A re-enumerated device may have reset, so a controller compares this against the
-    /// value it last set the device up under and replays its setup writes (and any saved lighting)
-    /// when it has moved on. Read on the worker thread only.
+    /// How many times the transport has lost its handle to the device (a USB re-enumeration
+    /// across sleep/wake or hibernate, a device gone); <c>0</c> for a handle that has never
+    /// faulted. It moves on the moment the handle faults, before the next transfer reopens the
+    /// device inside its own call, so a controller sees it before anything reaches the reopened
+    /// device, which may have reset or be another device on the same path. A controller compares
+    /// it against the value it last set the device up (or identified it) under. One that
+    /// identifies the device reads its identity first, whatever <see cref="IsFaulted"/> says, since
+    /// that read is what reopens the path; one that sets the device up waits until
+    /// <see cref="IsFaulted"/> is false again, so its setup writes (and any saved lighting) go to
+    /// a device that is actually back. Read on the worker thread only.
     /// </summary>
     int Generation { get; }
+
+    /// <summary>
+    /// Whether the handle is known not to reach the device: a transfer faulted it and none has
+    /// reopened it since. While true every transfer is refused fast, or reopens the device inside
+    /// its own call on the backoff schedule. Read on the worker thread only.
+    /// </summary>
+    bool IsFaulted { get; }
 
     /// <summary>Write a raw output report. No-ops if the stream is not writable.</summary>
     void Write(byte[] report);
