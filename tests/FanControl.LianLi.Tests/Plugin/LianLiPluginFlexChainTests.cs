@@ -566,7 +566,8 @@ public sealed class LianLiPluginFlexChainTests {
     // and before the pair's turn. Whose each id is was read once for the pass, so the pair's copy
     // is skipped and the control is registered once, under the receiver; the memory now names the
     // pair, which Load notices once the pass is done, and asks for the refresh that moves the
-    // control, since the claim itself found nothing registered yet.
+    // control. The test waits only for the memory to change, so on a slow machine the claim can
+    // finish after Load has published and ask for the same refresh itself; either reason is right.
     [Fact]
     public void AChainTheRadioTakesWhileLoadRuns_IsRegisteredOnce_AndTheHandOverIsAskedForAfterwards() {
         var clock = new FakeClock();
@@ -603,7 +604,7 @@ public sealed class LianLiPluginFlexChainTests {
         Assert.Contains("USB", Assert.Single(sensors.ControlSensors).Name, StringComparison.Ordinal);
         Assert.Equal(2, sensors.FanSensors.Count);
         Assert.True(runtime.TryTakeRefresh(plugin, out string reason));
-        Assert.Equal("a FLEX chain changed hands while the sensors were being registered", reason);
+        Assert.Contains(reason, new[] { "a FLEX chain changed hands while the sensors were being registered", "a FLEX chain on a USB receiver is now the L-Wireless controller's" });
         plugin.Close();
     }
 
