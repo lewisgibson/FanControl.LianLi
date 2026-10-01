@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using FanControl.LianLi.Devices;
 using FanControl.LianLi.Plugin;
 using FanControl.LianLi.Protocol;
@@ -17,7 +18,7 @@ public class SensorTests {
     [Fact]
     public void ControlSensor_Set_DrivesTargetAndPublishesValue() {
         var (controller, transport) = NewController();
-        var control = new ControlSensor(controller, 0, () => { });
+        var control = new ControlSensor(controller, 0, () => { }, new WirelessProcessState());
 
         control.Set(50);
         transport.Clear();
@@ -33,7 +34,7 @@ public class SensorTests {
     [Fact]
     public void ControlSensor_Reset_ReleasesChannelAndClearsValue() {
         var (controller, transport) = NewController();
-        var control = new ControlSensor(controller, 0, () => { });
+        var control = new ControlSensor(controller, 0, () => { }, new WirelessProcessState());
         control.Set(50);
         controller.ApplyPending();
 
@@ -64,7 +65,7 @@ public class SensorTests {
     [Fact]
     public void ControlAndFanSensor_HaveDistinctIds() {
         var (controller, _) = NewController();
-        var control = new ControlSensor(controller, 0, () => { });
+        var control = new ControlSensor(controller, 0, () => { }, new WirelessProcessState());
         var fan = new FanSensor(controller, 0);
 
         Assert.NotEqual(control.Id, fan.Id);
@@ -94,7 +95,7 @@ public class SensorTests {
         var (controller, _) = NewController();
         ChannelDescriptor descriptor = controller.Describe(0);
 
-        Assert.Equal(descriptor.ControlName, new ControlSensor(controller, 0, () => { }).Name);
+        Assert.Equal(descriptor.ControlName, new ControlSensor(controller, 0, () => { }, new WirelessProcessState()).Name);
         Assert.Equal(descriptor.RpmName, new FanSensor(controller, 0).Name);
     }
 
@@ -102,7 +103,7 @@ public class SensorTests {
     public void ControlSensor_WakesTheWorkerOnlyWhenTheTargetChanges() {
         var (controller, _) = NewController();
         int wakes = 0;
-        var control = new ControlSensor(controller, 0, () => wakes++);
+        var control = new ControlSensor(controller, 0, () => wakes++, new WirelessProcessState());
 
         control.Set(40);
         control.Set(40); // FanControl re-sends the same value every update
@@ -115,7 +116,34 @@ public class SensorTests {
     public void ControlSensor_NullWake_Throws() {
         var (controller, _) = NewController();
 
-        Assert.Throws<ArgumentNullException>(() => new ControlSensor(controller, 0, null!));
+        Assert.Throws<ArgumentNullException>(() => new ControlSensor(controller, 0, null!, new WirelessProcessState()));
+    }
+
+    // The control of a fan group keyed on an RF address keeps its target in the shared state as
+    // well, for the chain's other driver; a wired channel's control does not.
+    [Fact]
+    public void ControlSensor_OfAFanGroup_KeepsItsTargetInTheSharedState_AndReleasesIt() {
+        var state = new WirelessProcessState();
+        var group = new FakeFanGroupDevice("LianLi/wa00000000001/ctl", "LianLi/wa00000000001/f0/fan");
+        var control = new ControlSensor(group, 0, () => { }, state);
+
+        control.Set(45);
+        Assert.Equal(45, state.ChainTarget("a00000000001"));
+        Assert.Equal(new[] { new KeyValuePair<int, int>(0, 45) }, group.Targets);
+
+        control.Reset();
+        Assert.Equal(-1, state.ChainTarget("a00000000001"));
+
+        var (controller, _) = NewController();
+        new ControlSensor(controller, 0, () => { }, state).Set(30);
+        Assert.Equal(-1, state.ChainTarget("a00000000001"));
+    }
+
+    [Fact]
+    public void ControlSensor_NullSharedState_Throws() {
+        var (controller, _) = NewController();
+
+        Assert.Throws<ArgumentNullException>(() => new ControlSensor(controller, 0, () => { }, null!));
     }
 
     [Fact]
@@ -124,5 +152,5 @@ public class SensorTests {
 
     [Fact]
     public void ControlSensor_NullController_Throws()
-        => Assert.Throws<ArgumentNullException>(() => new ControlSensor(null!, 0, () => { }));
+        => Assert.Throws<ArgumentNullException>(() => new ControlSensor(null!, 0, () => { }, new WirelessProcessState()));
 }

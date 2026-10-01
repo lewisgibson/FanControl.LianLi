@@ -31,6 +31,25 @@ public class LConnectLocationsTests {
     }
 
     [Fact]
+    public void WirelessFanScreenSettingsAreNamedByLConnectsOwnHashes() {
+        // md5("lwireless-controller") and md5("wirelesslcd") (LWirelessController.SettingTypes.WirelessLCD, lowercased).
+        Assert.Equal(
+            Path.Combine(Root, "device", "137b3f244d3c5d1568121556b5b076e5", "a5692a84184f4b582184b66a7cfa4ddc.0"),
+            new LConnectLocations(Root).WirelessFanScreenSettingPath);
+    }
+
+    // A per-device wireless setting is keyed by RfDevice.MacStr, lowercase hex pairs with colons:
+    // md5("aa:bb:cc:dd:ee:ff") and md5("motherboardargbsync").
+    [Fact]
+    public void WirelessDeviceSettingsAreKeyedByTheColonSeparatedAddress() {
+        Assert.Equal(
+            Path.Combine(Root, "device", "6424e2dce251d76b3113dfa5a4b7d2d2", "ef7cf195f0086f46da49f61fae8af1e9.0"),
+            LConnectLocations.WirelessDeviceSettingPath(Path.Combine(Root, "device"), "aabbccddeeff", "MotherboardARGBSync"));
+        Assert.Throws<ArgumentNullException>(() => LConnectLocations.WirelessDeviceSettingPath(Root, null!, "MotherboardARGBSync"));
+        Assert.Throws<ArgumentException>(() => LConnectLocations.WirelessDeviceSettingPath(Root, "aabbccddeef", "MotherboardARGBSync"));
+    }
+
+    [Fact]
     public void MachineLocationIsLConnectsProgramDataFolder() {
         string expected = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Lian-Li", "L-Connect 3");

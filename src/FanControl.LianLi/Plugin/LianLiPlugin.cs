@@ -33,7 +33,9 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     // FanControl calls Initialize/Update/Close on its own threads. This serializes them, so a
     // Close cannot tear down what a concurrent Initialize is still building.
     private readonly object _sync = new object();
-    private readonly List<IFanDevice> _controllers = new List<IFanDevice>();
+
+    // What this instance registers, each under the key it is remembered by, in index order.
+    private readonly List<KeyValuePair<string, IFanDevice>> _controllers = new List<KeyValuePair<string, IFanDevice>>();
 
     // The stand-in registered for each plan whose build was still running at the deadline, so the
     // controller that build produces is handed to it rather than opened a second time.
@@ -60,13 +62,6 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
 
     // Where L-Connect's saved documents are: the machine's own in the host, a fixture in a test.
     private readonly LConnectLocations _lConnect;
-
-    // The sensor ids the last Load registered, or null before it has run. A controller that gains a
-    // sensor asks for a refresh only for one not in here: one gained before Load was registered by it.
-    // Volatile rather than under the instance lock: the worker reads it when a device checks in, and
-    // Close holds that lock while it waits for the worker, so a lock here would hold Close up for
-    // the worker's whole stop bound. The set is built before it is published and never changed after.
-    private volatile HashSet<string>? _registeredSensorIds;
 
 #if ENABLE_LIGHTING
     // L-Connect's saved looks, read at the start of each Initialize and only read after that, by
@@ -182,14 +177,15 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
 #endif
 
         // Every build also locates the 0x0416 command-packet controllers (Uni Fan TL, Galahad II),
-        // the wireless dongles and the HydroShift II OLED Curve's pump MCU; the Lighting build
-        // additionally locates lighting-only products (Strimer Plus) to drive their RGB. The
-        // enumerator requires both vendor and product to match, so listing a product id here is
-        // what opts a family into discovery.
+        // the wireless dongles, the HydroShift II OLED Curve's pump MCU and the FLEX receivers; the
+        // Lighting build additionally locates lighting-only products (Strimer Plus) to drive their
+        // RGB. The enumerator requires both vendor and product to match, so listing a product id
+        // here is what opts a family into discovery.
         var productIds = new List<int>(_catalog.ProductIds);
         productIds.AddRange(_catalog.CommandPacketProductIds);
         productIds.AddRange(_catalog.WirelessProductIds);
         productIds.AddRange(_catalog.HydroShiftCurveProductIds);
+        productIds.AddRange(_catalog.FlexReceiverProductIds);
 #if ENABLE_LIGHTING
         productIds.AddRange(_catalog.LightingProductIds);
 #endif
@@ -247,6 +243,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
                 case DeviceKind.TlFan:
                 case DeviceKind.Galahad2:
                 case DeviceKind.HydroShiftCurve:
+                case DeviceKind.FlexReceiver:
                     plans.Add(new ControllerPlan(kind, info));
                     break;
                 case DeviceKind.WirelessTransmitter:
@@ -278,7 +275,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
         PlanWirelessPair(transmitters, receivers, plans);
         BuildAll(plans, scanFailed);
         _runtime.Persist(_log);
-        _runtime.Start(this, _controllers.ToArray(), _log);
+        _runtime.Start(this, _controllers.Select(controller => controller.Value).ToArray(), _log);
     }
 
     // L-Connect drives one transmitter and one receiver - the first of each it finds - and so does
@@ -358,11 +355,33 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
             }
         }
 
+        // A FLEX receiver opens and identifies itself side by side with everything else, but decides
+        // whether its chain is driven here only once the wireless pair this scan is building has
+        // read its list, since that is when whether the radio has the chain is known: a receiver
+        // that decided earlier would take a chain the pair is about to record as its own, then hand
+        // it back a tick later through a refresh. The wait ends however the pair's build ends; a
+        // pair that runs past the deadline takes the receivers past it too, and they are handed on
+        // late like any other. A pair another scan is still building is not waited for (the gate
+        // starts settled): what it has recorded so far decides, and its own report puts anything
+        // else right (OnSensorsReported).
+        var wirelessPlan = new WirelessPlanGate(!owned.Any(i => plans[i].Kind == DeviceKind.WirelessTransmitter));
         var builds = new Func<IFanDevice>[owned.Count];
         for (int b = 0; b < owned.Count; b++) {
             ControllerPlan plan = plans[owned[b]];
             int index = indices[owned[b]];
-            builds[b] = () => Build(plan, index);
+            if (plan.Kind == DeviceKind.WirelessTransmitter) {
+                builds[b] = () => {
+                    try {
+                        return Build(plan, index);
+                    } finally {
+                        wirelessPlan.Settled();
+                    }
+                };
+            } else if (plan.Kind == DeviceKind.FlexReceiver) {
+                builds[b] = () => Build(plan, index, wirelessPlan.Await);
+            } else {
+                builds[b] = () => Build(plan, index);
+            }
         }
 
         BuildOutcome[] ownedOutcomes = ControllerBuilder.Run(
@@ -384,8 +403,25 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
         }
 
 
-        // Keyed by index, so the controllers register in index order.
+        // Every controller built is remembered before any is registered: a sensor id belongs to one
+        // controller (PluginRuntime.Remember), so a chain the wireless pair drives is taken from
+        // its USB receiver's memory first, whichever is remembered first, and the receiver then
+        // registers without it rather than standing in with the pair's ids beside it. Whether each
+        // was new is read before anything is remembered.
+        var currents = new RememberedController?[plans.Count];
+        var wasNew = new bool[plans.Count];
+        for (int i = 0; i < plans.Count; i++) {
+            wasNew[i] = _runtime.IsNew(plans[i].Key);
+            if (outcomes[i].Controller is IFanDevice controller) {
+                var current = new RememberedController(plans[i], indices[i], controller, _runtime.UtcNow);
+                currents[i] = current;
+                _ = _runtime.Remember(plans[i].Key, current);
+            }
+        }
+
+        // Keyed by index, so the controllers register in index order; each under its key.
         var built = new SortedDictionary<int, IFanDevice>();
+        var keys = new Dictionary<int, string>();
         for (int i = 0; i < plans.Count; i++) {
             ControllerPlan plan = plans[i];
             BuildOutcome outcome = outcomes[i];
@@ -393,19 +429,24 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
             // or still opening - can have devices check in after Load; one whose receiver already
             // reported devices, or whose open failed, has nothing more to wait for. A TL hub whose
             // handshake reported no fan yet is waiting the same way: its fans are added as they answer.
-            // Each waits only while the controller is new to the plugin (IsNew): one an earlier run
-            // remembered with nothing - a pair that only hears a neighbour's kit, say - must not show
-            // the placeholder for good. A failed open waits only for a pair or hub already remembered.
-            bool isNew = _runtime.IsNew(plan.Key);
+            // So is a FLEX receiver with no control yet: its chain has no fan reported, or is the
+            // radio's for now. Each waits only while the controller is new to the plugin (IsNew): one
+            // an earlier run remembered with nothing - a pair that only hears a neighbour's kit, say -
+            // must not show the placeholder for good. A failed open waits only for a pair, hub or
+            // receiver already remembered.
+            bool isNew = wasNew[i];
             bool mayCheckIn = isNew && (outcome.Controller is WirelessController wireless
                 ? !wireless.HasHeardDevices
                 : outcome.Controller is TlFanController hub
                     ? hub.ChannelCount == 0
-                    : outcome.Error is null || _runtime.Recall(plan.Key) != null);
+                    : outcome.Controller is FlexReceiverController receiver
+                        ? receiver.ChannelCount == 0
+                        : outcome.Error is null || _runtime.Recall(plan.Key) != null);
             _mayStillRegister |= (GainsSensorsAfterLoad(plan.Kind) && mayCheckIn)
                 || (outcome.Controller is null && outcome.Error is null && isNew);
-            if (outcome.Controller != null) {
-                built.Add(indices[i], Registered(plan, indices[i], outcome.Controller));
+            if (outcome.Controller is IFanDevice device && currents[i] is RememberedController current) {
+                built.Add(indices[i], Registered(plan, device, current));
+                keys[indices[i]] = plan.Key;
                 continue;
             }
 
@@ -430,6 +471,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
                 }
 
                 built.Add(remembered.Index, standIn);
+                keys[remembered.Index] = plan.Key;
             }
         }
 
@@ -461,44 +503,67 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
                 entry.Key,
                 scanFailed ? " (the scan failed)" : string.Empty));
             built.Add(entry.Value.Index, StandIn(entry.Value));
+            keys[entry.Value.Index] = entry.Key;
         }
 
-        _controllers.AddRange(built.Values);
+        foreach (KeyValuePair<int, IFanDevice> entry in built) {
+            _controllers.Add(new KeyValuePair<string, IFanDevice>(keys[entry.Key], entry.Value));
+        }
     }
 
-    // Remember a controller that has just been built, and choose what registers for it: the
-    // controller itself, or - when it came back without some sensor it registered before - a
-    // stand-in around it carrying the union, so a curve bound to the missing one is not dropped.
-    private IFanDevice Registered(ControllerPlan plan, int index, IFanDevice controller) {
-        var current = new RememberedController(plan, index, controller, _runtime.UtcNow);
-        RememberedController merged = _runtime.Remember(plan.Key, current);
+    // Choose what registers for a controller that has just been built and remembered (as
+    // current): the controller itself when it reports every sensor remembered for it, or else a
+    // stand-in around it carrying the union of what is remembered and what it reports, so a curve
+    // bound to a sensor it came back without is not dropped. A sensor it reports that the memory
+    // gives another controller (a FLEX chain the wireless pair drives, retained by its receiver) is
+    // in that union too: whose it is is decided by Load against the memory as it stands then, so a
+    // chain that changes hands between now and Load is registered under whichever of the two
+    // drives it by then, and Load registers each id once, so exposing it on both costs nothing.
+    // The memory is read again here, since a controller remembered after this one may have taken
+    // sensors from it.
+    private IFanDevice Registered(ControllerPlan plan, IFanDevice controller, RememberedController current) {
+        RememberedController merged = _runtime.Recall(plan.Key)!; // remembered by BuildAll just before, and nothing forgets it in between
         if (current.Covers(merged)) {
             return controller;
         }
 
-        // The wrapper registers the remembered sensors, not the controller's; one the controller
-        // learns before Load (a wireless device checking in) is caught by Load's check of stand-ins.
+        // The wrapper's sensors are fixed here; one the controller learns before Load (a wireless
+        // device checking in) is caught by Load's check of the memory.
+        RememberedController exposed = current.MergedWith(merged, _runtime.UtcNow, PluginRuntime.ForgetAfter);
         _standInKeys.Add(plan.Key);
         return ReconnectingFanDevice.Around(
-            controller, index, merged.Channels, merged.FanSpeeds, merged.Temperatures, () => Rebuild(plan, index), _log);
+            controller, current.Index, exposed.Channels, exposed.FanSpeeds, exposed.Temperatures, () => Rebuild(plan, current.Index), _log);
     }
 
-    // A controller reported sensors after the scan: a wireless device checked in, or a stand-in took
-    // the controller it was standing in for, which may have more than was remembered. They are
-    // remembered and saved first - the refresh that registers them closes this instance, and the
-    // next one may not reach the device at once, so it must stand in with them - and only a sensor
-    // Load has not registered needs that refresh. This runs on the worker's or a rebuild's thread,
-    // so nothing may escape it.
+    // A controller reported sensors after the scan: a wireless device checked in, a fan answered,
+    // or a stand-in took the controller it was standing in for, which may have more than was
+    // remembered. They are remembered and saved first - the refresh that registers them closes
+    // this instance, and the next one may not reach the device at once, so it must stand in with
+    // them - and a refresh is asked for only when the host's sensors no longer match: a sensor
+    // Load has not registered, or one it registered under another controller that this one now
+    // drives (a FLEX chain the radio has just taken from its receiver). What Load has registered
+    // is read as the sensors are remembered, under the one lock: a claim remembered before Load
+    // published its set is Load's to put right (it compares the memory against its pass after
+    // publishing), and one remembered after is this one's, so each is asked for once and none is
+    // lost between the two. This runs on the worker's or a rebuild's thread, so nothing may escape
+    // it.
     internal void OnSensorsReported(ControllerPlan plan, int index, IFanDevice controller, string reason) {
         try {
-            if (_runtime.RememberUnder(_numberingEpoch, plan.Key, new RememberedController(plan, index, controller, _runtime.UtcNow)) is null) {
+            if (_runtime.RememberUnder(
+                    _numberingEpoch,
+                    plan.Key,
+                    new RememberedController(plan, index, controller, _runtime.UtcNow),
+                    out IReadOnlyCollection<string> claimed,
+                    out Dictionary<string, string>? registered) is null) {
                 _log.Write("  " + plan.Key + ": its sensors were numbered before the saved controllers were read; not remembered");
                 return;
             }
 
             _runtime.Persist(_log);
-            if (HasUnregisteredSensor(SensorIds(controller), _registeredSensorIds)) {
+            if (HasUnregisteredSensor(SensorIds(controller), registered)) {
                 _runtime.RequestRefresh(reason, _log);
+            } else if (IsRegistered(claimed, registered)) {
+                _runtime.RequestRefresh(HandOverReason(controller), _log);
             }
         }
 #pragma warning disable CA1031 // resilience: this runs on a thread of the plugin's own, where an escaping exception ends FanControl's process
@@ -508,15 +573,36 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
 #pragma warning restore CA1031
     }
 
+    // The refresh reason when a controller claims ids the host has registered under another: a
+    // FLEX chain changed hands, and who took it says which way.
+    private static string HandOverReason(IFanDevice controller)
+        => controller is FlexReceiverController
+            ? "a FLEX chain on a USB receiver is driven over USB"
+            : "a FLEX chain on a USB receiver is now the L-Wireless controller's";
+
     // The kinds whose sensors can arrive after Load: a wireless pair's devices check in over radio,
-    // and a TL hub's fans are added as they answer.
+    // a TL hub's fans are added as they answer, and a FLEX receiver's chain gets its sensors once
+    // a fan is reported and the radio has let it go.
     private static bool GainsSensorsAfterLoad(DeviceKind kind)
-        => kind == DeviceKind.WirelessTransmitter || kind == DeviceKind.TlFan;
+        => kind == DeviceKind.WirelessTransmitter || kind == DeviceKind.TlFan || kind == DeviceKind.FlexReceiver;
 
     // Whether any of ids is one Load did not register. Before Load has run (registered null) there
     // is nothing to refresh for: Load itself registers whatever the controller has by then.
-    internal static bool HasUnregisteredSensor(IEnumerable<string> ids, HashSet<string>? registered)
-        => registered != null && ids.Any(id => !registered.Contains(id));
+    internal static bool HasUnregisteredSensor(IEnumerable<string> ids, Dictionary<string, string>? registered)
+        => registered != null && ids.Any(id => !registered.ContainsKey(id));
+
+    // Whether any of ids is one Load registered: for ids a controller has just claimed from
+    // another, under that other. Before Load has run (registered null) it registers each id under
+    // the controller whose it is by then, so there is nothing to put right.
+    private static bool IsRegistered(IEnumerable<string> ids, Dictionary<string, string>? registered)
+        => registered != null && ids.Any(registered.ContainsKey);
+
+    // Whether any of ids is registered under the controller at key (underKey true), or under some
+    // other controller (underKey false): whether a chain that changed hands has the host's control
+    // on the controller that no longer drives it. Nothing before Load has run.
+    private static bool IsRegisteredUnder(IEnumerable<string> ids, string key, bool underKey, Dictionary<string, string>? registered)
+        => registered != null && ids.Any(
+            id => registered.TryGetValue(id, out string? owner) && string.Equals(owner, key, StringComparison.Ordinal) == underKey);
 
     // Every sensor id a remembered controller's stand-in registers.
     private static IEnumerable<string> SensorIds(RememberedController remembered)
@@ -555,22 +641,45 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     // FanControl nothing.
     private void OnLateController(ControllerPlan plan, int index, IFanDevice controller) {
         bool known;
+        bool tookRegistered = false;
         lock (_sync) {
             known = _runtime.Recall(plan.Key) != null;
-            RememberedController? remembered = _runtime.RememberUnder(
-                _numberingEpoch, plan.Key, new RememberedController(plan, index, controller, _runtime.UtcNow));
-
-            // Only now that the index is remembered may it stop being held for the build.
-            _runtime.EndBuild(plan.Key);
-            if (remembered is null) {
-                // Numbered before the saved controllers were read, so the index may be another's: it
-                // is built again by the next scan, under the saved numbering.
-                _log.Write("  " + plan.Key + " finished opening after the scan, numbered before the saved controllers were read; built again by the next scan");
+            if (controller is FlexReceiverController && !_runtime.IsOwnedBy(this)) {
+                // A receiver finishing after this instance closed decided whose its chain is
+                // against a pair this instance may already have closed, which to the receiver looks
+                // exactly like the radio letting the chain go (as it does to one mid-poll, see
+                // OnFlexReceiverChanged). So nothing it decided is remembered, and the next
+                // instance's scan decides afresh. The index is let go of like any other late build's.
+                _runtime.EndBuild(plan.Key);
+                _log.Write("  " + plan.Key + " finished opening after this plugin instance closed; whose its chain is, is left to the next one");
             } else {
-                _runtime.Persist(_log);
-                if (_lateStandIns.TryGetValue(plan.Key, out ReconnectingFanDevice? standIn) && standIn.Offer(controller)) {
-                    _log.Write("  " + plan.Key + " finished opening after the scan; its stand-in took it");
-                    return;
+                RememberedController? remembered = _runtime.RememberUnder(
+                    _numberingEpoch,
+                    plan.Key,
+                    new RememberedController(plan, index, controller, _runtime.UtcNow),
+                    out IReadOnlyCollection<string> claimed,
+                    out Dictionary<string, string>? registered);
+
+                // A late pair that drives a chain its receiver registered has taken the chain's ids
+                // from the receiver's memory; the host's control for the chain is on the receiver.
+                tookRegistered = IsRegistered(claimed, registered);
+
+                // Only now that the index is remembered may it stop being held for the build.
+                _runtime.EndBuild(plan.Key);
+                if (remembered is null) {
+                    // Numbered before the saved controllers were read, so the index may be another's: it
+                    // is built again by the next scan, under the saved numbering.
+                    _log.Write("  " + plan.Key + " finished opening after the scan, numbered before the saved controllers were read; built again by the next scan");
+                } else {
+                    _runtime.Persist(_log);
+                    if (_lateStandIns.TryGetValue(plan.Key, out ReconnectingFanDevice? standIn) && standIn.Offer(controller)) {
+                        _log.Write("  " + plan.Key + " finished opening after the scan; its stand-in took it");
+                        if (tookRegistered) {
+                            _runtime.RequestRefresh(HandOverReason(controller), _log);
+                        }
+
+                        return;
+                    }
                 }
             }
         }
@@ -578,6 +687,8 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
         controller.Dispose();
         if (!known) {
             _runtime.RequestRefresh("a controller finished opening after the scan", _log);
+        } else if (tookRegistered) {
+            _runtime.RequestRefresh(HandOverReason(controller), _log);
         }
     }
 
@@ -587,8 +698,10 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     }
 
     // Build the controller a plan describes, at index. Throws when the device will not open or
-    // answer, for BuildAll (or a stand-in's rebuild) to handle.
-    private IFanDevice Build(ControllerPlan plan, int index) {
+    // answer, for BuildAll (or a stand-in's rebuild) to handle. A FLEX receiver decides whose its
+    // chain is only after awaitWirelessPlan returns: a scan's wait for the pair it is building, or
+    // nothing on a rebuild.
+    private IFanDevice Build(ControllerPlan plan, int index, Action? awaitWirelessPlan = null) {
         LocatedDevice first = plan.Devices[0];
         switch (plan.Kind) {
             case DeviceKind.UniFan:
@@ -597,6 +710,8 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
                 return BuildWirelessController(plan, index);
             case DeviceKind.HydroShiftCurve:
                 return BuildHydroShiftCurveController(index, first);
+            case DeviceKind.FlexReceiver:
+                return BuildFlexReceiverController(plan, index, first, awaitWirelessPlan);
             default:
                 return BuildCommandPacketController(plan, index, first);
         }
@@ -624,12 +739,16 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     }
 
     // A stand-in's rebuild takes the device's build ownership like a scan's build does, so it never
-    // opens a device another build still has; that attempt fails, and the backoff tries again.
+    // opens a device another build still has; that attempt fails, and the backoff tries again. It
+    // runs on the stand-in's own thread, so it may reach here after FanControl has closed this
+    // instance and the next one is scanning: then it opens nothing, since holding the device for
+    // an open nobody would adopt would make that scan stand in for the device instead.
     internal IFanDevice Rebuild(ControllerPlan plan, int index) {
-        if (!_runtime.TryBeginBuildUnder(_numberingEpoch, plan.Key, index)) {
+        if (!_runtime.TryBeginRebuild(this, _numberingEpoch, plan.Key, index)) {
             // Either another build still has the device, or this instance numbered it before the
-            // saved controllers were read and the next scan opens it under the saved numbering.
-            throw new InvalidOperationException(plan.Key + " is still being opened by another build, or by the next scan");
+            // saved controllers were read and the next scan opens it under the saved numbering, or
+            // this instance has closed.
+            throw new InvalidOperationException(plan.Key + " is still being opened by another build, or by the next scan, or this plugin instance has closed");
         }
 
         try {
@@ -642,16 +761,22 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     private WirelessController BuildWirelessController(ControllerPlan plan, int index) {
         LocatedDevice transmitterInfo = plan.Devices[0];
         LocatedDevice receiverInfo = plan.Devices[1];
-        // Every build reads the saved channel and pump settings, so the master stays on the user's
-        // channel and driving a wireless pump leaves the AIO screen as they set it. Only the
-        // Lighting build reads the saved effects. A bad file costs only its own feature.
+        // Every build reads the saved channel, pump and fan screen settings, so the master stays on
+        // the user's channel and driving a wireless pump or an LCD FLEX group leaves its screens as
+        // they set them. Only the Lighting build reads the saved effects and the per-device sync
+        // switches. A bad file costs only its own feature.
 #if ENABLE_LIGHTING
         const bool readsEffects = true;
 #else
         const bool readsEffects = false;
 #endif
         var configuration = new LConnectWirelessConfiguration(
-            _lConnect.WirelessDirectory, _lConnect.WirelessPumpSettingPath, readsEffects, _log);
+            _lConnect.WirelessDirectory,
+            _lConnect.DeviceDirectory,
+            _lConnect.WirelessPumpSettingPath,
+            _lConnect.WirelessFanScreenSettingPath,
+            readsEffects,
+            _log);
 
         // The controller owns both dongles once it is made. Until then they are closed here on any
         // failure - the receiver refusing to open, or the controller's first reads throwing - since
@@ -839,6 +964,111 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
 #pragma warning restore CA1031
     }
 
+    // Open a FLEX or P28 V2 chain's USB receiver, a WinUSB device. The controller's constructor
+    // reads the receiver's status for its RF address and fan count, so a receiver that does not
+    // answer, or answers with something else, throws here and is skipped rather than crashing the
+    // host; it owns the transport from there. Whether the chain is driven here is settled only
+    // once awaitWirelessPlan returns (see BuildAll). No lighting is driven for it in any build:
+    // L-Connect renders a FLEX look on the PC and saves only its settings, so there is no look to
+    // replay.
+    private FlexReceiverController BuildFlexReceiverController(
+        ControllerPlan plan, int index, LocatedDevice info, Action? awaitWirelessPlan) {
+        IDeviceTransport transport = _enumerator.Open(info);
+        FlexReceiverController controller;
+        try {
+            controller = new FlexReceiverController(
+                index, transport, FlexReceiverProtocol.FamilyOf(info.ProductId), _clock, _log, _runtime.WirelessState);
+        } catch {
+            transport.Dispose();
+            throw;
+        }
+
+        _log.Write(string.Format(
+            CultureInfo.InvariantCulture,
+            "  controller pid=0x{0:x4} kind={1} address={2} fans={3} path={4}",
+            info.ProductId,
+            DeviceKind.FlexReceiver,
+            controller.MacText,
+            controller.FanCount,
+            info.DevicePath));
+
+        awaitWirelessPlan?.Invoke();
+        controller.SettleOwnership();
+        controller.Changed += (_, change) => OnFlexReceiverChanged(plan, index, controller, change);
+        return controller;
+    }
+
+    // A receiver noticed something on a poll. A chain the radio took, or let go, means the host's
+    // control for it may be on the wrong controller now: a refresh is asked for when Load has the
+    // chain's ids on the controller that no longer drives it (nothing before Load, which registers
+    // them under whoever drives the chain by then). A chain driven here again is remembered first,
+    // which takes its ids from the pair's memory; a chain the radio took is remembered by the pair
+    // when it hears it, and asked for from that side as well. A fan reported later is a new sensor
+    // only if the host does not already have it, which OnSensorsReported checks. Another receiver
+    // answering on the path needs the path planned afresh, once. Nothing is done for an instance
+    // that no longer runs the worker: its controllers are being closed for the refresh that
+    // replaces it, and the wireless controller closing looks, to a receiver mid-poll, exactly like
+    // the radio letting the chain go. Runs on the worker's thread, so nothing may escape it.
+    internal void OnFlexReceiverChanged(
+        ControllerPlan plan, int index, FlexReceiverController controller, FlexReceiverChange change) {
+        try {
+            if (!_runtime.IsOwnedBy(this)) {
+                _log.Write("  " + plan.Key + ": " + Describe(change) + " while this plugin instance is closing; left to the next one");
+                return;
+            }
+
+            switch (change) {
+                case FlexReceiverChange.FanReported:
+                    OnSensorsReported(plan, index, controller, "a FLEX fan was reported after the scan");
+                    break;
+                case FlexReceiverChange.ReleasedByRadio:
+                    if (_runtime.RememberUnder(
+                            _numberingEpoch,
+                            plan.Key,
+                            new RememberedController(plan, index, controller, _runtime.UtcNow),
+                            out _,
+                            out Dictionary<string, string>? registered) is null) {
+                        _log.Write("  " + plan.Key + ": its sensors were numbered before the saved controllers were read; not remembered");
+                        return;
+                    }
+
+                    _runtime.Persist(_log);
+                    if (IsRegisteredUnder(SensorIds(controller), plan.Key, underKey: false, registered)) {
+                        _runtime.RequestRefresh("a FLEX chain on a USB receiver is driven over USB", _log);
+                    }
+
+                    break;
+                case FlexReceiverChange.TakenByRadio:
+                    if (IsRegisteredUnder(SensorIds(controller), plan.Key, underKey: true, _runtime.Registered)) {
+                        _runtime.RequestRefresh("a FLEX chain on a USB receiver is now the L-Wireless controller's", _log);
+                    }
+
+                    break;
+                default:
+                    _runtime.RequestRefresh("a USB receiver now answers as another chain", _log);
+                    break;
+            }
+        }
+#pragma warning disable CA1031 // resilience: this runs on a thread of the plugin's own, where an escaping exception ends FanControl's process
+        catch (Exception ex) {
+            _log.Write("  " + plan.Key + ": the change it reported could not be remembered: " + ex.Message);
+        }
+#pragma warning restore CA1031
+    }
+
+    private static string Describe(FlexReceiverChange change) {
+        switch (change) {
+            case FlexReceiverChange.FanReported:
+                return "a fan was reported";
+            case FlexReceiverChange.ReleasedByRadio:
+                return "the radio let its chain go";
+            case FlexReceiverChange.TakenByRadio:
+                return "the radio took its chain";
+            default:
+                return "another receiver answered";
+        }
+    }
+
     // Open a 0x0416 command-packet controller (Uni Fan TL or Galahad II). The controller's
     // constructor performs the discovery handshake, so a wrong interface or an absent device
     // surfaces here as a read timeout, thrown to Register, which skips it rather than crashing the host.
@@ -883,38 +1113,44 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
         }
     }
 
+    /// <summary>
+    /// Raised from <see cref="Load"/> with each controller's key just before its sensors are read,
+    /// so a test can have a device change hands between two controllers' registrations.
+    /// </summary>
+    internal event Action<string>? Registering;
+
     /// <summary>Register a control sensor and a fan sensor for every populated channel of every controller.</summary>
     public void Load(IPluginSensorsContainer container) {
         if (container is null) {
             throw new ArgumentNullException(nameof(container));
         }
 
-        var registered = new HashSet<string>(StringComparer.Ordinal);
-        foreach (IFanDevice controller in _controllers) {
-            registered.UnionWith(SensorIds(controller));
-        }
-
-        _registeredSensorIds = registered;
-
-        foreach (string key in _standInKeys) {
-            if (HasUnregisteredSensor(SensorIds(_runtime.Recall(key)!), registered)) { // a stand-in is made only for a remembered key
-                _runtime.RequestRefresh("a controller came back with sensors the scan did not have", _log);
-            }
-        }
-
-        foreach (IFanDevice controller in _controllers) {
+        // Each sensor id is registered once, under the controller it belongs to. A FLEX chain has
+        // the same ids on its USB receiver and on the dongles, and between the scan and this call
+        // the radio may have taken it or let it go; the controller that drives it now remembers it
+        // as its own, so the memory says whose it is, and a controller that reports a sensor the
+        // memory gives another leaves it to that one. Whose each id is is read once, here, for the
+        // whole pass: the worker can move a chain between the two while the pass runs, and a pass
+        // that asked the memory per id could then find it under neither, or under both. An id
+        // nothing remembers - a controller numbered before the saved controllers were read - goes
+        // to the first controller that reports it.
+        Dictionary<string, string> owners = _runtime.Owners();
+        var registered = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (KeyValuePair<string, IFanDevice> entry in _controllers) {
+            Registering?.Invoke(entry.Key);
+            IFanDevice controller = entry.Value;
             for (int ch = 0; ch < controller.ChannelCount; ch++) {
                 // Skip a channel with no fan attached so an empty slot is not surfaced as a dead
                 // sensor. The sensor id is keyed to the physical channel (see Describe), so the
                 // populated channels keep their ids and the user's saved curve bindings survive;
                 // FanControl greys out a binding whose sensor is absent and re-links it if the fan
                 // reappears, rather than discarding the rest of the config.
-                if (!controller.IsChannelPopulated(ch)) {
+                if (!controller.IsChannelPopulated(ch) || !Registers(entry.Key, controller.Describe(ch).ControlId, owners, registered)) {
                     continue;
                 }
 
-                container.ControlSensors.Add(new ControlSensor(controller, ch, _runtime.Wake));
-                if (!(controller is IFanSpeedSource)) {
+                container.ControlSensors.Add(new ControlSensor(controller, ch, _runtime.Wake, _runtime.WirelessState));
+                if (!(controller is IFanSpeedSource) && Registers(entry.Key, controller.Describe(ch).RpmId, owners, registered)) {
                     container.FanSensors.Add(new FanSensor(controller, ch));
                 }
             }
@@ -923,7 +1159,9 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
             // fan) reports its fan speeds on their own.
             if (controller is IFanSpeedSource speeds) {
                 for (int f = 0; f < speeds.FanSpeedCount; f++) {
-                    container.FanSensors.Add(new FanSpeedSensor(speeds, f));
+                    if (Registers(entry.Key, speeds.DescribeFanSpeed(f).Id, owners, registered)) {
+                        container.FanSensors.Add(new FanSpeedSensor(speeds, f));
+                    }
                 }
             }
 
@@ -931,15 +1169,79 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
             // temperature sensor per reading, usable as a curve source.
             if (controller is ITemperatureSource temperatures) {
                 for (int t = 0; t < temperatures.TemperatureCount; t++) {
-                    container.TempSensors.Add(new TemperatureSensor(temperatures, t));
+                    if (Registers(entry.Key, temperatures.DescribeTemperature(t).Id, owners, registered)) {
+                        container.TempSensors.Add(new TemperatureSensor(temperatures, t));
+                    }
                 }
             }
         }
 
-        if (registered.Count == 0 && _mayStillRegister) {
-            container.TempSensors.Add(new WaitingSensor());
-            _log.Write("nothing to register yet but a device is still to come; a placeholder sensor is registered so FanControl hears the refresh that follows it");
+        // Published before the memory is compared against the pass, and under the memory's own
+        // lock (PluginRuntime.Publish), so a claim remembered from here on is handed this set and
+        // asks for its refresh itself (OnSensorsReported, OnFlexReceiverChanged), and one
+        // remembered before it is in the memory the checks below read; the two can overlap, and
+        // one request covers both.
+        _runtime.Publish(registered);
+
+        // A sensor the memory holds for a controller that this pass did not register: a stand-in
+        // whose fixed sensors are behind the memory, or a controller that learned a sensor after
+        // the pass read it (a wireless device checking in while a later controller was being
+        // registered) and remembered it before the set above was published. Every registered
+        // controller is remembered: built and remembered by this scan, or stood in for from the
+        // memory.
+        bool correctionPending = false;
+        foreach (KeyValuePair<string, IFanDevice> entry in _controllers) {
+            if (HasUnregisteredSensor(SensorIds(_runtime.Recall(entry.Key)!), registered)) {
+                _runtime.RequestRefresh(
+                    _standInKeys.Contains(entry.Key)
+                        ? "a controller came back with sensors the scan did not have"
+                        : "a controller reported sensors while they were being registered",
+                    _log);
+                correctionPending = true;
+            }
         }
+
+        // An id that changed hands while the pass ran (the radio took the chain, or let it go,
+        // between the snapshot and its registration) is registered under the controller that no
+        // longer drives it, and nobody asked for the refresh: the claim found nothing registered.
+        foreach (string id in registered.Keys) {
+            if (_runtime.OwnerOf(id) is string owner && !string.Equals(owner, owners[id], StringComparison.Ordinal)) {
+                _runtime.RequestRefresh("a FLEX chain changed hands while the sensors were being registered", _log);
+                correctionPending = true;
+                break;
+            }
+        }
+
+        // FanControl listens for a plugin's refresh only once it has registered a sensor, so with
+        // nothing registered the placeholder is what lets it hear one: for a device still to come,
+        // and for a correction already asked for above, which would otherwise never arrive.
+        if (registered.Count == 0 && (_mayStillRegister || correctionPending)) {
+            container.TempSensors.Add(new WaitingSensor());
+            _log.Write(correctionPending
+                ? "nothing to register yet but a refresh is already wanted; a placeholder sensor is registered so FanControl hears it"
+                : "nothing to register yet but a device is still to come; a placeholder sensor is registered so FanControl hears the refresh that follows it");
+        }
+    }
+
+    // Whether the controller remembered under key registers the sensor id now: not when the
+    // memory, as read once for the pass (owners), gives the id to another controller. The memory
+    // holds each id under one key (PluginRuntime.Remember), and an id under no key goes to the
+    // first controller to report it for the rest of the pass, so an id is registered under one
+    // key, once. Add rather than the indexer: an id reaching here twice would mean that rule
+    // failed, and a loud failure is better than a duplicate control the host cannot tell apart.
+    private bool Registers(string key, string id, Dictionary<string, string> owners, Dictionary<string, string> registered) {
+        if (!owners.TryGetValue(id, out string? owner)) {
+            owners[id] = key;
+            owner = key;
+        }
+
+        if (!string.Equals(owner, key, StringComparison.Ordinal)) {
+            _log.Write("  " + key + ": " + id + " is registered under " + owner + ", which drives it");
+            return false;
+        }
+
+        registered.Add(id, key);
+        return true;
     }
 
     /// <summary>
@@ -1233,6 +1535,33 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
 #pragma warning restore CA1031
     }
 #endif
+
+    // Whether the wireless pair a scan is building has read its list yet, for the scan's FLEX
+    // receivers to wait on before deciding whose their chain is (see BuildAll). Settled from the
+    // start when the scan builds no pair.
+    private sealed class WirelessPlanGate {
+        private readonly object _gate = new object();
+        private bool _settled;
+
+        public WirelessPlanGate(bool settled) {
+            _settled = settled;
+        }
+
+        public void Settled() {
+            lock (_gate) {
+                _settled = true;
+                Monitor.PulseAll(_gate);
+            }
+        }
+
+        public void Await() {
+            lock (_gate) {
+                while (!_settled) {
+                    Monitor.Wait(_gate);
+                }
+            }
+        }
+    }
 
     // Order located devices by their OS device path (ordinal) so the same physical port keeps the
     // same controller index - and therefore the same sensor ids - across restarts.

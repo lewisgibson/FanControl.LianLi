@@ -18,6 +18,13 @@ internal sealed class FakeWirelessConfiguration : IWirelessConfigurationSource {
     public Dictionary<string, WirelessAioPresentation> Presentations { get; } =
         new Dictionary<string, WirelessAioPresentation>();
 
+    /// <summary>Saved LCD FLEX screen settings by RF address; a group not listed gets L-Connect's default entry.</summary>
+    public Dictionary<string, WirelessFanScreenPresentation> FanScreens { get; } =
+        new Dictionary<string, WirelessFanScreenPresentation>();
+
+    /// <summary>The devices whose L-Connect "sync to motherboard" switch is saved on.</summary>
+    public HashSet<string> MotherboardArgbSync { get; } = new HashSet<string>();
+
     /// <summary>Every address an effect was looked up for, in order.</summary>
     public List<string> EffectLookups { get; } = new List<string>();
 
@@ -29,8 +36,13 @@ internal sealed class FakeWirelessConfiguration : IWirelessConfigurationSource {
         return Effects.TryGetValue(macText, out WirelessSavedEffect? effect) ? effect : null;
     }
 
+    public bool FindMotherboardArgbSync(string macText) => MotherboardArgbSync.Contains(macText);
+
     public WirelessAioPresentation? FindPumpPresentation(string macText)
         => Presentations.TryGetValue(macText, out WirelessAioPresentation? presentation) ? presentation : null;
+
+    public WirelessFanScreenPresentation? FindFanScreenPresentation(string macText)
+        => FanScreens.TryGetValue(macText, out WirelessFanScreenPresentation? presentation) ? presentation : null;
 
     public IReadOnlyList<WirelessLockedDevice>? FindLockedDevices(string masterMacText)
         => LockedDevices.TryGetValue(masterMacText, out IReadOnlyList<WirelessLockedDevice>? locked) ? locked : null;

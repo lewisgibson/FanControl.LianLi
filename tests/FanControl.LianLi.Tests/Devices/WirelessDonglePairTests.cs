@@ -7,7 +7,7 @@ using Xunit;
 
 namespace FanControl.LianLi.Tests.Devices;
 
-/// <summary>WinUsb.RfSend's failure count and the cross-wired reset (MasterDevice.ResetTx / ResetRx).</summary>
+/// <summary>WinUsb.RfSend's and RfRead's failure counts and the cross-wired reset (MasterDevice.ResetTx / ResetRx).</summary>
 public sealed class WirelessDonglePairTests {
     private static readonly byte[] Packet = { 0x42 };
 
@@ -37,11 +37,14 @@ public sealed class WirelessDonglePairTests {
         Assert.Equal(3, pair.TransmitterGeneration);
         Assert.Equal(5, pair.ReceiverGeneration);
         Assert.False(pair.IsFaulted);
+        Assert.False(pair.IsTransmitterFaulted);
         receiver.IsFaulted = true;
         Assert.True(pair.IsFaulted);
+        Assert.False(pair.IsTransmitterFaulted);
         receiver.IsFaulted = false;
         transmitter.IsFaulted = true;
         Assert.True(pair.IsFaulted);
+        Assert.True(pair.IsTransmitterFaulted);
     }
 
     // WinUsb.RfSend: five failed sends in a row on the transmitter call RFController.ResetTx, which
@@ -122,6 +125,125 @@ public sealed class WirelessDonglePairTests {
 
         Assert.Equal("simulated write failure", thrown.Message);
         Assert.Contains(logger.Messages, m => m == "W1: transmitter failed 5 writes in a row; resetting it through the receiver failed too: simulated write failure");
+    }
+
+    // WinUsb.RfRead: a reply whose first byte is zero counts (iReadErr++); at five in a
+    // row the dongle read from is reset through its partner (ResetRx) and the count starts again.
+    [Fact]
+    public void FiveEmptyReceiverReads_ResetItThroughTheTransmitter() {
+        var logger = new FakeLogger();
+        var transmitter = new FakeWirelessDongle();
+        var receiver = new FakeWirelessDongle();
+        using var pair = new WirelessDonglePair(transmitter, receiver, 2, logger);
+
+        for (int i = 0; i < 4; i++) {
+            Assert.Equal(new byte[3], pair.ReadReceiver(3));
+        }
+
+        Assert.Empty(transmitter.Writes);
+        Assert.Equal(new byte[3], pair.ReadReceiver(3));
+
+        Assert.True(IsReset(Assert.Single(transmitter.Writes)));
+        Assert.Contains(logger.Messages, m => m == "W2: receiver read nothing for the 5th time in a row across both dongles; reset it through the transmitter");
+
+        for (int i = 0; i < 4; i++) {
+            pair.ReadReceiver(3);
+        }
+
+        Assert.Single(transmitter.Writes);
+    }
+
+    // A reply of no bytes at all is as empty as one of zeros.
+    [Fact]
+    public void FiveEmptyTransmitterReads_ResetItThroughTheReceiver() {
+        var transmitter = new FakeWirelessDongle();
+        var receiver = new FakeWirelessDongle();
+        using var pair = new WirelessDonglePair(transmitter, receiver, 0, new FakeLogger());
+
+        for (int i = 0; i < 3; i++) {
+            pair.ReadTransmitter(64);
+        }
+
+        Assert.Empty(pair.ReadTransmitter(0));
+        Assert.Empty(receiver.Writes);
+        Assert.Empty(pair.ReadTransmitter(0));
+
+        Assert.True(IsReset(Assert.Single(receiver.Writes)));
+    }
+
+    // iReadErr = 0 on a reply that carries anything; a read that throws counts like an empty one,
+    // since ReadAll hands back the zeros it got, and still throws to the caller.
+    [Fact]
+    public void ANonEmptyRead_StartsTheCountAgain_AndAFailedReadCounts() {
+        bool answer = false;
+        var transmitter = new FakeWirelessDongle();
+        var receiver = new FakeWirelessDongle { Responder = _ => answer ? new byte[] { 0x10 } : null };
+        using var pair = new WirelessDonglePair(transmitter, receiver, 0, new FakeLogger());
+
+        for (int i = 0; i < 4; i++) {
+            pair.ReadReceiver(3);
+        }
+
+        answer = true;
+        Assert.Equal(new byte[] { 0x10, 0, 0 }, pair.ReadReceiver(3));
+        answer = false;
+        for (int i = 0; i < 2; i++) {
+            pair.ReadReceiver(3);
+        }
+
+        receiver.ReadFailure = new IOException("simulated read failure");
+        Assert.Throws<IOException>(() => pair.ReadReceiver(3));
+        Assert.Throws<IOException>(() => pair.ReadReceiver(3));
+        Assert.Empty(transmitter.Writes);
+        Assert.Throws<IOException>(() => pair.ReadReceiver(3));
+        Assert.True(IsReset(Assert.Single(transmitter.Writes)));
+    }
+
+    // Reads and writes are counted apart (iReadErr and iSendErr), and the reset is a write to the
+    // partner, counted against the partner like any other.
+    [Fact]
+    public void ReadsAndWrites_AreCountedApart_AndAResetCountsAgainstThePartner() {
+        var logger = new FakeLogger();
+        var transmitter = new FakeWirelessDongle { FailWrite = _ => true };
+        var receiver = new FakeWirelessDongle { FailWrite = _ => true };
+        using var pair = new WirelessDonglePair(transmitter, receiver, 1, logger);
+
+        for (int i = 0; i < 3; i++) {
+            pair.ReadReceiver(3);
+            Assert.Throws<IOException>(() => pair.WriteReceiver(Packet));
+        }
+
+        Assert.Empty(transmitter.Writes);
+        Assert.Empty(logger.Messages);
+
+        for (int i = 0; i < 2; i++) {
+            pair.ReadReceiver(3);
+        }
+
+        Assert.Contains(logger.Messages, m => m == "W1: receiver read nothing for the 5th time in a row across both dongles; resetting it through the transmitter failed too: simulated write failure");
+    }
+
+    // iReadErr is one static count in L-Connect's WinUsb, shared by both dongles: empty reads from
+    // either add to it, and the fifth resets whichever dongle it was read from.
+    [Fact]
+    public void EmptyReads_AreCountedAcrossBothDongles_AndResetTheOneReadFifth() {
+        var logger = new FakeLogger();
+        var transmitter = new FakeWirelessDongle();
+        var receiver = new FakeWirelessDongle();
+        using var pair = new WirelessDonglePair(transmitter, receiver, 3, logger);
+
+        pair.ReadTransmitter(64);
+        pair.ReadTransmitter(64);
+        pair.ReadReceiver(64);
+        pair.ReadReceiver(64);
+        Assert.Empty(transmitter.Writes);
+        Assert.Empty(receiver.Writes);
+
+        pair.ReadTransmitter(64);
+
+        Assert.True(IsReset(Assert.Single(receiver.Writes)));
+        Assert.Empty(transmitter.Writes);
+        Assert.Contains(logger.Messages, m => m == "W3: transmitter read nothing for the 5th time in a row across both dongles; reset it through the receiver");
     }
 
     [Fact]

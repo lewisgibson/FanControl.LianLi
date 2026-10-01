@@ -65,8 +65,37 @@ public class WinUsbDeviceLocatorTests {
     [InlineData(0x0416, 0x8051, true)]
     [InlineData(0x0416, 0x8052, false)] // the pump MCU's bootloader
     [InlineData(0x0416, 0x7372, false)] // a HID controller
-    public void IsWinUsbDevice_IsEitherDongleOrThePumpMcu(int vendor, int product, bool expected)
+    [InlineData(0x43A8, 0x0101, true)]  // a TL FLEX receiver
+    [InlineData(0x43A8, 0x0105, true)]  // a P28 V2 receiver
+    [InlineData(0x43A8, 0x0106, false)] // an SL FLEX receiver, which L-Connect gives no wired fan control
+    public void IsWinUsbDevice_IsEitherDongleThePumpMcuOrAReceiver(int vendor, int product, bool expected)
         => Assert.Equal(expected, WinUsbDeviceLocator.IsWinUsbDevice(vendor, product));
+
+    // A FLEX receiver: the same walk again, under its own vendor.
+    private const string FlexReceiver = @"USB\VID_43A8&PID_0101\5&3c4d5e6f&0&4";
+    private const string FlexReceiverPath = @"\\?\usb#vid_43a8&pid_0101#5&3c4d5e6f&0&4#{a5dcbf10-6530-11d2-901f-00c04fb951ed}";
+    private const uint FlexReceiverNode = 10;
+
+    [Fact]
+    public void Locate_FindsAFlexReceiver_UnderItsOwnVendor_AndNamesItWhenItIsNotBound() {
+        FakeConfigurationManagerApi api = TwoDongles();
+        api.DeviceIds.Add(FlexReceiver);
+        AddDongle(api, FlexReceiver, FlexReceiverNode, FlexReceiverPath);
+        var log = new FakeLogger();
+        int[] vendors = { 0x0416, 0x43A8 };
+        int[] products = { 0x8040, 0x8041, 0x0101 };
+
+        IReadOnlyList<LocatedDevice> located = Locator(api, log).Locate(vendors, products, CancellationToken.None);
+        Assert.Equal(new[] { TransmitterPath, ReceiverPath, FlexReceiverPath }, located.Select(d => d.DevicePath));
+        Assert.Equal(0x43A8, located[2].VendorId);
+        Assert.Null(located[2].Device);
+
+        api.HardwareKeys[FlexReceiverNode] = new Dictionary<string, (int Type, char[] Data)>();
+        Assert.Equal(2, Locator(api, log).Locate(vendors, products, CancellationToken.None).Count);
+        Assert.Contains(
+            "  UNI FAN TL FLEX receiver " + FlexReceiver + " has no WinUSB interface registered: Windows has not bound it to WinUSB, so L-Connect cannot reach it either",
+            log.Messages);
+    }
 
     [Fact]
     public void Locate_FindsThePumpMcu_BesideTheDongles_WhenItIsAllowed() {

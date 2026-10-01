@@ -35,15 +35,24 @@ internal sealed class FakeDeviceTransport : IDeviceTransport {
     public int InterruptReadCount { get; private set; }
 
     /// <summary>
+    /// When set, <see cref="Read"/> answers with what this returns for the last report written,
+    /// whenever <see cref="ReadReplies"/> is empty: a device that answers every request, for a test
+    /// that runs the worker for longer than a queue of replies would last.
+    /// </summary>
+    public Func<byte[], byte[]>? ReplyFor { get; set; }
+
+    private byte[]? _lastWrite;
+
+    /// <summary>
     /// When set, a <see cref="Read"/> with nothing queued throws <see cref="DeviceReplyMissingException"/>,
     /// as the real transports do for a reply that never comes, instead of yielding zeros.
     /// </summary>
     public bool MissingRepliesThrow { get; set; }
 
     /// <summary>
-    /// When set, <see cref="GetInputReport"/> blocks on this event before returning, letting a
-    /// test hold a tick mid-read (simulating the slow post-hibernate HID read that stalls the
-    /// keepalive thread while it holds the tick gate).
+    /// When set, <see cref="GetInputReport"/> and <see cref="Read"/> block on this event before
+    /// returning, letting a test hold a tick mid-read (simulating the slow post-hibernate HID read
+    /// that stalls the keepalive thread while it holds the tick gate, or a dongle slow to answer).
     /// </summary>
     public ManualResetEventSlim? BlockReadsUntil { get; set; }
 
@@ -87,6 +96,7 @@ internal sealed class FakeDeviceTransport : IDeviceTransport {
             var copy = (byte[])report.Clone();
             Writes.Add(copy);
             Transfers.Add(new KeyValuePair<bool, byte[]>(false, copy));
+            _lastWrite = copy;
         }
     }
 
@@ -125,20 +135,25 @@ internal sealed class FakeDeviceTransport : IDeviceTransport {
             throw new IOException("simulated device read failure");
         }
 
+        byte[] buffer;
         lock (_lock) {
             InterruptReadCount++;
             if (MissingRepliesThrow && ReadReplies.Count == 0) {
                 throw new DeviceReplyMissingException("simulated reply that never came");
             }
 
-            byte[] buffer = new byte[length];
-            if (ReadReplies.Count > 0) {
-                byte[] reply = ReadReplies.Dequeue();
+            buffer = new byte[length];
+            byte[]? reply = ReadReplies.Count > 0
+                ? ReadReplies.Dequeue()
+                : _lastWrite is byte[] written ? ReplyFor?.Invoke(written) : null;
+            if (reply != null) {
                 Array.Copy(reply, buffer, Math.Min(reply.Length, length));
             }
-
-            return buffer;
         }
+
+        // Outside the lock, as GetInputReport blocks: the counters show the read started.
+        BlockReadsUntil?.Wait();
+        return buffer;
     }
 
     /// <summary>

@@ -131,6 +131,19 @@ internal static class WirelessProtocol {
     private const byte RfEffectDataCommand = 0x20;   // one chunk of a rendered lighting effect
     private const byte RfAioParametersCommand = 0x21; // a water block's pump and screen parameters
     private const byte RfWirelessThemeCommand = 0x19; // a water block's screen shows its own theme, not PC-streamed content
+    private const byte RfLightingSyncCommand = 0x27;  // the device's lighting follows the motherboard's ARGB header, or stops
+    private const byte RfThemeSwitchCommand = 0x29;   // an LCD FLEX group's screens show their wireless theme, a bit per screen
+    private const byte RfScreenColoursCommand = 0x28; // the colours of one LCD FLEX screen's wireless theme
+
+    // Where 0x27 and 0x29 carry their setting: the source (1 follows the motherboard) and the switch mask.
+    private const int RfSwitchValueOffset = 20;
+
+    // The screen colours command carries a 76-byte buffer at 20 (RfDevice.sendColors): a 19-byte
+    // slot per screen, in the table's fan order, holding the six colours' red, green and blue and
+    // then a change marker, which UpdateSensorColors sets non-zero for the one screen the command
+    // is for and leaves zero for the rest.
+    private const int ScreenColoursOffset = 20;
+    private const int ScreenColourSlotLength = 19;
 
     // An effect is streamed as a header chunk followed by 220-byte slices of its compressed data.
     private const int EffectChunkLength = 220;
@@ -149,18 +162,45 @@ internal static class WirelessProtocol {
     // What RefreshList reads a device reporting no PWM while spinning as.
     private const byte UnreportedPwm = 100;
 
-    // The duty L-Connect's service sends when a curve asks for nothing: getTemperatureDuty and
-    // calculateDuty both return 5 for a zero speed, below every floor.
-    private const int IdleDuty = 5;
+    // The high nibble of each slot's RPM high byte carries flags (slot 0: sync line, motherboard
+    // light sync, PWM line and tach line; slot 1: the P28 V2's gear and sync line, or the per-fan
+    // wireless-theme bits; slots 2 and 3: the device's RF firmware version), which RefreshList
+    // masks off before the RPM is read. An RPM is therefore 12 bits, 0-4095, which every real fan
+    // and pump reading fits; older firmware leaves the nibble zero, so the mask is safe for it too.
+    private const int RpmHighByteMask = 0x0F;
 
-    // LWirelessController.startWriteCaseSpeed floors both Lancool 217 curves at 11.
+    // Of the nibble flags, the two the plugin reads: slot 0's bit 6 (IsSyncMbLight, the lighting
+    // follows the motherboard's ARGB header) and slot 1's whole nibble (WiredlessThemeSwitch, one bit
+    // per LCD FLEX screen showing its wireless theme), which RefreshList reads for every group whose
+    // first fan is not a P28 V2 (code 63, whose nibble is its gear and sync line).
+    private const int LightingFollowsMotherboardFlag = 0x40;
+    private const int ThemeSwitchSlot = 1;
+    private const byte P28V2FanType = 63;
+
+    // The duty L-Connect's service sends when a curve asks for nothing: getTemperatureDuty and
+    // calculateDuty both return 5 for a zero speed, below every floor; a P28 V2 group alone idles
+    // at 1 (getTemperatureDuty's P28V2Fan120 case), which maps to PWM 2.
+    private const int IdleDuty = 5;
+    private const int P28V2IdleDuty = 1;
+
+    // LWirelessController.startWriteCaseSpeed floors every curve of a case device (the Lancool 217's
+    // two and the V150's two) at 11.
     private const int CaseDutyFloor = 11;
 
-    // LWirelessController.startWriteFanSpeed's floors by LWirelessFanType: SL V3 14; TL V2 LED and
-    // SL-Infinity 11; TL V2 LCD, CL and everything else 10.
+    // LWirelessController.startWriteFanSpeed's floors by LWirelessFanType: SL V3 and SL V4 120 mm
+    // 14; TL V2 LED, SL-Infinity and TL FLEX 11; P28 V2 8; TL V2 LCD, SL-INF FLEX, CL, CL FLEX and
+    // everything else 10.
     private const int SlV3DutyFloor = 14;
     private const int LedDutyFloor = 11;
     private const int DefaultDutyFloor = 10;
+    private const int P28V2DutyFloor = 8;
+
+    // The clock broadcast carries a 220-byte block at payload 14-233 (MasterDevice.cpuInfoParam):
+    // a 50-byte fixed block of the PC's figures with the date and time at 32-38, then the 168-byte
+    // per-receiver-slot screen table at 50, then two zero bytes.
+    private const int ClockBlockOffset = 14;
+    private const int ClockDateOffset = 32;
+    private const int ClockScreenTableOffset = 50;
 
     // MasterDevice.NeedSyncPwm steps a CL group's 153 and 154 down to 152 and 155 up to 156.
     private const byte ClReservedLow = 153;
@@ -276,17 +316,40 @@ internal static class WirelessProtocol {
                 continue;
             }
 
-            records.Add(DecodeRecord(reply, offset));
+            records.Add(DecodeRecord(reply, offset, unreportedPwmAsFull: true));
         }
 
         return new WirelessDeviceList(total, records);
     }
 
+    /// <summary>
+    /// Decode the 42-byte record at <paramref name="offset"/> in <paramref name="reply"/> by its
+    /// layout alone, which is how <c>UsbRecevierController.SetStatus</c> reads a FLEX receiver's
+    /// status reply over USB (the same record one byte in, after the command echo). The list read's
+    /// one extra rule, an all-zero PWM read as 100 while the first fan spins, belongs to
+    /// <see cref="DecodeDeviceList"/> and is not applied here. Throws <see cref="ArgumentException"/>
+    /// when the record does not fit.
+    /// </summary>
+    public static WirelessDeviceRecord DecodeRecord(byte[] reply, int offset) {
+        if (reply is null) {
+            throw new ArgumentNullException(nameof(reply));
+        }
+
+        if (offset < 0 || offset + RecordLength > reply.Length) {
+            throw new ArgumentException("A record is " + RecordLength + " bytes from its offset.", nameof(offset));
+        }
+
+        return DecodeRecord(reply, offset, unreportedPwmAsFull: false);
+    }
+
     // Record layout (offsets within the 42 bytes): 0-5 device address, 6-11 master address,
     // 12 channel, 13 receiver slot, 14-17 device clock, 18 device type, 19 fan count (+10 = the
     // SL-Infinity end cap is on the right), 20-23 running effect identity, 24-27 per-slot fan type,
-    // 28-35 per-slot RPM as big-endian 16-bit, 36-39 per-slot PWM, 40 command sequence, 41 marker.
-    private static WirelessDeviceRecord DecodeRecord(byte[] reply, int offset) {
+    // 28-35 per-slot RPM as big-endian 12-bit in the low nibble of the high byte and the low byte
+    // (the high nibbles are flags and firmware bits, see RpmHighByteMask; slot 0's bit 6 and slot
+    // 1's nibble are read, see LightingFollowsMotherboardFlag), 36-39 per-slot PWM, 40 command
+    // sequence, 41 marker.
+    private static WirelessDeviceRecord DecodeRecord(byte[] reply, int offset, bool unreportedPwmAsFull) {
         var mac = new byte[MacLength];
         var masterMac = new byte[MacLength];
         Array.Copy(reply, offset, mac, 0, MacLength);
@@ -298,7 +361,8 @@ internal static class WirelessProtocol {
         // FanNum getter takes ten off again whatever is still ten or more. No device has more than
         // the four slots its record carries, so anything beyond is clamped rather than trusted.
         int fanCount = reply[offset + 19];
-        if (fanCount >= RightAttachOffset) {
+        bool rightAttached = fanCount >= RightAttachOffset;
+        if (rightAttached) {
             fanCount -= RightAttachOffset;
         }
 
@@ -317,15 +381,21 @@ internal static class WirelessProtocol {
         var rpm = new int[SlotsPerGroup];
         for (int slot = 0; slot < SlotsPerGroup; slot++) {
             int at = offset + 28 + (slot * 2);
-            rpm[slot] = (reply[at] << 8) | reply[at + 1];
+            rpm[slot] = ((reply[at] & RpmHighByteMask) << 8) | reply[at + 1];
         }
+
+        // RefreshList: IsSyncMbLight is bit 6 of fans_speed[0]; WiredlessThemeSwitch is the high
+        // nibble of fans_speed[2] unless fans_type[0] is a P28 V2, whose nibble is its gear.
+        bool lightingFollowsMotherboard = (reply[offset + 28] & LightingFollowsMotherboardFlag) != 0;
+        byte themeSwitches = fanTypes[0] == P28V2FanType ? (byte)0 : (byte)(reply[offset + 28 + (ThemeSwitchSlot * 2)] >> 4);
 
         var pwm = new byte[SlotsPerGroup];
         Array.Copy(reply, offset + 36, pwm, 0, SlotsPerGroup);
 
         // RefreshList reads a device that reports no PWM at all while its first fan's speed has a
-        // high byte (fans_speed[0] is the high byte of slot 0's RPM) as running at 100 on every slot.
-        if (pwm[0] == 0 && pwm[1] == 0 && pwm[2] == 0 && pwm[3] == 0 && reply[offset + 28] > 0) {
+        // high byte (fans_speed[0] is the high byte of slot 0's RPM, tested after the flag nibble is
+        // masked off) as running at 100 on every slot. The wired SetStatus does not.
+        if (unreportedPwmAsFull && pwm[0] == 0 && pwm[1] == 0 && pwm[2] == 0 && pwm[3] == 0 && (reply[offset + 28] & RpmHighByteMask) > 0) {
             for (int slot = 0; slot < SlotsPerGroup; slot++) {
                 pwm[slot] = UnreportedPwm;
             }
@@ -343,7 +413,10 @@ internal static class WirelessProtocol {
             fanTypes,
             rpm,
             pwm,
-            reply[offset + 40]);
+            reply[offset + 40],
+            rightAttached,
+            themeSwitches,
+            lightingFollowsMotherboard);
     }
 
     /// <summary>
@@ -352,7 +425,7 @@ internal static class WirelessProtocol {
     /// so it restates the binding: the master's address, the receiver slot the device was bound
     /// under, the master's channel, and <paramref name="bindIndex"/> (the device's 1-based position
     /// among the bound devices; 0 would unbind it, so it is refused here). The PWM bytes are on the
-    /// device's 0-255 scale; see <see cref="FanPwm"/> and <see cref="CasePwm"/>.
+    /// device's 0-255 scale; see <see cref="FanPwm(int, int, int)"/> and <see cref="CasePwm"/>.
     /// </summary>
     public static byte[] EncodeSpeedPayload(
         byte[] deviceMac, byte[] masterMac, int receiverType, int channel, int bindIndex, byte[] pwm) {
@@ -624,13 +697,34 @@ internal static class WirelessProtocol {
     }
 
     /// <summary>
-    /// Encode the clock pulse: a broadcast carrying only the master's address, which the devices use
-    /// to keep their clocks, and so their effects, in step with the master's. L-Connect sends it every
+    /// Encode the clock pulse: a broadcast carrying the master's address, which the devices use to
+    /// keep their clocks, and so their effects, in step with the master's. L-Connect sends it every
     /// second whatever it is doing (<c>MasterDevice.SyncMasterClock</c>). Unlike every other payload
     /// it addresses nobody - the device address stays all zero - because it is for whoever can hear it.
+    /// It also carries a 220-byte block at 14-233: the PC's figures for the LCD FLEX fans' screens,
+    /// of which the plugin sends only the date and time (<paramref name="localTime"/>, local as
+    /// <c>DateTime.Now</c> is: year big-endian at 46-47, then month, day, hour, minute and second
+    /// at 48-52), with every CPU and GPU figure zero; and at 64-231 the per-receiver-slot screen
+    /// table (<paramref name="screens"/>), which is where those fans read their screens' theme,
+    /// data source and brightness from.
     /// </summary>
-    public static byte[] EncodeClockPayload(byte[] masterMac)
-        => AddressedPayload(RfClockCommand, new byte[MacLength], masterMac, 0, 0);
+    public static byte[] EncodeClockPayload(byte[] masterMac, DateTime localTime, WirelessScreenTable screens) {
+        if (screens is null) {
+            throw new ArgumentNullException(nameof(screens));
+        }
+
+        byte[] payload = AddressedPayload(RfClockCommand, new byte[MacLength], masterMac, 0, 0);
+        int date = ClockBlockOffset + ClockDateOffset;
+        payload[date] = (byte)(localTime.Year >> 8);
+        payload[date + 1] = (byte)(localTime.Year & 0xFF);
+        payload[date + 2] = (byte)localTime.Month;
+        payload[date + 3] = (byte)localTime.Day;
+        payload[date + 4] = (byte)localTime.Hour;
+        payload[date + 5] = (byte)localTime.Minute;
+        payload[date + 6] = (byte)localTime.Second;
+        Array.Copy(screens.ToBytes(), 0, payload, ClockBlockOffset + ClockScreenTableOffset, WirelessScreenTable.Length);
+        return payload;
+    }
 
     /// <summary>
     /// Encode the broadcast that tells every device bound to the master to commit its state
@@ -659,6 +753,98 @@ internal static class WirelessProtocol {
         payload[16] = countedBefore;
         payload[17] = sequence;
         return payload;
+    }
+
+    /// <summary>
+    /// The payload that hands a device's lighting to the motherboard's ARGB header, or takes it back
+    /// (<c>MasterDevice.SyncControlInfo</c>'s <c>isTlv3CloseLight</c> branch, queued by
+    /// <c>RFController.SyncMBLightSwitch</c>): laid out as <see cref="EncodeWirelessThemePayload"/>,
+    /// with the source at byte 20 - 1 to follow the motherboard (<c>SetMotherboardARGBSync(mac, true)</c>
+    /// sends <c>isClose: false</c>), 0 to stop.
+    /// </summary>
+    public static byte[] EncodeLightingSyncPayload(
+        byte[] deviceMac, byte[] masterMac, int receiverType, int channel, byte countedBefore, byte sequence, bool followMotherboard) {
+        byte[] payload = AddressedPayload(RfLightingSyncCommand, deviceMac, masterMac, receiverType, channel);
+        payload[16] = countedBefore;
+        payload[17] = sequence;
+        payload[RfSwitchValueOffset] = followMotherboard ? (byte)1 : (byte)0;
+        return payload;
+    }
+
+    /// <summary>
+    /// The payload that switches an LCD FLEX group's screens onto their wireless themes
+    /// (<c>MasterDevice.SyncControlInfo</c>'s <c>isPlayWirelessTheme</c> branch, queued by
+    /// <c>RFController.PlayWiredlessThemeSwitch</c>): laid out as
+    /// <see cref="EncodeWirelessThemePayload"/>, with the switch mask the group should hold at byte
+    /// 20 (<c>WiredlessThemeSwitchTarget</c>), one bit per screen in the firmware's order (see
+    /// <see cref="WirelessDeviceRecord.ThemeSwitches"/>).
+    /// </summary>
+    public static byte[] EncodeThemeSwitchPayload(
+        byte[] deviceMac, byte[] masterMac, int receiverType, int channel, byte countedBefore, byte sequence, byte switches) {
+        byte[] payload = AddressedPayload(RfThemeSwitchCommand, deviceMac, masterMac, receiverType, channel);
+        payload[16] = countedBefore;
+        payload[17] = sequence;
+        payload[RfSwitchValueOffset] = switches;
+        return payload;
+    }
+
+    /// <summary>
+    /// The payload that gives one LCD FLEX screen the colours of its wireless theme
+    /// (<c>MasterDevice.SyncControlInfo</c>'s <c>isSendColors</c> branch, queued by
+    /// <c>RFController.UpdateSensorColors</c> for the fan <c>applyWirelessLCDMode</c> is applying):
+    /// laid out as <see cref="EncodeWirelessThemePayload"/>, with the 76-byte colour buffer at 20,
+    /// in which the screen's own 19-byte slot (<paramref name="tableFanIndex"/>, the table's fan
+    /// order, times 19) holds the six colours' red, green and blue (<paramref name="colours"/>, 18
+    /// bytes) and then a non-zero change marker; the other slots stay zero. L-Connect draws the
+    /// marker at random from 1 to 253; the plugin takes it from the round's sequence, which differs
+    /// between rounds as a random does.
+    /// </summary>
+    public static byte[] EncodeScreenColoursPayload(
+        byte[] deviceMac, byte[] masterMac, int receiverType, int channel, byte countedBefore, byte sequence, int tableFanIndex, byte[] colours) {
+        if (colours is null) {
+            throw new ArgumentNullException(nameof(colours));
+        }
+
+        if (colours.Length != WirelessThemeColours.Length) {
+            throw new ArgumentException("Expected " + WirelessThemeColours.Length + " colour bytes.", nameof(colours));
+        }
+
+        if (tableFanIndex < 0 || tableFanIndex >= SlotsPerGroup) {
+            throw new ArgumentOutOfRangeException(nameof(tableFanIndex), "A group has fans 0-" + (SlotsPerGroup - 1) + ".");
+        }
+
+        byte[] payload = AddressedPayload(RfScreenColoursCommand, deviceMac, masterMac, receiverType, channel);
+        payload[16] = countedBefore;
+        payload[17] = sequence;
+        int slot = ScreenColoursOffset + (tableFanIndex * ScreenColourSlotLength);
+        Array.Copy(colours, 0, payload, slot, WirelessThemeColours.Length);
+        payload[slot + WirelessThemeColours.Length] = ScreenColoursMarker(sequence);
+        return payload;
+    }
+
+    /// <summary>The change marker for a round of the screen colours command sent under <paramref name="sequence"/> (1 to 254): 1 to 253, as L-Connect's random is drawn.</summary>
+    public static byte ScreenColoursMarker(byte sequence) => (byte)(((sequence + 252) % 253) + 1);
+
+    /// <summary>
+    /// The switch mask an LCD FLEX group holds once every one of its <paramref name="fanCount"/>
+    /// screens shows its wireless theme, on top of the bits it reports now
+    /// (<paramref name="reported"/>): <c>FlexLCDSdkHelper.TryRestoreWirelessThemeSwitches</c> asks
+    /// for the bit of every fan whose bit is clear, the service's fan <c>i</c> being the firmware's
+    /// <c>max(count, 3) - 1 - i</c> (<c>ToThemeSwitchPlayIndex</c>), and
+    /// <c>RFController.PlayWiredlessThemeSwitch</c> ors each into the target over what is reported.
+    /// </summary>
+    public static byte ThemeSwitchesForAllScreens(byte reported, int fanCount) {
+        if (fanCount < 0 || fanCount > SlotsPerGroup) {
+            throw new ArgumentOutOfRangeException(nameof(fanCount), "A group has 0-" + SlotsPerGroup + " fans.");
+        }
+
+        int highest = Math.Max(fanCount, 3) - 1;
+        int target = reported;
+        for (int fan = 0; fan < fanCount; fan++) {
+            target |= 1 << (highest - fan);
+        }
+
+        return (byte)target;
     }
 
     /// <summary>
@@ -695,7 +881,8 @@ internal static class WirelessProtocol {
 
     /// <summary>Which family a slot's fan type code belongs to; 0 (empty) and unrecognised codes are Unknown.</summary>
     public static WirelessFanFamily FamilyOf(int fanType) {
-        // Type codes (RfDevice.InitAttr): 20-26 SL V3, 27-35 TL V2, 36-39 SL-Infinity, 41-42 CL.
+        // Type codes (RfDevice.InitAttr): 20-26 SL V3, 27-35 TL V2, 36-39 SL-Infinity, 41-42 CL,
+        // 43-50 SL-INF FLEX, 51-58 TL FLEX, 59-62 SL V4, 63 P28 V2, 126-127 CL V2.
         if (fanType >= 20 && fanType <= 26) {
             return WirelessFanFamily.SlV3;
         }
@@ -712,16 +899,38 @@ internal static class WirelessProtocol {
             return WirelessFanFamily.Cl;
         }
 
+        if (fanType >= 43 && fanType <= 50) {
+            return WirelessFanFamily.SlInfinityFlex;
+        }
+
+        if (fanType >= 51 && fanType <= 58) {
+            return WirelessFanFamily.TlFlex;
+        }
+
+        if (fanType >= 59 && fanType <= 62) {
+            return WirelessFanFamily.SlV4;
+        }
+
+        if (fanType == 63) {
+            return WirelessFanFamily.P28V2;
+        }
+
+        if (fanType == 126 || fanType == 127) {
+            return WirelessFanFamily.ClV2;
+        }
+
         return WirelessFanFamily.Unknown;
     }
 
     /// <summary>
     /// The lowest duty percent L-Connect's service sends a device's fans, picked per device the way
     /// <c>LWirelessController.convertFanType</c> and <c>startWriteFanSpeed</c> pick it: a fan group by
-    /// its first slot's family - SL V3 14, SL-Infinity 11, TL V2 11 or 10 if any slot is an LCD
-    /// fan (type 23-27 or 32-35, <c>RfDevice.InitAttr</c>'s <c>BindLcd</c>) - and 10 for everything
-    /// else: CL, RL120 and unrecognised fans, a water block (whose fans the service always configures
-    /// as <c>CLFan120LED</c>), the V150 and any unrecognised device.
+    /// its first slot's family and size - SL V3 14, SL V4 120 mm 14 (its 140 mm codes fall through
+    /// to <c>None</c>, 10), SL-Infinity 11, TL FLEX 11, TL V2 11 or 10 if any slot is an LCD fan
+    /// (<c>RfDevice.InitAttr</c>'s <c>BindLcd</c>), P28 V2 8 - and 10 for everything else: SL-INF
+    /// FLEX, CL, CL FLEX (whose codes leave <c>DevSize</c> at 0, so <c>convertFanType</c> gives
+    /// <c>None</c>), RL120 and unrecognised fans, a water block (whose fans the service always
+    /// configures as <c>CLFan120LED</c>), a case device's fans and any unrecognised device.
     /// </summary>
     public static int GroupDutyFloor(WirelessDeviceRecord record) {
         if (record is null) {
@@ -735,26 +944,81 @@ internal static class WirelessProtocol {
         switch (FamilyOf(record.FanTypes[0])) {
             case WirelessFanFamily.SlV3:
                 return SlV3DutyFloor;
+            case WirelessFanFamily.SlV4:
+                // InitAttr: 59 and 60 are 120 mm, 61 and 62 are 140 mm.
+                return record.FanTypes[0] <= 60 ? SlV3DutyFloor : DefaultDutyFloor;
             case WirelessFanFamily.TlV2:
                 return AnyLcdFan(record.FanTypes) ? DefaultDutyFloor : LedDutyFloor;
             case WirelessFanFamily.SlInfinity:
+            case WirelessFanFamily.TlFlex:
                 return LedDutyFloor;
+            case WirelessFanFamily.P28V2:
+                return P28V2DutyFloor;
             default:
                 return DefaultDutyFloor;
         }
     }
 
     /// <summary>
+    /// The duty percent L-Connect's service sends a device's fans when a curve asks for no speed:
+    /// 1 for a P28 V2 group and 5 for everything else (<c>getTemperatureDuty</c>, keyed on the first
+    /// slot's family through <c>convertFanType</c>).
+    /// </summary>
+    public static int GroupIdleDuty(WirelessDeviceRecord record) {
+        if (record is null) {
+            throw new ArgumentNullException(nameof(record));
+        }
+
+        return record.Kind == WirelessDeviceKind.FanGroup && FamilyOf(record.FanTypes[0]) == WirelessFanFamily.P28V2
+            ? P28V2IdleDuty
+            : IdleDuty;
+    }
+
+    /// <summary>
     /// Whether L-Connect treats the device as a CL group, whose reserved PWM values it steps around
-    /// (<c>NeedSyncPwm</c> checks <c>RecType[0] == CLV1</c>, which <c>InitAttr</c> sets only for a fan
-    /// group whose first slot is a CL fan).
+    /// (<c>NeedSyncPwm</c> checks <c>RecType[0] == CLV1 || CLV2</c>, which <c>InitAttr</c> sets only
+    /// for a fan group whose first slot is a CL or CL FLEX fan).
     /// </summary>
     public static bool IsClGroup(WirelessDeviceRecord record) {
         if (record is null) {
             throw new ArgumentNullException(nameof(record));
         }
 
-        return record.Kind == WirelessDeviceKind.FanGroup && FamilyOf(record.FanTypes[0]) == WirelessFanFamily.Cl;
+        if (record.Kind != WirelessDeviceKind.FanGroup) {
+            return false;
+        }
+
+        WirelessFanFamily family = FamilyOf(record.FanTypes[0]);
+        return family == WirelessFanFamily.Cl || family == WirelessFanFamily.ClV2;
+    }
+
+    /// <summary>
+    /// Whether the device is an LCD FLEX group whose screens read the clock broadcast's screen
+    /// table: a fan group whose first slot is a TL FLEX LCD or SL-INF FLEX LCD fan
+    /// (<c>RFController.UpdateSensorDataByWiredLess</c> writes an entry for a bound group with
+    /// <c>RecType[0]</c> of <c>TLV3</c> or <c>SLINFV3</c> and <c>BindLcd[0]</c> set, which
+    /// <c>InitAttr</c> sets for codes 43, 44, 47, 48, 51, 52, 55 and 56).
+    /// </summary>
+    public static bool HasScreens(WirelessDeviceRecord record) {
+        if (record is null) {
+            throw new ArgumentNullException(nameof(record));
+        }
+
+        return record.Kind == WirelessDeviceKind.FanGroup && IsFlexLcdFan(record.FanTypes[0]);
+    }
+
+    /// <summary>
+    /// Whether the screen table numbers the group's fans in reverse of the service's order: for
+    /// every group except a left-attached SL-Infinity or SL-INF FLEX group, the service's fan
+    /// <c>i</c> is the table's fan <c>count - 1 - i</c> (<c>RFController.UpdateSensorSettingByWiredLess</c>).
+    /// </summary>
+    public static bool ScreensNumberedInReverse(WirelessDeviceRecord record) {
+        if (record is null) {
+            throw new ArgumentNullException(nameof(record));
+        }
+
+        WirelessFanFamily family = FamilyOf(record.FanTypes[0]);
+        return record.RightAttached || (family != WirelessFanFamily.SlInfinity && family != WirelessFanFamily.SlInfinityFlex);
     }
 
     /// <summary>A CL group's PWM stepped off the values its firmware reserves: 153 and 154 to 152, 155 to 156.</summary>
@@ -771,12 +1035,20 @@ internal static class WirelessProtocol {
     /// of 0 is sent as 5% without the floor (<c>getTemperatureDuty</c> returns 5 for a zero speed),
     /// anything else is raised to <paramref name="floor"/> and capped at 100, then mapped onto 0-255.
     /// </summary>
-    public static byte FanPwm(int dutyPercent, int floor)
-        => PwmFromPercent(dutyPercent <= 0 ? IdleDuty : Math.Max(floor, Math.Min(100, dutyPercent)));
+    public static byte FanPwm(int dutyPercent, int floor) => FanPwm(dutyPercent, floor, IdleDuty);
 
     /// <summary>
-    /// The PWM byte for a Lancool 217 case fan at a duty percent: 0 is sent as 5%
-    /// (<c>calculateDuty</c>), anything else floored at 11% (<c>startWriteCaseSpeed</c>), then mapped.
+    /// The PWM byte for a fan device at a duty percent whose idle duty is <paramref name="idleDuty"/>
+    /// (see <see cref="GroupIdleDuty"/>): a duty of 0 is sent as that, without the floor, anything
+    /// else is raised to <paramref name="floor"/> and capped at 100, then mapped onto 0-255.
+    /// </summary>
+    public static byte FanPwm(int dutyPercent, int floor, int idleDuty)
+        => PwmFromPercent(dutyPercent <= 0 ? idleDuty : Math.Max(floor, Math.Min(100, dutyPercent)));
+
+    /// <summary>
+    /// The PWM byte for a case fan (the Lancool 217's and the V150's) at a duty percent: 0 is sent
+    /// as 5% (<c>calculateDuty</c>), anything else floored at 11% (<c>startWriteCaseSpeed</c>), then
+    /// mapped.
     /// </summary>
     public static byte CasePwm(int dutyPercent) => FanPwm(dutyPercent, CaseDutyFloor);
 
@@ -787,14 +1059,20 @@ internal static class WirelessProtocol {
         return (byte)(int)Math.Max(0.0, Math.Min(255.0, mapped));
     }
 
-    // RfDevice.InitAttr's BindLcd: the LCD variants of SL V3 and TL V2.
+    // RfDevice.InitAttr's BindLcd: the LCD variants of SL V3 and TL V2, and of the FLEX families.
     private static bool AnyLcdFan(byte[] fanTypes) {
         foreach (byte fanType in fanTypes) {
-            if ((fanType >= 23 && fanType <= 27) || (fanType >= 32 && fanType <= 35)) {
+            if ((fanType >= 23 && fanType <= 27) || (fanType >= 32 && fanType <= 35) || IsFlexLcdFan(fanType)) {
                 return true;
             }
         }
 
         return false;
     }
+
+    // InitAttr sets BindLcd for the SL-INF FLEX codes 43, 44, 47 and 48 and the TL FLEX codes 51,
+    // 52, 55 and 56.
+    private static bool IsFlexLcdFan(byte fanType)
+        => fanType == 43 || fanType == 44 || fanType == 47 || fanType == 48
+            || fanType == 51 || fanType == 52 || fanType == 55 || fanType == 56;
 }

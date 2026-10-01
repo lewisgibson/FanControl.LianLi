@@ -34,6 +34,10 @@ public class WinUsbTransportTests {
 
     private WinUsbTransport OpenPump() => WinUsbTransport.Open(PumpPath, WinUsbPipePolicy.PumpMcu, _log, _api, _gate, _delay, CancellationToken.None);
 
+    private const string FlexPath = @"\\?\usb#vid_43a8&pid_0101#8&3&0&2#{guid}";
+
+    private WinUsbTransport OpenFlexReceiver() => WinUsbTransport.Open(FlexPath, WinUsbPipePolicy.FlexReceiver, _log, _api, _gate, _delay, CancellationToken.None);
+
     public WinUsbTransportTests() {
         _gate = new DeviceCallGate(_calls, _clock, _log);
     }
@@ -180,6 +184,31 @@ public class WinUsbTransportTests {
         Assert.Equal(packet, Assert.Single(_api.Written));
         Assert.Equal(1000, _calls.TimeoutOf("WinUsb_WritePipe on " + Path));
         Assert.Empty(_delay.Waits);
+    }
+
+    // The receiver's write is given L-Connect's 2000 ms pipe timeout (WinUsbLed.SendAndRead), so
+    // the bound around the call is that plus the margin, or a write inside its window would be
+    // given up on and the handle faulted; the dongles and the pump keep their second.
+    [Fact]
+    public void Write_UnderTheFlexReceiverPolicy_IsBoundedBeyondItsTwoSecondPipeTimeout() {
+        using WinUsbTransport transport = OpenFlexReceiver();
+
+        transport.Write(Packet(0x12));
+
+        Assert.Equal(2500, _calls.TimeoutOf("WinUsb_WritePipe on " + FlexPath));
+        using WinUsbTransport pump = OpenPump();
+        pump.Write(Packet(0x60));
+        Assert.Equal(1000, _calls.TimeoutOf("WinUsb_WritePipe on " + PumpPath));
+    }
+
+    [Fact]
+    public void Write_UnderTheFlexReceiverPolicy_OutlivingItsBound_SaysWhichBound() {
+        using WinUsbTransport transport = OpenFlexReceiver();
+        _calls.TimesOut = operation => operation.StartsWith("WinUsb_WritePipe", StringComparison.Ordinal);
+
+        IOException failure = Assert.Throws<IOException>(() => transport.Write(Packet(0x12)));
+
+        Assert.Equal("WinUsb_WritePipe timed out after 2500 ms; pending transfers aborted; handle faulted.", failure.Message);
     }
 
     [Fact]

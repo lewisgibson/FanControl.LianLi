@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -42,6 +43,25 @@ public class LianLiPluginTests {
 
     private static LocatedDevice HydroShiftCurve()
         => new LocatedDevice(0x0416, 0x8051, "fake/hydroshift-curve", null);
+
+    private static LocatedDevice FlexReceiver(int productId = 0x0101)
+        => new LocatedDevice(0x43A8, productId, "fake/flex", null);
+
+    // A receiver whose chain has the given address and two fans: it answers every status request
+    // and takes every speed.
+    private static Action<LocatedDevice, FakeDeviceTransport> FlexChain(byte[] mac)
+        => (info, transport) => {
+            if (info.VendorId != 0x43A8) {
+                return;
+            }
+
+            byte[] status = FlexReceiverProtocolTests.StatusReply(new FakeWirelessRecord(mac, new byte[6]) {
+                FanCountByte = 2,
+                FanTypes = new byte[] { 51, 51, 0, 0 },
+                Rpm = new[] { 1200, 1150, 0, 0 },
+            });
+            transport.ReplyFor = written => written[0] == 0x12 ? status : new byte[] { 0x13, 0 };
+        };
 
     // The device path that became controller 0. Each path reports its own RPM on every channel
     // (1000 rpm for "aaa", 2000 for "zzz"), so controller 0's first fan sensor says which it is.
@@ -281,6 +301,130 @@ public class LianLiPluginTests {
         plugin.Close();
         Assert.Equal(new byte[] { 0x64, 1, 0, 0, 0, 0, 0, 0 }, enumerator.Opened[0].Writes[0]);
         Assert.Contains(logger.Messages, m => m.Contains("kind=HydroShiftCurve pump and liquid temperature path=fake/hydroshift-curve"));
+    }
+
+    [Fact]
+    public void InitializeThenLoad_RegistersAFlexChainOnItsUsbReceiver_UnderTheWirelessIds() {
+        // A TL FLEX receiver (0x43A8:0x0101) is a WinUSB device built as one controller: one control
+        // for the chain and a reading per fan, keyed on the receiver's RF address exactly as the
+        // wireless controller would key the same chain on the dongles.
+        var logger = new FakeLogger();
+        var enumerator = new FakeEnumerator(FlexReceiver()) { ConfigureTransport = FlexChain(new byte[] { 0xA1, 0xB2, 0xC3, 0xD4, 0xE5, 0xF6 }) };
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+
+        plugin.Initialize();
+        var container = new FakeSensorsContainer();
+        plugin.Load(container);
+
+        IPluginControlSensor control = Assert.Single(container.ControlSensors);
+        Assert.Equal("LianLi/wa1b2c3d4e5f6/ctl", control.Id);
+        Assert.Equal("Lian Li UNI FAN TL FLEX USB d4e5f6", control.Name);
+        Assert.Equal(new[] { "LianLi/wa1b2c3d4e5f6/f0/fan", "LianLi/wa1b2c3d4e5f6/f1/fan" }, container.FanSensors.Select(s => s.Id));
+        container.FanSensors[1].Update();
+        Assert.Equal(1150f, container.FanSensors[1].Value);
+        Assert.Empty(container.TempSensors);
+
+        control.Set(50);
+        FakeDeviceTransport transport = enumerator.Opened[0];
+        Assert.True(SpinWait.SpinUntil(() => transport.SnapshotTransfers().Any(t => t.Value[0] == 0x13), TimeSpan.FromSeconds(5)));
+        plugin.Close();
+        Assert.Equal(new byte[] { 0x13, 128, 128, 0 }, transport.Writes.First(w => w[0] == 0x13).Take(4));
+        Assert.Contains(logger.Messages, m => m.Contains("kind=FlexReceiver address=a1b2c3d4e5f6 fans=2 path=fake/flex"));
+        Assert.True(transport.IsDisposed);
+    }
+
+    [Fact]
+    public void AFlexChainTheWirelessPairHasBound_IsLeftToTheRadio_EvenWhenThePairOpensSlowly() {
+        // The dongles list the chain at a0:00:00:00:00:01 bound to their master; the same chain
+        // answers on a USB receiver. The receiver opens and identifies itself while the pair is
+        // still held on its first read, and decides whose the chain is only once the pair's build
+        // has ended, so it sees the chain as the radio's and registers nothing: one control for
+        // the chain, the pair's.
+        byte[] chain = { 0xA0, 0, 0, 0, 0, 1 };
+        using var slowMaster = new ManualResetEventSlim(false);
+        var logger = new FakeLogger();
+        var enumerator = new FakeEnumerator(FlexReceiver(0x0104), WirelessTransmitter(), WirelessReceiver()) {
+            ConfigureTransport = (info, transport) => {
+                if (info.VendorId == 0x0416) {
+                    SeedWirelessDongles(info, transport);
+                }
+
+                FlexChain(chain)(info, transport);
+                if (info.ProductId == 0x8040) {
+                    transport.BlockReadsUntil = slowMaster;
+                }
+            },
+        };
+        var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore());
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, runtime);
+        bool masterHeld = false;
+        bool identifiedWhileHeld = false;
+        bool settledWhileHeld = true;
+        var release = new Thread(() => {
+            // The master is held: the receiver has been asked its status by now, but has not
+            // decided whose its chain is.
+            masterHeld = SpinWait.SpinUntil(() => enumerator.OpenedPaths.Contains("fake/wireless/tx") && enumerator.TransportFor("fake/wireless/tx").InterruptReadCount >= 1, TimeSpan.FromSeconds(5));
+            identifiedWhileHeld = SpinWait.SpinUntil(() => enumerator.OpenedPaths.Contains("fake/flex") && enumerator.TransportFor("fake/flex").InterruptReadCount >= 1, TimeSpan.FromSeconds(5));
+            Thread.Sleep(100);
+            settledWhileHeld = logger.Messages.Any(m => m.Contains("left to the radio"));
+            slowMaster.Set();
+        });
+        release.Start();
+
+        plugin.Initialize();
+        var container = new FakeSensorsContainer();
+        plugin.Load(container);
+        release.Join();
+
+        Assert.True(masterHeld);
+        Assert.True(identifiedWhileHeld);
+        Assert.False(settledWhileHeld);
+        Assert.Equal("LianLi/wa00000000001/ctl", Assert.Single(container.ControlSensors).Id);
+        Assert.Contains("Wireless", Assert.Single(container.ControlSensors).Name, StringComparison.Ordinal);
+        Assert.Equal(2, container.FanSensors.Count);
+        Assert.Contains(logger.Messages, m => m.Contains("kind=FlexReceiver address=a00000000001 fans=2 path=fake/flex"));
+        Assert.Contains(logger.Messages, m => m.Contains("F0:a00000000001 is bound to the L-Wireless controller's master, which drives it; left to the radio"));
+        Assert.Empty(runtime.Recall("fake/flex")!.Ids);
+
+        plugin.Close();
+        Assert.DoesNotContain(enumerator.TransportFor("fake/flex").Writes, w => w[0] == 0x13);
+    }
+
+    // The pair's build throws (its transmitter will not open): the receiver's wait ends with it,
+    // and the chain, which no radio has, is the receiver's.
+    [Fact]
+    public void AFlexReceiver_StillRegistersItsChain_WhenThePairsBuildFails() {
+        byte[] chain = { 0xA0, 0, 0, 0, 0, 1 };
+        var logger = new FakeLogger();
+        var enumerator = new FakeEnumerator(FlexReceiver(), WirelessTransmitter(), WirelessReceiver()) {
+            FailOpenWhen = info => info.ProductId == 0x8040,
+            ConfigureTransport = (info, transport) => FlexChain(chain)(info, transport),
+        };
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+
+        plugin.Initialize();
+        var container = new FakeSensorsContainer();
+        plugin.Load(container);
+
+        Assert.Equal("LianLi/wa00000000001/ctl", Assert.Single(container.ControlSensors).Id);
+        Assert.Contains("USB", Assert.Single(container.ControlSensors).Name, StringComparison.Ordinal);
+        Assert.Contains(logger.Messages, m => m.Contains("open failed for fake/wireless/tx"));
+        plugin.Close();
+    }
+
+    [Fact]
+    public void AFlexReceiverThatDoesNotAnswer_IsSkipped_AndItsTransportClosed() {
+        var logger = new FakeLogger();
+        var enumerator = new FakeEnumerator(FlexReceiver());
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+
+        plugin.Initialize();
+        var container = new FakeSensorsContainer();
+        plugin.Load(container);
+
+        Assert.Empty(container.ControlSensors);
+        Assert.Contains(logger.Messages, m => m.Contains("open failed for fake/flex: the receiver answered the status request with 00, not its status"));
+        Assert.True(Assert.Single(enumerator.Opened).IsDisposed);
     }
 
     [Fact]

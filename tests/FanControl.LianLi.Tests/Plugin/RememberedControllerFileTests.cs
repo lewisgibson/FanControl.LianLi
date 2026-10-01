@@ -237,6 +237,21 @@ public sealed class RememberedControllerFileTests : IDisposable {
     }
 
     [Fact]
+    public void AFlexReceiverEntry_ReadsBack_WithItsAddressKeyedSensors() {
+        WriteText("{\"version\":1,\"controllers\":[{\"key\":\"usb/flex\",\"lastSeen\":\"2026-09-01T12:00:00Z\",\"kind\":\"FlexReceiver\",\"index\":2,\"devices\":[{\"vendorId\":17320,\"productId\":257,\"path\":\"usb/flex\"}],"
+            + "\"channels\":[{\"controlId\":\"LianLi/wa1b2c3d4e5f6/ctl\",\"controlName\":\"TL FLEX\",\"rpmId\":\"LianLi/wa1b2c3d4e5f6/f0/fan\",\"rpmName\":\"Fan 1\",\"lastSeen\":\"2026-09-01T12:00:00Z\"}],"
+            + "\"fanSpeeds\":[{\"id\":\"LianLi/wa1b2c3d4e5f6/f0/fan\",\"name\":\"Fan 1\",\"lastSeen\":\"2026-09-01T12:00:00Z\"},{\"id\":\"LianLi/wa1b2c3d4e5f6/f1/fan\",\"name\":\"Fan 2\",\"lastSeen\":\"2026-09-01T12:00:00Z\"}]}]}");
+
+        StoredController entry = Assert.Single(Read());
+
+        Assert.Equal(DeviceKind.FlexReceiver, entry.Controller.Plan.Kind);
+        Assert.Equal(0x43A8, entry.Controller.Plan.Devices[0].VendorId);
+        Assert.Equal(0x0101, entry.Controller.Plan.Devices[0].ProductId);
+        Assert.Equal("LianLi/wa1b2c3d4e5f6/ctl", Assert.Single(entry.Controller.Channels).ControlId);
+        Assert.Equal(2, entry.Controller.FanSpeeds.Count);
+    }
+
+    [Fact]
     public void Machine_IsBesideThePluginLog()
         => Assert.Equal(
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FanControl.LianLi", "remembered-controllers.json"),

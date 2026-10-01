@@ -28,7 +28,10 @@ public sealed class WirelessDeviceRecordTests {
             fanTypes: fanTypes ?? new byte[] { 20, 20, 20, 0 },
             rpm: rpm ?? new[] { 900, 910, 920, 0 },
             pwm: pwm ?? new byte[] { 50, 50, 50, 0 },
-            commandSequence: 7);
+            commandSequence: 7,
+            rightAttached: false,
+            themeSwitches: 0,
+            lightingFollowsMotherboard: false);
 
     [Fact]
     public void Constructor_CopiesEveryArray() {
@@ -54,12 +57,22 @@ public sealed class WirelessDeviceRecordTests {
         Assert.Equal(1, record.ReceiverType);
         Assert.Equal(1234, record.ClockMilliseconds);
         Assert.Equal(7, record.CommandSequence);
+        Assert.False(record.RightAttached);
+    }
+
+    [Fact]
+    public void RightAttached_IsKept() {
+        WirelessDeviceRecord record = new WirelessDeviceRecord(Mac, Master, 8, 1, 0, 0, 2, Effect, new byte[4], new int[4], new byte[4], 0, true, 0b0110, true);
+
+        Assert.True(record.RightAttached);
+        Assert.Equal(0b0110, record.ThemeSwitches);
+        Assert.True(record.LightingFollowsMotherboard);
     }
 
     [Fact]
     public void Constructor_RejectsMissingOrMisSizedValues() {
         Assert.Throws<ArgumentNullException>(
-            () => new WirelessDeviceRecord(null!, Master, 0, 0, 0, 0, 0, Effect, new byte[4], new int[4], new byte[4], 0));
+            () => new WirelessDeviceRecord(null!, Master, 0, 0, 0, 0, 0, Effect, new byte[4], new int[4], new byte[4], 0, false, 0, false));
         Assert.Throws<ArgumentException>(() => Record(mac: new byte[5]));
         Assert.Throws<ArgumentException>(() => Record(master: new byte[7]));
         Assert.Throws<ArgumentException>(() => Record(effect: new byte[3]));
@@ -67,7 +80,7 @@ public sealed class WirelessDeviceRecordTests {
         Assert.Throws<ArgumentException>(() => Record(pwm: new byte[5]));
         Assert.Throws<ArgumentException>(() => Record(rpm: new int[3]));
         Assert.Throws<ArgumentNullException>(
-            () => new WirelessDeviceRecord(Mac, Master, 0, 0, 0, 0, 0, Effect, new byte[4], null!, new byte[4], 0));
+            () => new WirelessDeviceRecord(Mac, Master, 0, 0, 0, 0, 0, Effect, new byte[4], null!, new byte[4], 0, false, 0, false));
         Assert.Throws<ArgumentOutOfRangeException>(() => Record(fanCount: 5));
         Assert.Throws<ArgumentOutOfRangeException>(() => Record(fanCount: -1));
     }
@@ -126,11 +139,13 @@ public sealed class WirelessDeviceRecordTests {
         Assert.Throws<ArgumentNullException>(() => WirelessDeviceRecord.FormatMac(null!));
     }
 
-    // RefreshList under lock_list keeps dev_type, and fans_type except on types 10, 11, 65 and 66.
+    // RefreshList under lock_list keeps dev_type, and fans_type except on types 10, 11, 65 and 66;
+    // the fan count byte, and so which side the end cap is on, is always read.
     [Fact]
     public void WithLockedIdentity_KeepsTheSavedTypeAndFanTypes_AndTakesEverythingElse() {
         WirelessDeviceRecord saved = Record(deviceType: 0, fanTypes: new byte[] { 36, 36, 0, 0 });
-        WirelessDeviceRecord heard = Record(deviceType: 3, fanTypes: new byte[] { 20, 20, 20, 0 }, rpm: new[] { 1, 2, 3, 4 });
+        WirelessDeviceRecord heard = new WirelessDeviceRecord(
+            Mac, Master, 8, 1, 1234, 3, 3, Effect, new byte[] { 20, 20, 20, 0 }, new[] { 1, 2, 3, 4 }, new byte[] { 50, 50, 50, 0 }, 7, true, 0b0111, true);
 
         WirelessDeviceRecord locked = heard.WithLockedIdentity(saved);
 
@@ -138,6 +153,9 @@ public sealed class WirelessDeviceRecordTests {
         Assert.Equal(new byte[] { 36, 36, 0, 0 }, locked.FanTypes);
         Assert.Equal(new[] { 1, 2, 3, 4 }, locked.Rpm);
         Assert.Equal(7, locked.CommandSequence);
+        Assert.True(locked.RightAttached);
+        Assert.Equal(0b0111, locked.ThemeSwitches);
+        Assert.True(locked.LightingFollowsMotherboard);
         Assert.Throws<ArgumentNullException>(() => heard.WithLockedIdentity(null!));
     }
 }

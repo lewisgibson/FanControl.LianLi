@@ -61,6 +61,12 @@ internal sealed class RememberedController {
         }
 
         _seenUtc = seen;
+
+        // A controller that keeps sensors it no longer drives says which it drives; every other
+        // controller drives everything it reports.
+        DrivenIds = controller is IDrivenSensorSource driven
+            ? new HashSet<string>(driven.DrivenSensorIds, StringComparer.Ordinal)
+            : new HashSet<string>(seen.Keys, StringComparer.Ordinal);
     }
 
     /// <summary>
@@ -91,9 +97,18 @@ internal sealed class RememberedController {
         }
 
         _seenUtc = seen;
+        DrivenIds = new HashSet<string>(seen.Keys, StringComparer.Ordinal);
     }
 
     private readonly Dictionary<string, DateTime> _seenUtc;
+
+    /// <summary>
+    /// The ids of the sensors whose device the controller was driving when it was remembered: what
+    /// is added to its memory, and what it may claim from another remembered controller with the
+    /// same ids. A sensor it merely retained (<see cref="IDrivenSensorSource"/>) is neither; a
+    /// controller made from its saved parts counts every sensor as driven.
+    /// </summary>
+    public IReadOnlyCollection<string> DrivenIds { get; }
 
     /// <summary>The plan the controller was built from.</summary>
     public ControllerPlan Plan { get; }
@@ -160,6 +175,35 @@ internal sealed class RememberedController {
             Union(Kept(earlier.Channels, c => c.ControlId, seen), Channels, c => c.ControlId),
             Union(Kept(earlier.FanSpeeds, f => f.Id, seen), FanSpeeds, f => f.Id),
             Union(Kept(earlier.Temperatures, t => t.Id, seen), Temperatures, t => t.Id),
+            seen);
+    }
+
+    /// <summary>Every sensor id this controller registers: its controls, fan speeds and temperatures.</summary>
+    public IEnumerable<string> Ids => SensorIds();
+
+    /// <summary>
+    /// This controller without the sensors in <paramref name="ids"/>: another controller drives
+    /// them now (a FLEX chain taken by the wireless pair from its USB receiver, or the other way
+    /// round). The rest keep their last-seen times.
+    /// </summary>
+    public RememberedController Without(ISet<string> ids) {
+        if (ids is null) {
+            throw new ArgumentNullException(nameof(ids));
+        }
+
+        var seen = new Dictionary<string, DateTime>(StringComparer.Ordinal);
+        foreach (KeyValuePair<string, DateTime> sensor in _seenUtc) {
+            if (!ids.Contains(sensor.Key)) {
+                seen[sensor.Key] = sensor.Value;
+            }
+        }
+
+        return new RememberedController(
+            Plan,
+            Index,
+            Kept(Channels, c => c.ControlId, seen),
+            Kept(FanSpeeds, f => f.Id, seen),
+            Kept(Temperatures, t => t.Id, seen),
             seen);
     }
 

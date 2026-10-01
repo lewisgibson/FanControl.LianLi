@@ -10,7 +10,7 @@ namespace FanControl.LianLi.Transport;
 /// <summary>
 /// Finds and opens every device the plugin drives, whichever kind it is. HID controllers come from
 /// <see cref="HidDeviceLocator"/>, matched on the vendor and product ids each interface reports; the
-/// L-Wireless dongles and the HydroShift II OLED Curve's pump MCU are WinUSB
+/// L-Wireless dongles, the HydroShift II OLED Curve's pump MCU and the FLEX receivers are WinUSB
 /// devices with no HID interface at all, and come from <see cref="WinUsbDeviceLocator"/>. An open
 /// routes to the matching transport. Both the scan and an open run under a bounded wait, because
 /// both run on the host's thread during Initialize and both open a device. Neither goes through any

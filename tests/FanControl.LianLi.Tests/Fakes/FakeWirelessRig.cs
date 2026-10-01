@@ -38,6 +38,9 @@ internal sealed class FakeWirelessRig {
     /// <summary>When false the receiver answers with something that is not a list.</summary>
     public bool ReceiverAnswers { get; set; } = true;
 
+    /// <summary>When true the receiver answers nothing at all: an all-zero reply, as a dongle that never replies within the pipe timeout gives.</summary>
+    public bool ReceiverSilent { get; set; }
+
     public byte[]? MasterReply() {
         if (!MasterAnswers) {
             return null;
@@ -56,6 +59,10 @@ internal sealed class FakeWirelessRig {
     }
 
     public byte[]? ListReply(int pages) {
+        if (ReceiverSilent) {
+            return null;
+        }
+
         if (!ReceiverAnswers) {
             return new byte[] { 0x42 };
         }

@@ -12,8 +12,9 @@ namespace FanControl.LianLi.Devices;
 /// map to a pure <see cref="IFanProtocol"/> via <see cref="ProtocolFor"/>; the 0x0416
 /// command-packet controllers (Uni Fan TL, Galahad II Trinity) have no <c>IFanProtocol</c>
 /// and are identified by <see cref="Classify"/> instead, as are the L-Wireless dongles in
-/// <see cref="WirelessProductIds"/> and the HydroShift II OLED Curve's pump MCU in
-/// <see cref="HydroShiftCurveProductIds"/>. The Strimer Plus (0xA200) is a
+/// <see cref="WirelessProductIds"/>, the HydroShift II OLED Curve's pump MCU in
+/// <see cref="HydroShiftCurveProductIds"/> and the FLEX receivers in
+/// <see cref="FlexReceiverProductIds"/>. The Strimer Plus (0xA200) is a
 /// lighting-only device listed in <see cref="LightingProductIds"/>. Unknown ids classify as
 /// <see cref="DeviceKind.Unknown"/> and produce no controller and no writes.
 /// </summary>
@@ -62,7 +63,7 @@ internal sealed class DeviceCatalog {
             { 0xA106, sl },         // Uni SL (Redragon OEM variant) - L-Connect drives it as an SL fan
         };
 
-        VendorIds = new[] { UniVendorId, CommandPacketVendorId, WirelessProtocol.AlternateVendorId };
+        VendorIds = new[] { UniVendorId, CommandPacketVendorId, WirelessProtocol.AlternateVendorId, FlexReceiverProtocol.VendorId };
         ProductIds = _byProductId.Keys.ToArray();
 
         // The 0x0416 fan/pump controllers. They share the transport and enumeration with the Uni
@@ -84,9 +85,23 @@ internal sealed class DeviceCatalog {
         // The HydroShift II OLED Curve's pump rides on its lighting MCU, a WinUSB device like the
         // dongles; its screen and display-mode devices are not listed, as the plugin leaves them alone.
         HydroShiftCurveProductIds = new[] { HydroShiftCurveProtocol.ProductId };
+
+        // The USB receivers of the FLEX chains L-Connect drives over USB, and the P28 V2's:
+        // WinUSB devices like the dongles. The plain SL-INF FLEX, SL FLEX and CL FLEX receivers are
+        // not listed, since L-Connect gives them no wired fan control, and the LCD variants' screens
+        // (0x1CBE:0xA018 and 0xA019) are separate devices the plugin leaves alone.
+        FlexReceiverProductIds = new[] {
+            FlexReceiverProtocol.TlFlexProductId,
+            FlexReceiverProtocol.TlFlexLcdProductId,
+            FlexReceiverProtocol.SlInfinityFlexLcdProductId,
+            FlexReceiverProtocol.P28V2ProductId,
+        };
     }
 
-    /// <summary>The USB vendor ids the plugin scans: the Uni family (0x0CF2), the 0x0416 family, and the wireless dongles' alternate vendor.</summary>
+    /// <summary>
+    /// The USB vendor ids the plugin scans: the Uni family (0x0CF2), the 0x0416 family, the
+    /// wireless dongles' alternate vendor and the FLEX receivers' (0x43A8).
+    /// </summary>
     public IReadOnlyList<int> VendorIds { get; }
 
     /// <summary>Every Uni fan product id backed by an <see cref="IFanProtocol"/>.</summary>
@@ -106,6 +121,12 @@ internal sealed class DeviceCatalog {
 
     /// <summary>The HydroShift II OLED Curve's pump MCU product id, a 0x0416 WinUSB device built as a pump controller.</summary>
     public IReadOnlyList<int> HydroShiftCurveProductIds { get; }
+
+    /// <summary>
+    /// The 0x43A8 USB receiver product ids the plugin drives (TL FLEX, TL FLEX LCD, SL-INF FLEX
+    /// LCD, P28 V2), WinUSB devices built as one controller each.
+    /// </summary>
+    public IReadOnlyList<int> FlexReceiverProductIds { get; }
 
     /// <summary>
     /// Classify a located device by its vendor and product id so the plugin knows what to build.
@@ -133,6 +154,10 @@ internal sealed class DeviceCatalog {
             if (HydroShiftCurveProtocol.IsPump(vendorId, productId)) {
                 return DeviceKind.HydroShiftCurve;
             }
+        }
+
+        if (FlexReceiverProtocol.IsReceiver(vendorId, productId)) {
+            return DeviceKind.FlexReceiver;
         }
 
         if (WirelessProtocol.IsTransmitter(vendorId, productId)) {

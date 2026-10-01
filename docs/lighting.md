@@ -136,7 +136,7 @@ The lighting code is gated behind the `ENABLE_LIGHTING` compile symbol (the stan
 
 The wireless range works the same way in spirit and differently in every detail. L-Connect does not send a wireless device an effect by name: it renders the effect to frames on the PC, compresses them, and streams the bytes over the radio. That rendering is tens of thousands of lines and a native compressor, and reimplementing it is neither possible nor necessary, because L-Connect saves the finished result to disk - so the Lighting build reads the saved effect and streams it back exactly as L-Connect would, including asking the devices to commit it to flash and keeping the once-a-second clock pulse that holds an effect in step across several devices.
 
-The consequence is the same as for the wired controllers, only more so: the plugin replays a look, it cannot compose one. Change it in L-Connect, then close L-Connect again. The wire formats are in [`wireless.md`](wireless.md).
+The consequence is the same as for the wired controllers, only more so: the plugin replays a look, it cannot compose one. Change it in L-Connect, then close L-Connect again. The wire formats are in [`wireless.md`](wireless.md). The per-device "sync to motherboard" switch exists for the wireless devices too (2.1.11 had none), saved under the device's RF address; the Lighting build reads it and hands such a device's lighting to the motherboard with the RF command L-Connect uses, and still streams it its saved effect whenever it does not report running it, as L-Connect's `SyncRgbData` does whatever the switch says (see [`wireless.md`](wireless.md), "Lighting").
 
 ## Saved numbers that L-Connect renumbers
 

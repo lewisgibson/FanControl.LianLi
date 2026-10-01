@@ -63,6 +63,14 @@ internal sealed class PluginRuntime {
     private bool _restored;
     private bool _restoring;
 
+    // The sensor ids the running instance's Load registered, each under the key of the controller
+    // it was registered on, or null before that instance has loaded. Kept under the memory's lock
+    // so that a claim (Remember) and Load's publication are ordered: a claim remembered before the
+    // publication is seen by Load's check of the memory after it, and one remembered after sees
+    // the publication, so one side or the other always asks for the refresh a hand-over or a late
+    // sensor needs.
+    private Dictionary<string, string>? _registered;
+
     private object? _owner;
     private KeepAliveWorker? _worker;
     private string? _refreshReason;
@@ -296,10 +304,41 @@ internal sealed class PluginRuntime {
             previous = _worker;
             _worker = worker;
             _owner = owner;
+
+            // The instance starting the worker has not loaded yet: what the last one registered is
+            // FanControl's until this one's Load replaces it, and a claim made before then is that
+            // Load's to put right.
+            _registered = null;
         }
 
         previous?.Dispose();
         worker.Start();
+    }
+
+    /// <summary>
+    /// Publish what the running instance's Load registered: each sensor id under the key of the
+    /// controller it was registered on. Ordered with every claim
+    /// (<see cref="Remember(string, RememberedController)"/>) under the one lock: a claim remembered
+    /// before this is in the memory Load reads after it, and one remembered after is handed this
+    /// registration to compare against.
+    /// </summary>
+    public void Publish(Dictionary<string, string> registered) {
+        if (registered is null) {
+            throw new ArgumentNullException(nameof(registered));
+        }
+
+        lock (_sync) {
+            _registered = registered;
+        }
+    }
+
+    /// <summary>What the running instance's Load registered (see <see cref="Publish"/>), or null before it has loaded.</summary>
+    public Dictionary<string, string>? Registered {
+        get {
+            lock (_sync) {
+                return _registered;
+            }
+        }
     }
 
     /// <summary>Whether <paramref name="owner"/> started the worker that is running now.</summary>
@@ -321,10 +360,24 @@ internal sealed class PluginRuntime {
     /// <summary>
     /// Remember what was built for <paramref name="key"/>, merged with what was remembered for it
     /// before (<see cref="RememberedController.MergedWith"/>): a sensor the build did not report is
-    /// kept until no build has reported it for <see cref="ForgetAfter"/>. Returns what is now
-    /// remembered, which is what the controller's sensors are registered from.
+    /// kept until no build has reported it for <see cref="ForgetAfter"/>. A sensor id belongs to one
+    /// controller: a FLEX chain keeps the same ids on its USB receiver and on the dongles, and the
+    /// one that drives it now is the one to stand in with it, never both. So only the sensors
+    /// <paramref name="controller"/> drives (<see cref="RememberedController.DrivenIds"/>) are added
+    /// to its memory, and they are taken from any other remembered controller that has them; a
+    /// sensor it reports but only retains stays where it is remembered, so a chain nobody drives
+    /// keeps its last driver's binding. Returns what is now remembered, which is what the
+    /// controller's sensors are registered from.
     /// </summary>
-    public RememberedController Remember(string key, RememberedController controller) {
+    public RememberedController Remember(string key, RememberedController controller)
+        => Remember(key, controller, out _);
+
+    /// <summary>
+    /// <see cref="Remember(string, RememberedController)"/>, also giving back the ids
+    /// <paramref name="claimed"/> from other remembered controllers: whoever registered those
+    /// sensors under the other controller has to refresh.
+    /// </summary>
+    public RememberedController Remember(string key, RememberedController controller, out IReadOnlyCollection<string> claimed) {
         if (key is null) {
             throw new ArgumentNullException(nameof(key));
         }
@@ -335,9 +388,11 @@ internal sealed class PluginRuntime {
 
         lock (_sync) {
             DateTime now = _clock.UtcNow;
+            var retained = new HashSet<string>(controller.Ids.Where(id => !controller.DrivenIds.Contains(id)), StringComparer.Ordinal);
+            RememberedController driven = retained.Count == 0 ? controller : controller.Without(retained);
             RememberedController merged = _remembered.TryGetValue(key, out RememberedController? earlier)
-                ? controller.MergedWith(earlier, now, ForgetAfter)
-                : controller;
+                ? driven.MergedWith(earlier, now, ForgetAfter)
+                : driven;
             // New until it first has a sensor: one a later prune empties is not new again.
             if (earlier is null && !HasSensors(merged)) {
                 _ = _firstRememberedHere.Add(key);
@@ -347,7 +402,67 @@ internal sealed class PluginRuntime {
 
             _remembered[key] = merged;
             _lastSeen[key] = now;
+            claimed = Claim(key, controller.DrivenIds);
             return merged;
+        }
+    }
+
+    // Caller holds _sync. Take the sensors the controller at key drives from every other
+    // remembered controller that has them; returns the ones taken.
+    private List<string> Claim(string key, IReadOnlyCollection<string> driven) {
+        var taken = new List<string>();
+        if (driven.Count == 0) {
+            return taken;
+        }
+
+        var claimed = new HashSet<string>(driven, StringComparer.Ordinal);
+        foreach (KeyValuePair<string, RememberedController> entry in _remembered.ToList()) {
+            if (string.Equals(entry.Key, key, StringComparison.Ordinal)) {
+                continue;
+            }
+
+            List<string> theirs = entry.Value.Ids.Where(claimed.Contains).ToList();
+            if (theirs.Count > 0) {
+                _remembered[entry.Key] = entry.Value.Without(claimed);
+                taken.AddRange(theirs);
+            }
+        }
+
+        return taken;
+    }
+
+    /// <summary>
+    /// Every remembered sensor id and the key of the controller it is remembered under, as one
+    /// snapshot: what a registration pass decides whose each id is from, so a hand-over the worker
+    /// makes while the pass runs cannot leave an id registered under both controllers or neither.
+    /// </summary>
+    public Dictionary<string, string> Owners() {
+        var owners = new Dictionary<string, string>(StringComparer.Ordinal);
+        lock (_sync) {
+            foreach (KeyValuePair<string, RememberedController> entry in _remembered) {
+                foreach (string id in entry.Value.Ids) {
+                    owners[id] = entry.Key;
+                }
+            }
+        }
+
+        return owners;
+    }
+
+    /// <summary>The key of the remembered controller whose sensor <paramref name="id"/> is, or null when none remembers it.</summary>
+    public string? OwnerOf(string id) {
+        if (id is null) {
+            throw new ArgumentNullException(nameof(id));
+        }
+
+        lock (_sync) {
+            foreach (KeyValuePair<string, RememberedController> entry in _remembered) {
+                if (entry.Value.Ids.Contains(id)) {
+                    return entry.Key;
+                }
+            }
+
+            return null;
         }
     }
 
@@ -381,13 +496,42 @@ internal sealed class PluginRuntime {
         => controller.Channels.Count > 0 || controller.FanSpeeds.Count > 0 || controller.Temperatures.Count > 0;
 
     /// <summary>
-    /// <see cref="Remember"/>, but only while the numbering is still <paramref name="epoch"/>, the
-    /// one the build ran under; null, remembering nothing, once the saved controllers have been read
-    /// since. Checked and remembered under one lock, so a read cannot come between the two.
+    /// <see cref="Remember(string, RememberedController)"/>, but only while the numbering is still
+    /// <paramref name="epoch"/>, the one the build ran under; null, remembering nothing, once the
+    /// saved controllers have been read since. Checked and remembered under one lock, so a read
+    /// cannot come between the two.
     /// </summary>
-    public RememberedController? RememberUnder(int epoch, string key, RememberedController controller) {
+    public RememberedController? RememberUnder(int epoch, string key, RememberedController controller)
+        => RememberUnder(epoch, key, controller, out _, out _);
+
+    /// <summary>
+    /// <see cref="RememberUnder(int, string, RememberedController)"/>, also giving back the ids
+    /// <paramref name="claimed"/> from other controllers (none when nothing was remembered) and
+    /// what the running instance's Load had <paramref name="registered"/> (<see cref="Registered"/>)
+    /// as it stood when the controller was remembered, so the caller compares its claim against a
+    /// registration that either preceded the claim or will see it.
+    /// </summary>
+    public RememberedController? RememberUnder(
+        int epoch, string key, RememberedController controller, out IReadOnlyCollection<string> claimed, out Dictionary<string, string>? registered) {
         lock (_sync) {
-            return epoch == _numberingEpoch ? Remember(key, controller) : null;
+            registered = _registered;
+            if (epoch != _numberingEpoch) {
+                claimed = Array.Empty<string>();
+                return null;
+            }
+
+            return Remember(key, controller, out claimed);
+        }
+    }
+
+    /// <summary>Whether a build of the controller at <paramref name="key"/> is running, whoever started it.</summary>
+    public bool IsBuilding(string key) {
+        if (key is null) {
+            throw new ArgumentNullException(nameof(key));
+        }
+
+        lock (_sync) {
+            return _building.ContainsKey(key);
         }
     }
 
@@ -535,6 +679,25 @@ internal sealed class PluginRuntime {
     public bool TryBeginBuildUnder(int epoch, string key, int index) {
         lock (_sync) {
             return epoch == _numberingEpoch && TryBeginBuild(key, index);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="TryBeginBuildUnder"/> for a stand-in's rebuild, which runs on a thread of its own
+    /// through the instance that registered the stand-in: only while that instance still owns the
+    /// worker (<see cref="IsOwnedBy"/>). One FanControl has closed, or a later instance has
+    /// succeeded, opens nothing: its rebuild would hold the device against the next instance's scan
+    /// for the length of an open nobody would adopt, and that scan would stand in for the device
+    /// instead of opening it. Checked and claimed under one lock, so a rebuild thread started
+    /// before the close and reaching this after it is refused whatever the timing.
+    /// </summary>
+    public bool TryBeginRebuild(object owner, int epoch, string key, int index) {
+        if (owner is null) {
+            throw new ArgumentNullException(nameof(owner));
+        }
+
+        lock (_sync) {
+            return IsOwnedBy(owner) && TryBeginBuildUnder(epoch, key, index);
         }
     }
 

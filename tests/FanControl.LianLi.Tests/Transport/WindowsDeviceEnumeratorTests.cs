@@ -169,6 +169,20 @@ public class WindowsDeviceEnumeratorTests {
     }
 
     [Fact]
+    public void Open_AFlexReceiver_OpensAWinUsbTransport_NotAHidOne() {
+        const string ReceiverPath = @"\\?\usb#vid_43a8&pid_0105#5&3&0&4#{guid}";
+
+        using IDeviceTransport transport = Enumerator().Open(new LocatedDevice(0x43A8, 0x0105, ReceiverPath, null));
+
+        Assert.IsType<WinUsbTransport>(Assert.IsType<ClaimedTransport>(transport).Inner);
+        // Under a receiver's pipe policy (WinUsbLed.SendAndRead's 2000 ms write, Led_Read's 100 ms).
+        Assert.Contains("SetPipeTransferTimeout interface0 0x01 2000", _winUsb.Calls);
+        Assert.Contains("SetPipeTransferTimeout interface0 0x81 100", _winUsb.Calls);
+        Assert.Equal("OpenDevice " + ReceiverPath, _winUsb.Calls[0]);
+        Assert.Empty(_hid.Calls);
+    }
+
+    [Fact]
     public void Open_ARememberedHidDevice_ReadsItsCapabilitiesFromItsPath_ThenOpens() {
         _hid.Capabilities[UniPath] = new HidCapabilities(0xFF72, 65, 353, 65);
 

@@ -31,14 +31,18 @@ public sealed class LConnectWirelessConfigurationTests : IDisposable {
 
     private readonly string _root;
     private readonly string _wireless;
+    private readonly string _device;
     private readonly string _pumpFile;
+    private readonly string _screenFile;
     private readonly FakeLogger _log = new FakeLogger();
 
     public LConnectWirelessConfigurationTests() {
         _root = Path.Combine(Path.GetTempPath(), "lianli-wireless-config-" + Guid.NewGuid().ToString("N"));
         _wireless = Path.Combine(_root, "slv3", "config");
         Directory.CreateDirectory(_wireless);
+        _device = Path.Combine(_root, "device");
         _pumpFile = Path.Combine(_root, "pump.0");
+        _screenFile = Path.Combine(_root, "wirelesslcd.0");
     }
 
     public void Dispose() {
@@ -47,16 +51,20 @@ public sealed class LConnectWirelessConfigurationTests : IDisposable {
         }
     }
 
-    private void WritePumpSettings(string json) => WriteGzip(Encoding.UTF8.GetBytes(json));
+    private void WritePumpSettings(string json) => WriteGzip(_pumpFile, Encoding.UTF8.GetBytes(json));
 
-    private void WriteGzip(byte[] bytes) {
-        using FileStream file = File.Create(_pumpFile);
+    private void WriteScreenSettings(string json) => WriteGzip(_screenFile, Encoding.UTF8.GetBytes(json));
+
+    private void WriteGzip(byte[] bytes) => WriteGzip(_pumpFile, bytes);
+
+    private static void WriteGzip(string path, byte[] bytes) {
+        using FileStream file = File.Create(path);
         using var gzip = new GZipStream(file, CompressionMode.Compress);
         gzip.Write(bytes, 0, bytes.Length);
     }
 
     private LConnectWirelessConfiguration Configuration(bool readsEffects = true)
-        => new LConnectWirelessConfiguration(_wireless, _pumpFile, readsEffects, _log);
+        => new LConnectWirelessConfiguration(_wireless, _device, _pumpFile, _screenFile, readsEffects, _log);
 
     [Fact]
     public void ParseEffect_ReadsEveryMemberOfASavedEffect() {
@@ -383,12 +391,19 @@ public sealed class LConnectWirelessConfigurationTests : IDisposable {
     [Fact]
     public void NullArgumentsThrow() {
         LConnectWirelessConfiguration configuration = Configuration();
-        Assert.Throws<ArgumentNullException>(() => new LConnectWirelessConfiguration(null!, _pumpFile, true, _log));
-        Assert.Throws<ArgumentNullException>(() => new LConnectWirelessConfiguration(_wireless, null!, true, _log));
-        Assert.Throws<ArgumentNullException>(() => new LConnectWirelessConfiguration(_wireless, _pumpFile, true, null!));
+        Assert.Throws<ArgumentNullException>(() => new LConnectWirelessConfiguration(null!, _device, _pumpFile, _screenFile, true, _log));
+        Assert.Throws<ArgumentNullException>(() => new LConnectWirelessConfiguration(_wireless, null!, _pumpFile, _screenFile, true, _log));
+        Assert.Throws<ArgumentNullException>(() => new LConnectWirelessConfiguration(_wireless, _device, null!, _screenFile, true, _log));
+        Assert.Throws<ArgumentNullException>(() => new LConnectWirelessConfiguration(_wireless, _device, _pumpFile, null!, true, _log));
+        Assert.Throws<ArgumentNullException>(() => new LConnectWirelessConfiguration(_wireless, _device, _pumpFile, _screenFile, true, null!));
+        Assert.Throws<ArgumentNullException>(() => configuration.FindMotherboardArgbSync(null!));
+        Assert.Throws<ArgumentNullException>(() => LConnectWirelessConfiguration.ParseMotherboardArgbSync(null!));
         Assert.Throws<ArgumentNullException>(() => configuration.FindChannel(null!));
         Assert.Throws<ArgumentNullException>(() => configuration.FindEffect(null!));
         Assert.Throws<ArgumentNullException>(() => configuration.FindPumpPresentation(null!));
+        Assert.Throws<ArgumentNullException>(() => configuration.FindFanScreenPresentation(null!));
+        Assert.Throws<ArgumentNullException>(() => LConnectWirelessConfiguration.ParseFanScreenSettings(null!, new List<string>()));
+        Assert.Throws<ArgumentNullException>(() => LConnectWirelessConfiguration.ParseFanScreenSettings("{}", null!));
         Assert.Throws<ArgumentNullException>(() => LConnectWirelessConfiguration.ParseEffect(null!));
         Assert.Throws<ArgumentNullException>(() => LConnectWirelessConfiguration.ParsePumpSettings(null!, new List<string>()));
         Assert.Throws<ArgumentNullException>(() => LConnectWirelessConfiguration.ParsePumpSettings("{}", null!));
@@ -427,11 +442,33 @@ public sealed class LConnectWirelessConfigurationTests : IDisposable {
         Assert.Equal(10, locked[1].Record.DeviceType);
     }
 
+    // RFController.LockDevice writes with ReferenceHandler.Preserve: the root is an object whose
+    // $values is the list, and every object carries an $id; byte arrays stay base64.
+    [Fact]
+    public void ParseLockedDevices_ReadsTheReferencePreservingShape() {
+        string json = "{\"$id\":\"1\",\"$values\":[" + LockedEntry("oAAAAAAC", MasterBase64).Replace("{\"changingEffect\"", "{\"$id\":\"2\",\"changingEffect\"")
+            + "," + LockedEntry("oAAAAAAB", MasterBase64).Replace("{\"changingEffect\"", "{\"$id\":\"3\",\"isINFRightAttach\":true,\"changingEffect\"") + "]}";
+
+        IReadOnlyList<WirelessLockedDevice> locked = LConnectWirelessConfiguration.ParseLockedDevices(json, "aabbccddeeff")!;
+
+        Assert.Equal(new[] { "a00000000002", "a00000000001" }, locked.Select(d => d.Record.MacText));
+        Assert.Equal(4, locked[0].TargetReceiverType);
+        Assert.False(locked[0].Record.RightAttached);
+        Assert.True(locked[1].Record.RightAttached);
+    }
+
+    [Theory]
+    [InlineData("{\"$id\":\"1\",\"$values\":{}}", "\"$values\" is not a list")]
+    [InlineData("{\"$id\":\"1\"}", "is not a list")]
+    public void ParseLockedDevices_AnObjectRootWithoutAList_Throws(string json, string reason)
+        => Assert.Contains(reason, Assert.Throws<FormatException>(() => LConnectWirelessConfiguration.ParseLockedDevices(json, "aabbccddeeff")).Message);
+
     // CheckLockAndInitData: nothing, an empty list, or a list saved for another master is no lock.
     [Theory]
     [InlineData("")]
     [InlineData("  ")]
     [InlineData("[]")]
+    [InlineData("{\"$id\":\"1\",\"$values\":[]}")]
     public void ParseLockedDevices_NothingSaved_IsNoLock(string json)
         => Assert.Null(LConnectWirelessConfiguration.ParseLockedDevices(json, "aabbccddeeff"));
 
@@ -459,6 +496,171 @@ public sealed class LConnectWirelessConfigurationTests : IDisposable {
         Assert.Throws<FormatException>(() => LConnectWirelessConfiguration.ParseLockedDevices("[" + noMaster + "]", "aabbccddeeff"));
         Assert.Throws<ArgumentNullException>(() => LConnectWirelessConfiguration.ParseLockedDevices(null!, "aabbccddeeff"));
         Assert.Throws<ArgumentNullException>(() => LConnectWirelessConfiguration.ParseLockedDevices("[]", null!));
+    }
+
+    // ---------- the LCD FLEX fan screen settings (the WirelessLCD document) ----------
+
+    // One LWirelessLCDConfig as DeviceSettingManager saves it, with a per-fan setting saved under the
+    // template key "index:theme" and one under the fan index alone.
+    private const string ScreenConfig = "{\"MacStr\":\"AA:BB:CC:DD:EE:FF\",\"IsAdvanceMode\":false,\"DevType\":51,"
+        + "\"TemplateParams\":{\"Theme1\":5,\"Theme2\":6,\"Theme3\":7,\"Theme4\":8,\"DataType1\":1,\"DataType2\":2,\"DataType3\":3,\"DataType4\":4,"
+        + "\"CpuTemp\":0,\"CpuUse\":0,\"GpuTemp\":0,\"GpuUse\":0,\"Fps\":0,\"Brightness\":80,\"Rotation\":1},"
+        + "\"FanSettings\":{\"1\":{\"MacStr\":\"x\",\"RxType\":3,\"FanIndex\":1,\"FanDirection\":4,\"FanThemeIndex\":6,\"FanDataSourceIndex\":12,\"FanBrightness\":80,\"GraphColor1\":4294901760},"
+        + "\"2\":{\"FanIndex\":2,\"FanThemeIndex\":9,\"FanDataSourceIndex\":13}},"
+        + "\"TemplateFanSettings\":{\"0:5\":{\"FanIndex\":0,\"FanThemeIndex\":5,\"FanDataSourceIndex\":11},\"0:9\":{\"FanIndex\":0,\"FanThemeIndex\":9,\"FanDataSourceIndex\":19}}}";
+
+    // applyWirelessLCDMode: theme n = TemplateParams.Theme(n+1); the data source is the setting
+    // saved for that fan under that theme (TemplateFanSettings["n:theme"], else FanSettings["n"]
+    // when its theme matches), else DataType(n+1); brightness and rotation are the template's.
+    [Fact]
+    public void ParseFanScreenSettings_ReadsEveryFansThemeAndSource_TheBrightnessAndTheDirection() {
+        var problems = new List<string>();
+
+        IReadOnlyDictionary<string, WirelessFanScreenPresentation> screens = LConnectWirelessConfiguration.ParseFanScreenSettings(
+            "{\"DeviceID\":\"LWireless-Controller\",\"Type\":\"WirelessLCD\",\"Data\":{\"AA:BB:CC:DD:EE:FF\":" + ScreenConfig + "}}", problems);
+
+        WirelessFanScreenPresentation presentation = Assert.Contains("aabbccddeeff", screens);
+        Assert.Empty(problems);
+        Assert.Equal(new byte[] { 5, 6, 7, 8 }, Enumerable.Range(0, 4).Select(presentation.ThemeOf));
+
+        // Fan 0's source by template key, 1's by fan, 2's saved under another theme, 3's not saved.
+        Assert.Equal(new byte[] { 11, 12, 3, 4 }, Enumerable.Range(0, 4).Select(presentation.DataSourceOf));
+        Assert.Equal(80, presentation.Brightness);
+        Assert.Equal(4, presentation.Direction); // rotation 1
+        Assert.False(presentation.AdvanceMode);
+
+        // The colours come from the same saved setting (WirelessFanInfoDto's packed uints, 0 when
+        // absent), or from L-Connect's own table for a fan with none saved.
+        Assert.Equal(new uint[] { 0, 0, 0, 0, 0, 0 }, presentation.ColoursOf(0).Colours); // saved under the template key, without colours
+        Assert.Equal(new uint[] { 4294901760, 0, 0, 0, 0, 0 }, presentation.ColoursOf(1).Colours); // theme 6 uses four: its saved graph colour and three unsaved
+        Assert.Equal(WirelessThemeColours.ForTheme(7).Colours, presentation.ColoursOf(2).Colours);
+        Assert.Equal(WirelessThemeColours.ForTheme(8).Colours, presentation.ColoursOf(3).Colours);
+    }
+
+    // IsAdvanceMode: the group's screens play PC-streamed content, and L-Connect neither applies
+    // its template nor switches the screens onto their themes (applyConfiguredWirelessLCDModes).
+    [Fact]
+    public void ParseFanScreenSettings_ReadsAdvanceMode() {
+        IReadOnlyDictionary<string, WirelessFanScreenPresentation> screens = LConnectWirelessConfiguration.ParseFanScreenSettings(
+            "{\"Data\":{\"aabbccddeeff\":" + ScreenConfig.Replace("\"IsAdvanceMode\":false", "\"IsAdvanceMode\":true") + "}}", new List<string>());
+
+        Assert.True(screens["aabbccddeeff"].AdvanceMode);
+    }
+
+    // MainService.handleSetMotherboardARGBSyncRequest saves a wireless device's switch as
+    // DeviceSetting<bool> { DeviceID = "aa:bb:cc:dd:ee:ff", Type = "MotherboardARGBSync", Data = true }
+    // under device\md5(deviceid)\md5("motherboardargbsync").0; ResumeSuspend reads it back per bound device.
+    [Theory]
+    [InlineData("{\"DeviceID\":\"a0:00:00:00:00:0a\",\"Type\":\"MotherboardARGBSync\",\"Data\":true}", true)]
+    [InlineData("{\"DeviceID\":\"a0:00:00:00:00:0a\",\"Type\":\"MotherboardARGBSync\",\"Data\":false}", false)]
+    [InlineData("{\"DeviceID\":\"a0:00:00:00:00:0a\",\"Type\":\"MotherboardARGBSync\",\"Data\":1}", false)]
+    [InlineData("{\"DeviceID\":\"a0:00:00:00:00:0a\",\"Type\":\"MotherboardARGBSync\"}", false)]
+    [InlineData("{\"DeviceID\":\"a0:00:00:00:00:0a\",\"Type\":\"Pump\",\"Data\":true}", false)]
+    [InlineData("{}", false)]
+    public void FindMotherboardArgbSync_ReadsTheDevicesOwnDocument(string json, bool expected) {
+        string path = LConnectLocations.WirelessDeviceSettingPath(_device, "a0000000000a", "MotherboardARGBSync");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        WriteGzip(path, Encoding.UTF8.GetBytes(json));
+
+        Assert.Equal(expected, Configuration().FindMotherboardArgbSync("a0000000000a"));
+        Assert.Equal(expected, LConnectWirelessConfiguration.ParseMotherboardArgbSync(JsonValue.Parse(json)));
+        Assert.Empty(_log.Messages);
+    }
+
+    [Fact]
+    public void FindMotherboardArgbSync_IsFalseWhenNothingIsSaved_AndWhenLightingIsNotDriven() {
+        Assert.False(Configuration().FindMotherboardArgbSync("a0000000000a"));
+
+        string path = LConnectLocations.WirelessDeviceSettingPath(_device, "a0000000000a", "MotherboardARGBSync");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        WriteGzip(path, Encoding.UTF8.GetBytes("{\"DeviceID\":\"a0:00:00:00:00:0a\",\"Type\":\"MotherboardARGBSync\",\"Data\":true}"));
+
+        Assert.False(Configuration(readsEffects: false).FindMotherboardArgbSync("a0000000000a"));
+        Assert.True(Configuration().FindMotherboardArgbSync("a0000000000a"));
+    }
+
+    [Fact]
+    public void FindMotherboardArgbSync_ACorruptDocumentIsLoggedAndReadsAsOff() {
+        string path = LConnectLocations.WirelessDeviceSettingPath(_device, "a0000000000a", "MotherboardARGBSync");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "not gzip");
+
+        Assert.False(Configuration().FindMotherboardArgbSync("a0000000000a"));
+        Assert.Contains(_log.Messages, m => m.StartsWith("wireless: saved sync switch for a0000000000a unusable, ignored (" + path + "): ", StringComparison.Ordinal));
+    }
+
+    // addWirelessLCDConfigIfApplicable creates a config with a fresh TemplateParams (themes 0,
+    // brightness 0, rotation 3), which is what a document without one reads as; a brightness of 0
+    // is sent as 60.
+    [Fact]
+    public void ParseFanScreenSettings_AConfigWithoutATemplate_IsAFreshOne() {
+        WirelessFanScreenPresentation presentation = Assert.Contains(
+            "aabbccddeeff",
+            LConnectWirelessConfiguration.ParseFanScreenSettings("{\"Data\":{\"aabbccddeeff\":{\"MacStr\":\"x\"}}}", new List<string>()));
+
+        Assert.Equal(new byte[4], Enumerable.Range(0, 4).Select(presentation.ThemeOf));
+        Assert.Equal(new byte[4], Enumerable.Range(0, 4).Select(presentation.DataSourceOf));
+        Assert.Equal(60, presentation.Brightness);
+        Assert.Equal(2, presentation.Direction); // rotation 3
+    }
+
+    [Theory]
+    [InlineData("\"Theme2\":6", "\"Theme2\":256", "\"Theme2\" is not a byte.")]
+    [InlineData("\"Brightness\":80", "\"Brightness\":-1", "\"Brightness\" is not a byte.")]
+    [InlineData("\"Rotation\":1", "\"Rotation\":\"3\"", "\"Rotation\" is missing or of the wrong type.")]
+    [InlineData("\"FanDataSourceIndex\":11", "\"FanDataSourceIndex\":300", "\"FanDataSourceIndex\" is not a byte.")]
+    [InlineData("\"FanThemeIndex\":6,", "\"FanThemeIndex\":true,", "\"FanThemeIndex\" is missing or of the wrong type.")]
+    [InlineData("\"GraphColor1\":4294901760", "\"GraphColor1\":4294967296", "\"GraphColor1\" is not an unsigned integer.")]
+    [InlineData("\"GraphColor1\":4294901760", "\"GraphColor1\":-1", "\"GraphColor1\" is not an unsigned integer.")]
+    [InlineData("\"GraphColor1\":4294901760", "\"GraphColor1\":1.5", "\"GraphColor1\" is not an unsigned integer.")]
+    [InlineData("\"GraphColor1\":4294901760", "\"GraphColor1\":\"red\"", "\"GraphColor1\" is missing or of the wrong type.")]
+    public void ParseFanScreenSettings_AMalformedConfig_IsLeftOutAndNamed(string member, string replacement, string reason) {
+        var problems = new List<string>();
+
+        IReadOnlyDictionary<string, WirelessFanScreenPresentation> screens = LConnectWirelessConfiguration.ParseFanScreenSettings(
+            "{\"Data\":{\"aabbccddeeff\":" + ScreenConfig.Replace(member, replacement) + ",\"112233445566\":" + ScreenConfig + "}}", problems);
+
+        Assert.DoesNotContain("aabbccddeeff", screens.Keys);
+        Assert.Contains("112233445566", screens.Keys);
+        Assert.Equal("aabbccddeeff: " + reason, Assert.Single(problems));
+    }
+
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("{\"Type\":\"WirelessLCD\"}")]
+    public void ParseFanScreenSettings_ADocumentWithoutDataThrows(string json)
+        => Assert.Throws<FormatException>(() => LConnectWirelessConfiguration.ParseFanScreenSettings(json, new List<string>()));
+
+    [Fact]
+    public void FindFanScreenPresentation_ReadsTheGzippedDocument() {
+        WriteScreenSettings("{\"Data\":{\"aa:bb:cc:dd:ee:ff\":" + ScreenConfig + "}}");
+        LConnectWirelessConfiguration configuration = Configuration();
+
+        Assert.Equal(80, configuration.FindFanScreenPresentation("aabbccddeeff")!.Brightness);
+        Assert.Null(configuration.FindFanScreenPresentation("000000000000"));
+        Assert.Empty(_log.Messages);
+    }
+
+    [Fact]
+    public void FindFanScreenPresentation_IsNullWhenLConnectSavedNothing()
+        => Assert.Null(Configuration().FindFanScreenPresentation("aabbccddeeff"));
+
+    [Fact]
+    public void AMalformedScreenConfig_IsLoggedAndThatGroupGetsTheDefaultEntry() {
+        WriteScreenSettings("{\"Data\":{\"aabbccddeeff\":{\"TemplateParams\":{\"Theme1\":-1}}}}");
+
+        Assert.Null(Configuration().FindFanScreenPresentation("aabbccddeeff"));
+        Assert.Contains(
+            "wireless: saved screen settings for aabbccddeeff: \"Theme1\" is not a byte.; that group's screens get L-Connect's default entry",
+            _log.Messages);
+    }
+
+    [Fact]
+    public void ACorruptScreenDocument_IsLoggedAndCostsOnlyTheScreens() {
+        File.WriteAllBytes(_screenFile, new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 });
+
+        Assert.Null(Configuration().FindFanScreenPresentation("aabbccddeeff"));
+        Assert.Contains(_log.Messages, m => m.StartsWith("wireless: saved fan screen settings unusable, ignored (" + _screenFile + "): InvalidDataException: ", StringComparison.Ordinal));
     }
 
     [Fact]

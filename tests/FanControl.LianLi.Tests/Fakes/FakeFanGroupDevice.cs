@@ -5,7 +5,8 @@ using FanControl.LianLi.Devices;
 namespace FanControl.LianLi.Tests.Fakes;
 
 // A device with fewer controls than fans, as a wireless group is: one control, a speed per fan.
-internal sealed class FakeFanGroupDevice : IFanDevice, IFanSpeedSource {
+// Like the wireless controller it can keep a sensor it no longer drives (Retained).
+internal sealed class FakeFanGroupDevice : IFanDevice, IFanSpeedSource, IDrivenSensorSource {
     private readonly string _controlId;
     private readonly string[] _fanIds;
     private readonly float[] _speeds;
@@ -21,6 +22,23 @@ internal sealed class FakeFanGroupDevice : IFanDevice, IFanSpeedSource {
     public int FanSpeedCount => _fanIds.Length;
 
     public List<KeyValuePair<int, int>> Targets { get; } = new List<KeyValuePair<int, int>>();
+
+    /// <summary>The ids this device reports but no longer drives; every other id is driven.</summary>
+    public HashSet<string> Retained { get; } = new HashSet<string>(StringComparer.Ordinal);
+
+    public IEnumerable<string> DrivenSensorIds {
+        get {
+            if (!Retained.Contains(_controlId)) {
+                yield return _controlId;
+            }
+
+            foreach (string fan in _fanIds) {
+                if (!Retained.Contains(fan)) {
+                    yield return fan;
+                }
+            }
+        }
+    }
 
     public void SetSpeed(int fan, float rpm) => _speeds[fan] = rpm;
 

@@ -3,7 +3,9 @@ using System.Linq;
 using System.Threading;
 using FanControl.LianLi.Devices;
 using FanControl.LianLi.Plugin;
+using FanControl.LianLi.Protocol;
 using FanControl.LianLi.Tests.Fakes;
+using FanControl.LianLi.Tests.Protocol;
 using FanControl.LianLi.Transport;
 using FanControl.Plugins;
 using Xunit;
@@ -15,6 +17,9 @@ namespace FanControl.LianLi.Tests.Plugin;
 /// process; Close only for an instance that registered sensors; Update on the host's own thread.
 /// </summary>
 public sealed class LianLiPluginLifecycleTests {
+    // Stands in for the wireless controller that publishes the bound set.
+    private static readonly object RadioOwner = new object();
+
     private static LocatedDevice Sli(string path) => new LocatedDevice(0x0CF2, 0xA102, path, null);
 
     private static LianLiPlugin NewPlugin(FakeEnumerator enumerator, PluginRuntime runtime, FakeLogger? logger = null, IClock? clock = null)
@@ -340,11 +345,11 @@ public sealed class LianLiPluginLifecycleTests {
                 return;
             }
 
-            byte[] group = FanControl.LianLi.Tests.Protocol.WirelessProtocolTests.Record(
+            byte[] group = WirelessProtocolTests.Record(
                 new byte[] { 0xA0, 0, 0, 0, 0, 1 }, master, 8, 1, 0, 2, new byte[] { 36, 36, 0, 0 },
                 new[] { 1000, 1100, 0, 0 }, new byte[] { 100, 100, 0, 0 }, 1);
             for (int i = 0; i < 8; i++) {
-                transport.ReadReplies.Enqueue(FanControl.LianLi.Tests.Protocol.WirelessProtocolTests.ListReply(1, group));
+                transport.ReadReplies.Enqueue(WirelessProtocolTests.ListReply(1, group));
             }
         };
         var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore());
@@ -399,17 +404,37 @@ public sealed class LianLiPluginLifecycleTests {
                 return;
             }
 
-            byte[] group = FanControl.LianLi.Tests.Protocol.WirelessProtocolTests.Record(
+            byte[] group = WirelessProtocolTests.Record(
                 new byte[] { 0xA0, 0, 0, 0, 0, 1 }, master, 8, 1, 0, 2, new byte[] { 36, 36, 0, 0 },
                 new[] { 1000, 1100, 0, 0 }, new byte[] { 100, 100, 0, 0 }, 1);
             for (int i = 0; i < emptyReads; i++) {
-                transport.ReadReplies.Enqueue(FanControl.LianLi.Tests.Protocol.WirelessProtocolTests.ListReply(0));
+                transport.ReadReplies.Enqueue(WirelessProtocolTests.ListReply(0));
             }
 
             for (int i = 0; i < 50; i++) {
-                transport.ReadReplies.Enqueue(FanControl.LianLi.Tests.Protocol.WirelessProtocolTests.ListReply(1, group));
+                transport.ReadReplies.Enqueue(WirelessProtocolTests.ListReply(1, group));
             }
         };
+    }
+
+    // The transmitter always answers the master query; the receiver lists nothing until heard says
+    // so, then the group, so a test on the injected clock decides which poll hears it: the pair
+    // reads its list once a second on the clock, so after Initialize only the poll the test lets
+    // happen by moving the clock (or the worker's first, read at once) can hear it.
+    private static Action<LocatedDevice, FakeDeviceTransport> GroupChecksInWhen(Func<bool> heard) {
+        byte[] master = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66 };
+        var masterReply = new byte[64];
+        masterReply[0] = 0x11;
+        Array.Copy(master, 0, masterReply, 1, 6);
+        masterReply[10] = 0x40;
+        byte[] group = WirelessProtocolTests.Record(
+            new byte[] { 0xA0, 0, 0, 0, 0, 1 }, master, 8, 1, 0, 2, new byte[] { 36, 36, 0, 0 },
+            new[] { 1000, 1100, 0, 0 }, new byte[] { 100, 100, 0, 0 }, 1);
+        byte[] empty = WirelessProtocolTests.ListReply(0);
+        byte[] listed = WirelessProtocolTests.ListReply(1, group);
+        return (info, transport) => transport.ReplyFor = info.ProductId == 0x8040
+            ? _ => masterReply
+            : _ => heard() ? listed : empty;
     }
 
     private static LocatedDevice[] Dongles() => new[] {
@@ -417,17 +442,283 @@ public sealed class LianLiPluginLifecycleTests {
         new LocatedDevice(0x0416, 0x8041, "fake/wireless/rx", null),
     };
 
+    private static readonly byte[] FlexChainMac = { 0xA0, 0, 0, 0, 0, 1 };
+    private const string FlexControl = "LianLi/wa00000000001/ctl";
+
+    private static LocatedDevice FlexReceiver() => new LocatedDevice(0x43A8, 0x0101, "fake/flex", null);
+
+    // A receiver whose chain is the group the dongle fakes list (GroupChecksInLate), with the given
+    // number of fans: it answers every status request and takes every speed.
+    private static Action<LocatedDevice, FakeDeviceTransport> FlexChain(int fans = 2)
+        => (info, transport) => {
+            if (info.VendorId != 0x43A8) {
+                return;
+            }
+
+            byte[] status = FlexReceiverProtocolTests.StatusReply(new FakeWirelessRecord(FlexChainMac, new byte[6]) {
+                FanCountByte = (byte)fans,
+                FanTypes = new byte[] { 51, 51, 0, 0 },
+                Rpm = new[] { 1200, 1150, 0, 0 },
+            });
+            transport.ReplyFor = written => written[0] == 0x12 ? status : new byte[] { 0x13, 0 };
+        };
+
+    private static Action<LocatedDevice, FakeDeviceTransport> FlexChainAndDongles(int emptyReads)
+        => (info, transport) => {
+            if (info.VendorId == 0x0416) {
+                GroupChecksInLate(emptyReads)(info, transport);
+            }
+
+            FlexChain()(info, transport);
+        };
+
+    // Its USB receiver first; then the dongles appear with the chain bound to their master; then the
+    // dongles are gone again. The chain keeps its one control id throughout, registered by whichever
+    // drives it, and the other never stands in with it beside.
+    [Fact]
+    public void AFlexChain_MovedBetweenItsUsbReceiverAndTheDongles_IsRegisteredOnceUnderTheSameId() {
+        var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore());
+        using LianLiPlugin usbOnly = NewPlugin(new FakeEnumerator(FlexReceiver()) { ConfigureTransport = FlexChain() }, runtime);
+        FakeSensorsContainer first = Load(usbOnly);
+        Assert.Equal(FlexControl, Assert.Single(first.ControlSensors).Id);
+        Assert.Contains("USB", Assert.Single(first.ControlSensors).Name, StringComparison.Ordinal);
+        usbOnly.Close();
+
+        var logger = new FakeLogger();
+        var both = new FakeEnumerator(Dongles().Append(FlexReceiver()).ToArray()) { ConfigureTransport = FlexChainAndDongles(0) };
+        using LianLiPlugin bound = NewPlugin(both, runtime, logger);
+        FakeSensorsContainer second = Load(bound);
+        Assert.Equal(FlexControl, Assert.Single(second.ControlSensors).Id);
+        Assert.Contains("Wireless", Assert.Single(second.ControlSensors).Name, StringComparison.Ordinal);
+        Assert.Equal(2, second.FanSensors.Count);
+        Assert.Empty(runtime.Recall("fake/flex")!.Ids); // the pair took the chain from the receiver's memory
+        Assert.Contains(logger.Messages, m => m.Contains("is bound to the L-Wireless controller's master, which drives it; left to the radio"));
+        bound.Close();
+        Assert.DoesNotContain(both.TransportFor("fake/flex").Writes, w => w[0] == 0x13);
+
+        // The dongles are unplugged: the pair is stood in for, but without the chain, which its
+        // receiver drives again.
+        using LianLiPlugin usbAgain = NewPlugin(new FakeEnumerator(FlexReceiver()) { ConfigureTransport = FlexChain() }, runtime);
+        FakeSensorsContainer third = Load(usbAgain);
+        Assert.Equal(FlexControl, Assert.Single(third.ControlSensors).Id);
+        Assert.Contains("USB", Assert.Single(third.ControlSensors).Name, StringComparison.Ordinal);
+        Assert.Equal(2, third.FanSensors.Count);
+        Assert.Empty(runtime.Recall("fake/wireless/tx")!.Ids);
+        usbAgain.Close();
+    }
+
+    // The chain is driven over USB, registered on its receiver, when the radio takes it: the
+    // receiver notices on its next poll, stops writing and asks for a refresh, since the host's
+    // control is on the controller that no longer drives the chain. The radio letting it go again
+    // while the host's control is still on the receiver (nothing claimed the ids meanwhile) puts
+    // the chain back where the control is, and asks for nothing; with a wireless controller that
+    // had claimed the ids it does (LianLiPluginFlexChainTests).
+    [Fact]
+    public void AFlexChainTakenByTheRadioWhileRunning_AsksForARefresh_AndLetGoAgainWithItsControlStillOnTheReceiver_AsksForNone() {
+        var clock = new FakeClock();
+        var runtime = new PluginRuntime(clock, new FakeRememberedControllerStore()) { WorkerTickIntervalMilliseconds = 20 };
+        var logger = new FakeLogger();
+        using LianLiPlugin plugin = NewPlugin(new FakeEnumerator(FlexReceiver()) { ConfigureTransport = FlexChain() }, runtime, logger);
+        FakeSensorsContainer container = Load(plugin);
+        Assert.Equal(FlexControl, Assert.Single(container.ControlSensors).Id);
+        Assert.False(runtime.TryTakeRefresh(plugin, out _));
+
+        // The worker logs the request after making it, so the line is what is waited for.
+        runtime.WirelessState.RecordBoundDevices(RadioOwner, new[] { "a00000000001" });
+        Assert.True(SpinWait.SpinUntil(() => logger.Messages.Contains("refresh wanted: a FLEX chain on a USB receiver is now the L-Wireless controller's"), TimeSpan.FromSeconds(5)));
+        Assert.True(runtime.TryTakeRefresh(plugin, out _));
+        Assert.Contains(logger.Messages, m => m.Contains("F0:a00000000001 is now bound to the L-Wireless controller's master"));
+
+        clock.Advance(TimeSpan.FromMinutes(1));
+        runtime.WirelessState.ForgetBoundDevices(RadioOwner);
+        Assert.True(SpinWait.SpinUntil(() => logger.Messages.Any(m => m.Contains("F0:a00000000001 is no longer bound to the L-Wireless controller's master")), TimeSpan.FromSeconds(5)));
+        Thread.Sleep(100);
+        Assert.False(runtime.TryTakeRefresh(plugin, out _));
+        Assert.DoesNotContain(logger.Messages, m => m.Contains("refresh wanted: a FLEX chain on a USB receiver is driven over USB"));
+        Assert.Equal(new[] { FlexControl, "LianLi/wa00000000001/f0/fan", "LianLi/wa00000000001/f1/fan" }, runtime.Recall("fake/flex")!.Ids);
+        plugin.Close();
+    }
+
+    // A first-run receiver whose chain reports no fan yet keeps the placeholder, like a TL hub; once a
+    // fan is reported the receiver asks for the refresh that registers it. The radio taking the
+    // chain before that refresh has happened asks for nothing more: the host has none of the
+    // chain's sensors on the receiver yet, so there is nothing to move.
+    [Fact]
+    public void APlaceholder_ForAFlexReceiverWithNoFanYet_ThenARefreshWhenOneIsReported() {
+        var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()) { WorkerTickIntervalMilliseconds = 20 };
+        var enumerator = new FakeEnumerator(FlexReceiver()) { ConfigureTransport = FlexChain(0) };
+        var logger = new FakeLogger();
+        using LianLiPlugin plugin = NewPlugin(enumerator, runtime, logger);
+        FakeSensorsContainer container = Load(plugin);
+
+        Assert.Empty(container.ControlSensors);
+        Assert.Equal("LianLi/waiting", Assert.Single(container.TempSensors).Id);
+        Assert.False(runtime.TryTakeRefresh(plugin, out _));
+
+        FlexChain(2)(FlexReceiver(), enumerator.TransportFor("fake/flex"));
+        Assert.True(SpinWait.SpinUntil(() => runtime.TryTakeRefresh(plugin, out _), TimeSpan.FromSeconds(5)));
+        Assert.Equal(3, runtime.Recall("fake/flex")!.Ids.Count());
+
+        runtime.WirelessState.RecordBoundDevices(RadioOwner, new[] { "a00000000001" });
+        Assert.True(SpinWait.SpinUntil(() => logger.Messages.Any(m => m.Contains("F0:a00000000001 is now bound to the L-Wireless controller's master")), TimeSpan.FromSeconds(5)));
+        Thread.Sleep(100);
+        Assert.DoesNotContain(logger.Messages, m => m.Contains("refresh wanted: a FLEX chain on a USB receiver is now the L-Wireless controller's"));
+        plugin.Close();
+    }
+
+    // What a receiver reports is remembered on the worker's thread; a fault there is logged, never
+    // let out, and a receiver from a scan numbered before the saved controllers were read is not
+    // remembered at all. An instance that no longer runs the worker does nothing with it: its
+    // controllers are being closed for the refresh that replaces it.
+    [Fact]
+    public void AFlexReceiversChange_ThatCannotBeRemembered_OrReachesAClosingInstance_IsLogged() {
+        var store = new FakeRememberedControllerStore { UnreadableLoads = 1 };
+        var runtime = new PluginRuntime(new FakeClock(), store);
+        var logger = new FakeLogger();
+        var transport = new FakeDeviceTransport();
+        FlexChain()(FlexReceiver(), transport);
+        var controller = new FlexReceiverController(0, transport, FlexReceiverFamily.TlFlex, new FakeClock(), logger, runtime.WirelessState);
+        controller.SettleOwnership();
+        var plan = new ControllerPlan(DeviceKind.FlexReceiver, FlexReceiver());
+
+        using LianLiPlugin unread = NewPlugin(new FakeEnumerator(Sli("a")), runtime, logger);
+        _ = Load(unread);
+        using LianLiPlugin read = NewPlugin(new FakeEnumerator(Sli("a")), runtime, logger);
+        _ = Load(read);
+
+        // Stopped by the next instance's scan, which read the file and moved the numbering on.
+        unread.OnFlexReceiverChanged(plan, 7, controller, FlexReceiverChange.ReleasedByRadio);
+        Assert.Contains("  fake/flex: the radio let its chain go while this plugin instance is closing; left to the next one", logger.Messages);
+        unread.OnFlexReceiverChanged(plan, 7, controller, FlexReceiverChange.TakenByRadio);
+        Assert.Contains("  fake/flex: the radio took its chain while this plugin instance is closing; left to the next one", logger.Messages);
+        unread.OnFlexReceiverChanged(plan, 7, controller, FlexReceiverChange.FanReported);
+        Assert.Contains("  fake/flex: a fan was reported while this plugin instance is closing; left to the next one", logger.Messages);
+        unread.OnFlexReceiverChanged(plan, 7, controller, FlexReceiverChange.AnotherReceiverAnswered);
+        Assert.Contains("  fake/flex: another receiver answered while this plugin instance is closing; left to the next one", logger.Messages);
+        Assert.Null(runtime.Recall("fake/flex"));
+        Assert.False(runtime.TryTakeRefresh(read, out _));
+
+        // Running the worker again, with the numbering it had: nothing of what it reports is kept.
+        runtime.Start(unread, Array.Empty<IFanDevice>(), logger);
+        unread.OnFlexReceiverChanged(plan, 7, controller, FlexReceiverChange.ReleasedByRadio);
+        Assert.Contains("  fake/flex: its sensors were numbered before the saved controllers were read; not remembered", logger.Messages);
+        Assert.Null(runtime.Recall("fake/flex"));
+
+        runtime.Start(read, Array.Empty<IFanDevice>(), logger);
+        store.DuringSave = () => throw new InvalidOperationException("disk full");
+        read.OnFlexReceiverChanged(plan, 7, controller, FlexReceiverChange.ReleasedByRadio);
+        Assert.Contains("  fake/flex: the change it reported could not be remembered: disk full", logger.Messages);
+        store.DuringSave = null;
+
+        read.OnFlexReceiverChanged(plan, 7, controller, FlexReceiverChange.AnotherReceiverAnswered);
+        Assert.True(runtime.TryTakeRefresh(read, out string reason));
+        Assert.Equal("a USB receiver now answers as another chain", reason);
+        read.Close();
+        unread.Close();
+    }
+
+    // A receiver's change delivered after Initialize and before Load has published what it
+    // registered: the chain let go is remembered under its receiver, the chain taken is left to
+    // the pair's memory, and neither asks for a refresh, since Load registers the chain under
+    // whoever the memory names when it runs. The FLEX chain tests reach this from the receiver's
+    // own worker, which may or may not beat Load; this is the same callback, delivered by hand.
+    [Fact]
+    public void AFlexReceiversChange_BeforeLoadHasPublished_IsRememberedAndAsksForNoRefresh() {
+        var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore());
+        var logger = new FakeLogger();
+        var transport = new FakeDeviceTransport();
+        FlexChain()(FlexReceiver(), transport);
+        var controller = new FlexReceiverController(0, transport, FlexReceiverFamily.TlFlex, new FakeClock(), logger, runtime.WirelessState);
+        controller.SettleOwnership();
+        var plan = new ControllerPlan(DeviceKind.FlexReceiver, FlexReceiver());
+
+        using LianLiPlugin plugin = NewPlugin(new FakeEnumerator(Sli("a")), runtime, logger);
+        plugin.Initialize();
+
+        plugin.OnFlexReceiverChanged(plan, 7, controller, FlexReceiverChange.ReleasedByRadio);
+        Assert.Equal("fake/flex", runtime.OwnerOf(FlexControl));
+        plugin.OnFlexReceiverChanged(plan, 7, controller, FlexReceiverChange.TakenByRadio);
+
+        Assert.False(runtime.TryTakeRefresh(plugin, out _));
+        Assert.DoesNotContain(logger.Messages, m => m.Contains("refresh wanted", StringComparison.Ordinal));
+        plugin.Close();
+    }
+
     [Fact]
     public void AWirelessDeviceHeardAfterLoad_AsksFanControlForARefresh() {
-        var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore());
-        using LianLiPlugin plugin = NewPlugin(new FakeEnumerator(Dongles()) { ConfigureTransport = GroupChecksInLate(8) }, runtime, clock: new SystemClock());
+        var clock = new FakeClock();
+        var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()) { WorkerTickIntervalMilliseconds = 20 };
+        int heard = 0;
+        using LianLiPlugin plugin = NewPlugin(
+            new FakeEnumerator(Dongles()) { ConfigureTransport = GroupChecksInWhen(() => Volatile.Read(ref heard) == 1) }, runtime, clock: clock);
         FakeSensorsContainer container = Load(plugin);
         Assert.Empty(container.ControlSensors);
         Assert.Equal("LianLi/waiting", Assert.Single(container.TempSensors).Id); // so FanControl hears the refresh
         int refreshes = 0;
         plugin.RefreshRequested += () => refreshes++;
 
+        Volatile.Write(ref heard, 1);
+        clock.Advance(TimeSpan.FromSeconds(2));
         Assert.True(SpinWait.SpinUntil(() => { plugin.Update(); return refreshes == 1; }, TimeSpan.FromSeconds(10)));
+        plugin.Close();
+    }
+
+    // A device the pair first hears while Load is registering a later controller - after the pair's
+    // own registration, before Load published what it registered: nobody registers it, and the
+    // worker's callback finds nothing published to compare against. Load's check of the memory
+    // after publishing is what catches it (a claim remembered before the publication is in the
+    // memory Load reads after it), or, had the claim come after, the callback's own check would.
+    [Fact]
+    public void AWirelessDeviceHeardWhileALaterControllerIsBeingRegistered_GetsARefresh() {
+        var clock = new FakeClock();
+        var runtime = new PluginRuntime(clock, new FakeRememberedControllerStore()) { WorkerTickIntervalMilliseconds = 20 };
+        var log = new FakeLogger();
+        var tx = new LocatedDevice(0x0416, 0x8040, "fake/tx", null);
+        var rx = new LocatedDevice(0x0416, 0x8041, "fake/rx", null);
+        var uni = Sli("fake/uni");
+        var radio = new FakeWirelessRig();
+        var first = new FakeWirelessRecord(new byte[] { 0xA0, 0, 0, 0, 0, 1 }, FakeWirelessRig.MasterMac) {
+            FanCountByte = 2,
+            FanTypes = new byte[] { 51, 51, 0, 0 },
+            Rpm = new[] { 1200, 1150, 0, 0 },
+        };
+        var second = new FakeWirelessRecord(new byte[] { 0xA0, 0, 0, 0, 0, 2 }, FakeWirelessRig.MasterMac) {
+            FanCountByte = 2,
+            FanTypes = new byte[] { 51, 51, 0, 0 },
+            Receiver = 2,
+        };
+        byte[] initial = WirelessProtocolTests.ListReply(1, first.ToBytes());
+        byte[] added = WirelessProtocolTests.ListReply(2, first.ToBytes(), second.ToBytes());
+        int heard = 0;
+        Action<LocatedDevice, FakeDeviceTransport> configure = (info, transport) => transport.ReplyFor = info.ProductId == 0x8040
+            ? _ => radio.MasterReply() ?? new byte[64]
+            : _ => Volatile.Read(ref heard) == 0 ? initial : added;
+        using (LianLiPlugin earlier = NewPlugin(new FakeEnumerator(tx, rx) { ConfigureTransport = configure }, runtime, log, clock)) {
+            _ = Load(earlier);
+            earlier.Close();
+        }
+
+        // The pair keeps index 0, so it registers before the new Uni controller.
+        using LianLiPlugin plugin = NewPlugin(new FakeEnumerator(uni, tx, rx) { ConfigureTransport = configure }, runtime, log, clock);
+        plugin.Initialize();
+        var sensors = new FakeSensorsContainer();
+        const string addedId = "LianLi/wa00000000002/ctl";
+        plugin.Registering += key => {
+            if (key != uni.DevicePath) {
+                return;
+            }
+
+            Assert.Single(sensors.ControlSensors);
+            Volatile.Write(ref heard, 1);
+            clock.Advance(TimeSpan.FromSeconds(2));
+            Assert.True(SpinWait.SpinUntil(() => runtime.OwnerOf(addedId) == tx.DevicePath, TimeSpan.FromSeconds(5)));
+        };
+        plugin.Load(sensors);
+
+        Assert.DoesNotContain(sensors.ControlSensors, sensor => sensor.Id == addedId);
+        Assert.Equal(tx.DevicePath, runtime.OwnerOf(addedId));
+        Assert.True(SpinWait.SpinUntil(() => runtime.TryTakeRefresh(plugin, out _), TimeSpan.FromSeconds(5)));
+        Assert.Contains("refresh wanted: a controller reported sensors while they were being registered", log.Messages);
         plugin.Close();
     }
 
@@ -487,6 +778,52 @@ public sealed class LianLiPluginLifecycleTests {
         plugin.Close();
     }
 
+    // A pair an earlier process remembered with nothing (so it is not new, and no placeholder is
+    // owed to a device still to come) is stood in for when its dongles open slowly, and its late
+    // build hears a group before Load runs: the stand-in exposes nothing, the memory has the
+    // group's sensors, and Load asks for the refresh that registers them. Nothing else is
+    // registered, so FanControl would never hear that refresh; the placeholder is registered for
+    // the correction already pending, exactly as for a device still to come.
+    [Fact]
+    public void APlaceholder_WhenNothingRegisters_ButACorrectionIsAlreadyWanted() {
+        var store = new FakeRememberedControllerStore();
+        using (LianLiPlugin earlier = NewPlugin(new FakeEnumerator(Dongles()) { ConfigureTransport = GroupChecksInLate(100) }, new PluginRuntime(new FakeClock(), store))) {
+            Assert.Single(Load(earlier).TempSensors);
+            earlier.Close();
+        }
+
+        using var gate = new ManualResetEventSlim(false);
+        var runtime = new PluginRuntime(new FakeClock(), store) { WorkerTickIntervalMilliseconds = 20 };
+        var slow = new FakeEnumerator(Dongles()) {
+            ConfigureTransport = (info, transport) => {
+                GroupChecksInLate(0)(info, transport);
+                if (info.ProductId == 0x8040) {
+                    transport.BlockReadsUntil = gate;
+                }
+            },
+        };
+        var logger = new FakeLogger();
+        using LianLiPlugin plugin = NewPlugin(slow, runtime, logger);
+        plugin.BuildDeadlineMilliseconds = 50;
+        plugin.Initialize();
+        Assert.False(runtime.IsNew("fake/wireless/tx"));
+        gate.Set();
+        Assert.True(SpinWait.SpinUntil(() => logger.Messages.Contains("  fake/wireless/tx finished opening after the scan; its stand-in took it"), TimeSpan.FromSeconds(10)));
+        Assert.Equal(new[] { FlexControl }, runtime.Recall("fake/wireless/tx")!.Channels.Select(c => c.ControlId));
+        Assert.False(runtime.TryTakeRefresh(plugin, out _));
+
+        var container = new FakeSensorsContainer();
+        plugin.Load(container);
+
+        Assert.Empty(container.ControlSensors);
+        Assert.Empty(container.FanSensors);
+        Assert.Equal("LianLi/waiting", Assert.Single(container.TempSensors).Id);
+        Assert.True(runtime.TryTakeRefresh(plugin, out string reason));
+        Assert.Equal("a controller came back with sensors the scan did not have", reason);
+        Assert.Contains("nothing to register yet but a refresh is already wanted; a placeholder sensor is registered so FanControl hears it", logger.Messages);
+        plugin.Close();
+    }
+
     [Fact]
     public void WaitingSensor_HasNoReading() {
         var sensor = new WaitingSensor();
@@ -498,42 +835,52 @@ public sealed class LianLiPluginLifecycleTests {
 
     [Fact]
     public void AWirelessDeviceHeardBeforeLoad_IsSimplyRegistered_WithNoRefresh() {
-        var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore());
-        var enumerator = new FakeEnumerator(Dongles()) { ConfigureTransport = GroupChecksInLate(5) };
-        using LianLiPlugin plugin = NewPlugin(enumerator, runtime, clock: new SystemClock());
+        var clock = new FakeClock();
+        var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()) { WorkerTickIntervalMilliseconds = 20 };
+        int heard = 0;
+        var enumerator = new FakeEnumerator(Dongles()) { ConfigureTransport = GroupChecksInWhen(() => Volatile.Read(ref heard) == 1) };
+        using LianLiPlugin plugin = NewPlugin(enumerator, runtime, clock: clock);
         plugin.Initialize();
 
-        // The startup wait reads the list four times, all empty; the worker's first poll is the fifth,
-        // also empty, and its second hears the group - all before FanControl gets round to Load.
-        FakeDeviceTransport receiver = enumerator.TransportFor("fake/wireless/rx");
-        Assert.True(SpinWait.SpinUntil(() => receiver.InterruptReadCount >= 7, TimeSpan.FromSeconds(10)));
+        // The group checks in, and the worker's poll hears it - all before FanControl gets around to Load.
+        Volatile.Write(ref heard, 1);
+        clock.Advance(TimeSpan.FromSeconds(2));
+        Assert.True(SpinWait.SpinUntil(() => runtime.Recall("fake/wireless/tx")!.Channels.Count == 1, TimeSpan.FromSeconds(10)));
         var container = new FakeSensorsContainer();
         plugin.Load(container);
 
         Assert.Single(container.ControlSensors);
+        FakeDeviceTransport receiver = enumerator.TransportFor("fake/wireless/rx");
         int reads = receiver.InterruptReadCount;
-        Assert.True(SpinWait.SpinUntil(() => receiver.InterruptReadCount > reads, TimeSpan.FromSeconds(10))); // a further tick
+        clock.Advance(TimeSpan.FromSeconds(2));
+        Assert.True(SpinWait.SpinUntil(() => receiver.InterruptReadCount > reads, TimeSpan.FromSeconds(10))); // a further poll
         Assert.False(runtime.TryTakeRefresh(plugin, out _));
         plugin.Close();
     }
 
     [Fact]
     public void AWirelessDeviceHeardBeforeLoad_IsRememberedAndSaved() {
+        var clock = new FakeClock();
         var store = new FakeRememberedControllerStore();
-        var runtime = new PluginRuntime(new FakeClock(), store);
-        var enumerator = new FakeEnumerator(Dongles()) { ConfigureTransport = GroupChecksInLate(5) };
-        using LianLiPlugin plugin = NewPlugin(enumerator, runtime, clock: new SystemClock());
+        var runtime = new PluginRuntime(new FakeClock(), store) { WorkerTickIntervalMilliseconds = 20 };
+        int heard = 0;
+        var enumerator = new FakeEnumerator(Dongles()) { ConfigureTransport = GroupChecksInWhen(() => Volatile.Read(ref heard) == 1) };
+        using LianLiPlugin plugin = NewPlugin(enumerator, runtime, clock: clock);
         plugin.Initialize();
         Assert.Empty(runtime.Recall("fake/wireless/tx")!.Channels);
-        FakeDeviceTransport receiver = enumerator.TransportFor("fake/wireless/rx");
-        Assert.True(SpinWait.SpinUntil(() => receiver.InterruptReadCount >= 7, TimeSpan.FromSeconds(10)));
+        Volatile.Write(ref heard, 1);
+        clock.Advance(TimeSpan.FromSeconds(2));
+        // The worker remembers the group and then saves it, so wait for the save itself.
+        Assert.True(SpinWait.SpinUntil(
+            () => store.Snapshot().Any(stored => stored.Key == "fake/wireless/tx" && stored.Controller.Channels.Count == 1),
+            TimeSpan.FromSeconds(10)));
 
         var container = new FakeSensorsContainer();
         plugin.Load(container);
 
         string control = Assert.Single(container.ControlSensors).Id;
         Assert.Equal(control, Assert.Single(runtime.Recall("fake/wireless/tx")!.Channels).ControlId);
-        Assert.Equal(control, Assert.Single(Assert.Single(store.Stored).Controller.Channels).ControlId);
+        Assert.Equal(control, Assert.Single(Assert.Single(store.Snapshot()).Controller.Channels).ControlId);
         plugin.Close();
     }
 
@@ -638,7 +985,7 @@ public sealed class LianLiPluginLifecycleTests {
     public void ARefreshIsNeededOnlyForASensorLoadDidNotRegister(string[] ids, bool loaded, bool expected)
         => Assert.Equal(
             expected,
-            LianLiPlugin.HasUnregisteredSensor(ids, loaded ? new System.Collections.Generic.HashSet<string> { "a", "b" } : null));
+            LianLiPlugin.HasUnregisteredSensor(ids, loaded ? new System.Collections.Generic.Dictionary<string, string> { ["a"] = "x", ["b"] = "x" } : null));
 
     // The transmitter always answers; the receiver lists nothing for emptyReads reads, then a group.
     private static void SeedPair(LocatedDevice info, FakeDeviceTransport transport, int emptyReads) {
@@ -651,13 +998,13 @@ public sealed class LianLiPluginLifecycleTests {
             return;
         }
 
-        byte[] group = FanControl.LianLi.Tests.Protocol.WirelessProtocolTests.Record(
+        byte[] group = WirelessProtocolTests.Record(
             new byte[] { 0xA0, 0, 0, 0, 0, 1 }, FakeWirelessRig.MasterMac, 8, 1, 0, 2,
             new byte[] { 36, 36, 0, 0 }, new[] { 1000, 1100, 0, 0 }, new byte[] { 100, 100, 0, 0 }, 1);
         for (int i = 0; i < 100; i++) {
             transport.ReadReplies.Enqueue(i < emptyReads
-                ? FanControl.LianLi.Tests.Protocol.WirelessProtocolTests.ListReply(0)
-                : FanControl.LianLi.Tests.Protocol.WirelessProtocolTests.ListReply(1, group));
+                ? WirelessProtocolTests.ListReply(0)
+                : WirelessProtocolTests.ListReply(1, group));
         }
     }
 
@@ -702,14 +1049,17 @@ public sealed class LianLiPluginLifecycleTests {
     // refreshed instance stands in with its control even when it cannot open the pair.
     [Fact]
     public void AGroupHeardAfterLoad_IsRememberedBeforeTheRefresh_SoTheNextInstanceStandsInWithIt() {
+        var clock = new FakeClock();
         var store = new FakeRememberedControllerStore();
-        var runtime = new PluginRuntime(new FakeClock(), store);
+        var runtime = new PluginRuntime(new FakeClock(), store) { WorkerTickIntervalMilliseconds = 20 };
+        int heard = 0;
         using LianLiPlugin plugin = NewPlugin(
-            new FakeEnumerator(Dongles()) { ConfigureTransport = (info, transport) => SeedPair(info, transport, 8) },
-            runtime,
-            clock: new SystemClock());
+            new FakeEnumerator(Dongles()) { ConfigureTransport = GroupChecksInWhen(() => Volatile.Read(ref heard) == 1) }, runtime, clock: clock);
         Assert.Empty(Load(plugin).ControlSensors);
-        Assert.True(SpinWait.SpinUntil(() => runtime.TryTakeRefresh(plugin, out _), TimeSpan.FromSeconds(15)));
+
+        Volatile.Write(ref heard, 1);
+        clock.Advance(TimeSpan.FromSeconds(2));
+        Assert.True(SpinWait.SpinUntil(() => runtime.TryTakeRefresh(plugin, out _), TimeSpan.FromSeconds(10)));
         plugin.Close();
 
         Assert.Single(Assert.Single(store.Stored).Controller.Channels);
@@ -828,6 +1178,27 @@ public sealed class LianLiPluginLifecycleTests {
         Assert.Contains("  a: the sensors it reported could not be remembered: device gone", logger.Messages);
     }
 
+    // A temperature reported after Load (a wireless water block's coolant, say) is a sensor the
+    // host does not have, like any other.
+    [Fact]
+    public void ATemperatureReportedAfterLoad_AsksForARefresh() {
+        var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore());
+        using LianLiPlugin plugin = NewPlugin(new FakeEnumerator(Sli("a")), runtime);
+        _ = Load(plugin);
+
+        var device = new FakeFanDevice(new[] { "LianLi/wa00000000001/empty/ctl" }, new[] { "LianLi/wa00000000001/coolant/temp" });
+        device.UnpopulatedChannels.Add(0); // an empty channel is no sensor of the host's
+        plugin.OnSensorsReported(
+            new ControllerPlan(DeviceKind.WirelessTransmitter, new LocatedDevice(0x0416, 0x8040, "tx", null), new LocatedDevice(0x0416, 0x8041, "rx", null)),
+            1,
+            device,
+            "a wireless device checked in after the scan");
+
+        Assert.True(runtime.TryTakeRefresh(plugin, out string reason));
+        Assert.Equal("a wireless device checked in after the scan", reason);
+        plugin.Close();
+    }
+
     // An instance whose scan ran before the saved controllers were read does not remember what its
     // controllers report afterwards: their indices were numbered without the file.
     [Fact]
@@ -849,10 +1220,12 @@ public sealed class LianLiPluginLifecycleTests {
     }
 
     // A stand-in's rebuild runs through the instance that registered it, under the numbering that
-    // instance's scan ran under: once the saved controllers have been read since, it opens nothing,
-    // so it can never claim a device at a guessed index the file gives another controller.
+    // instance's scan ran under, and only while that instance owns the worker: once it has closed
+    // and the next instance has read the saved controllers, it opens nothing, so it can never claim
+    // a device at a guessed index the file gives another controller, nor hold the device against
+    // the next instance's scan for an open nobody would adopt.
     [Fact]
-    public void ARebuildFromAnInstanceOfAnEarlierNumbering_OpensNothing() {
+    public void ARebuildFromAnInstanceThatHasClosed_OrOfAnEarlierNumbering_OpensNothing() {
         var store = new FakeRememberedControllerStore { UnreadableLoads = 1 };
         var runtime = new PluginRuntime(new FakeClock(), store);
         var unreadEnumerator = new FakeEnumerator(Sli("a"));
@@ -867,7 +1240,7 @@ public sealed class LianLiPluginLifecycleTests {
         InvalidOperationException refused = Assert.Throws<InvalidOperationException>(
             () => unread.Rebuild(new ControllerPlan(DeviceKind.UniFan, Sli("a")), 0));
 
-        Assert.Equal("a is still being opened by another build, or by the next scan", refused.Message);
+        Assert.Equal("a is still being opened by another build, or by the next scan, or this plugin instance has closed", refused.Message);
         Assert.Equal(opened, unreadEnumerator.Opened.Count);
     }
 
@@ -930,9 +1303,14 @@ public sealed class LianLiPluginLifecycleTests {
         _ = runtime.Remember(plan.Key, RememberedFixture.Of(
             plan, 0, new[] { new ChannelDescriptor("group-a/ctl", "A", "group-a/fan", "A") },
             Array.Empty<FanSpeedDescriptor>(), Array.Empty<TemperatureDescriptor>(), new FakeClock().UtcNow));
+        var clock = new FakeClock();
+        runtime.WorkerTickIntervalMilliseconds = 20;
+        int heard = 0;
         using LianLiPlugin plugin = NewPlugin(
-            new FakeEnumerator(Dongles()) { ConfigureTransport = GroupChecksInLate(5) }, runtime, clock: new SystemClock());
+            new FakeEnumerator(Dongles()) { ConfigureTransport = GroupChecksInWhen(() => Volatile.Read(ref heard) == 1) }, runtime, clock: clock);
         plugin.Initialize();
+        Volatile.Write(ref heard, 1);
+        clock.Advance(TimeSpan.FromSeconds(2));
         Assert.True(SpinWait.SpinUntil(() => runtime.Recall(plan.Key)!.Channels.Count == 2, TimeSpan.FromSeconds(10)));
 
         var container = new FakeSensorsContainer();
@@ -948,7 +1326,7 @@ public sealed class LianLiPluginLifecycleTests {
     // placeholder must not stay for good.
     [Fact]
     public void APlaceholder_ForAPairHearingOnlyAnotherMastersDevices_OnlyInTheProcessThatFirstSawIt() {
-        byte[] foreign = FanControl.LianLi.Tests.Protocol.WirelessProtocolTests.Record(
+        byte[] foreign = WirelessProtocolTests.Record(
             new byte[] { 0xB0, 0, 0, 0, 0, 1 }, new byte[] { 0x99, 0x99, 0x99, 0x99, 0x99, 0x99 }, 8, 1, 0, 2,
             new byte[] { 36, 36, 0, 0 }, new[] { 1000, 1100, 0, 0 }, new byte[] { 100, 100, 0, 0 }, 1);
         var rig = new FakeWirelessRig();
@@ -956,7 +1334,7 @@ public sealed class LianLiPluginLifecycleTests {
             for (int i = 0; i < 100; i++) {
                 transport.ReadReplies.Enqueue(info.ProductId == 0x8040
                     ? rig.MasterReply()!
-                    : FanControl.LianLi.Tests.Protocol.WirelessProtocolTests.ListReply(1, foreign));
+                    : WirelessProtocolTests.ListReply(1, foreign));
             }
         };
         var store = new FakeRememberedControllerStore();
@@ -989,7 +1367,7 @@ public sealed class LianLiPluginLifecycleTests {
     // of them has a sensor - a Strimer only, here - so no placeholder is registered.
     [Fact]
     public void NoPlaceholder_ForAPairWhoseDevicesHaveAnsweredWithoutSensors() {
-        byte[] strimer = FanControl.LianLi.Tests.Protocol.WirelessProtocolTests.Record(
+        byte[] strimer = WirelessProtocolTests.Record(
             new byte[] { 0xA0, 0, 0, 0, 0, 1 }, FakeWirelessRig.MasterMac, 8, 1, 5, 0,
             new byte[4], new int[4], new byte[4], 1);
         var rig = new FakeWirelessRig();
@@ -998,7 +1376,7 @@ public sealed class LianLiPluginLifecycleTests {
                 for (int i = 0; i < 100; i++) {
                     transport.ReadReplies.Enqueue(info.ProductId == 0x8040
                         ? rig.MasterReply()!
-                        : FanControl.LianLi.Tests.Protocol.WirelessProtocolTests.ListReply(1, strimer));
+                        : WirelessProtocolTests.ListReply(1, strimer));
                 }
             },
         };
@@ -1259,12 +1637,12 @@ public sealed class LianLiPluginLifecycleTests {
         public byte[] Read(int length) {
             if (Interlocked.Increment(ref _reads) == 1) {
                 // An undetected record (detected bit clear) when no fan has answered yet.
-                return FanControl.LianLi.Protocol.CommandPacket.Build(0xA1, _fansAtFirst == 0 ? (byte)0x00 : (byte)0x80, 0x03, 0xE8);
+                return CommandPacket.Build(0xA1, _fansAtFirst == 0 ? (byte)0x00 : (byte)0x80, 0x03, 0xE8);
             }
 
             _entered.Set();
             Assert.True(_allow.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
-            return FanControl.LianLi.Protocol.CommandPacket.Build(0xA1, 0x80, 0x03, 0xE8, 0x81, 0x04, 0x4C);
+            return CommandPacket.Build(0xA1, 0x80, 0x03, 0xE8, 0x81, 0x04, 0x4C);
         }
 
         public void Dispose() {

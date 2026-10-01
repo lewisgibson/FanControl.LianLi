@@ -29,9 +29,18 @@ public class DeviceCatalogTests {
         => Assert.Throws<ArgumentException>(() => new DeviceCatalog().ProtocolFor(pid));
 
     [Fact]
-    public void VendorIds_ContainBothFamiliesAndTheWirelessAlternate() {
+    public void VendorIds_ContainBothFamiliesTheWirelessAlternateAndTheReceivers() {
         var catalog = new DeviceCatalog();
-        Assert.Equal(new[] { 0x0CF2, 0x0416, 0x1A86 }, catalog.VendorIds);
+        Assert.Equal(new[] { 0x0CF2, 0x0416, 0x1A86, 0x43A8 }, catalog.VendorIds);
+    }
+
+    [Fact]
+    public void FlexReceiverProductIds_ContainTheReceiversLConnectDrivesOverUsb() {
+        var catalog = new DeviceCatalog();
+        Assert.Equal(new[] { 0x0101, 0x0102, 0x0104, 0x0105 }, catalog.FlexReceiverProductIds);
+        Assert.DoesNotContain(0x0103, catalog.FlexReceiverProductIds); // SL-INF FLEX: no wired fan control in L-Connect
+        Assert.DoesNotContain(0x0106, catalog.FlexReceiverProductIds); // SL FLEX
+        Assert.DoesNotContain(0x0107, catalog.FlexReceiverProductIds); // CL FLEX
     }
 
     [Fact]
@@ -84,6 +93,12 @@ public class DeviceCatalogTests {
     [InlineData(0x0416, 0x8051, "HydroShiftCurve")] // HydroShift II OLED Curve pump MCU
     [InlineData(0x0416, 0x8052, "Unknown")]  // its bootloader, never opened
     [InlineData(0x0CF2, 0x8051, "Unknown")]  // right pid, wrong vendor for the pump
+    [InlineData(0x43A8, 0x0101, "FlexReceiver")] // TL FLEX receiver
+    [InlineData(0x43A8, 0x0102, "FlexReceiver")] // TL FLEX LCD receiver
+    [InlineData(0x43A8, 0x0104, "FlexReceiver")] // SL-INF FLEX LCD receiver
+    [InlineData(0x43A8, 0x0105, "FlexReceiver")] // P28 V2 receiver
+    [InlineData(0x43A8, 0x0103, "Unknown")]      // SL-INF FLEX receiver: L-Connect gives it no wired fan control
+    [InlineData(0x0416, 0x0101, "Unknown")]      // right pid, wrong vendor for a receiver
     [InlineData(0x0416, 0x8040, "WirelessTransmitter")] // L-Wireless transmitter dongle
     [InlineData(0x0416, 0x8041, "WirelessReceiver")]    // L-Wireless receiver dongle
     [InlineData(0x1A86, 0xE304, "WirelessTransmitter")] // alternate vendor pair

@@ -24,7 +24,10 @@ internal sealed class WirelessDeviceRecord {
         byte[] fanTypes,
         int[] rpm,
         byte[] pwm,
-        byte commandSequence) {
+        byte commandSequence,
+        bool rightAttached,
+        byte themeSwitches,
+        bool lightingFollowsMotherboard) {
         Mac = Copy(mac, WirelessProtocol.MacLength, nameof(mac));
         MasterMac = Copy(masterMac, WirelessProtocol.MacLength, nameof(masterMac));
         Channel = channel;
@@ -49,6 +52,9 @@ internal sealed class WirelessDeviceRecord {
         Rpm = (int[])rpm.Clone();
         Pwm = Copy(pwm, WirelessProtocol.SlotsPerGroup, nameof(pwm));
         CommandSequence = commandSequence;
+        RightAttached = rightAttached;
+        ThemeSwitches = themeSwitches;
+        LightingFollowsMotherboard = lightingFollowsMotherboard;
         MacText = FormatMac(Mac);
         Kind = KindOf(deviceType);
     }
@@ -62,7 +68,10 @@ internal sealed class WirelessDeviceRecord {
     /// <summary>The RF channel the device is on.</summary>
     public byte Channel { get; }
 
-    /// <summary>The receiver slot (1-15) the master assigned the device when it bound it.</summary>
+    /// <summary>
+    /// The receiver slot the master assigned the device when it bound it. L-Connect hands out 1-13
+    /// (<c>MasterDevice.GetRxUnused</c>); a device bound by an older release may still report 14 or 15.
+    /// </summary>
     public byte ReceiverType { get; }
 
     /// <summary>The device's clock in milliseconds, which L-Connect compares against the master's.</summary>
@@ -96,6 +105,29 @@ internal sealed class WirelessDeviceRecord {
     /// <summary>The command sequence number the device last acknowledged.</summary>
     public byte CommandSequence { get; }
 
+    /// <summary>
+    /// L-Connect's <c>isINFRightAttach</c>: the fan count byte was ten or more, which marks a group
+    /// whose SL-Infinity style end cap is on the right. It decides in which order the screens of an
+    /// LCD FLEX group are numbered in the clock broadcast's screen table.
+    /// </summary>
+    public bool RightAttached { get; }
+
+    /// <summary>
+    /// L-Connect's <c>WiredlessThemeSwitch</c>: the high nibble of slot 1's RPM high byte on every
+    /// device but a P28 V2 group, one bit per screen of an LCD FLEX group saying whether it shows
+    /// its wireless theme (set) or PC-streamed content (clear). The bits are in the firmware's fan
+    /// order, the reverse of the service's: the service's fan <c>i</c> is bit
+    /// <c>max(count, 3) - 1 - i</c> (<c>FlexLCDSdkHelper.ToThemeSwitchPlayIndex</c>). 0 on a P28 V2,
+    /// whose nibble carries its gear and sync line instead.
+    /// </summary>
+    public byte ThemeSwitches { get; }
+
+    /// <summary>
+    /// L-Connect's <c>IsSyncMbLight</c>: bit 6 of slot 0's RPM high byte, set while the device's
+    /// lighting follows the motherboard's ARGB header (the state RF command 0x27 sets).
+    /// </summary>
+    public bool LightingFollowsMotherboard { get; }
+
     /// <summary>The address as twelve lowercase hex digits, no separators - stable across runs, so it keys the sensor ids.</summary>
     public string MacText { get; }
 
@@ -116,7 +148,8 @@ internal sealed class WirelessDeviceRecord {
     /// This record as L-Connect reads it while its device list is locked (<c>RefreshList</c> under
     /// <c>lock_list</c>): the product type stays <paramref name="locked"/>'s, and so do the fan types,
     /// except on a water block or a case (types 10, 11, 65 and 66), whose slots carry what is fitted
-    /// and the coolant temperature and so are always read.
+    /// and the coolant temperature and so are always read. The fan count, and with it which side
+    /// the end cap is on, is always read too.
     /// </summary>
     public WirelessDeviceRecord WithLockedIdentity(WirelessDeviceRecord locked) {
         if (locked is null) {
@@ -139,7 +172,10 @@ internal sealed class WirelessDeviceRecord {
             liveFanTypes ? FanTypes : locked.FanTypes,
             Rpm,
             Pwm,
-            CommandSequence);
+            CommandSequence,
+            RightAttached,
+            ThemeSwitches,
+            LightingFollowsMotherboard);
     }
 
     /// <summary>Whether the device's current effect is the one with the given index.</summary>

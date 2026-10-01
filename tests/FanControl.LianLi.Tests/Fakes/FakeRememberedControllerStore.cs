@@ -36,8 +36,19 @@ internal sealed class FakeRememberedControllerStore : IRememberedControllerStore
         MostAtOnce = Math.Max(MostAtOnce, Interlocked.Increment(ref _running));
         DuringSave?.Invoke();
         Interlocked.Decrement(ref _running);
-        Saves++;
-        Stored.Clear();
-        Stored.AddRange(controllers);
+        lock (_sync) {
+            Saves++;
+            Stored.Clear();
+            Stored.AddRange(controllers);
+        }
     }
+
+    /// <summary>What the last save left, read under the save's lock, for a test waiting on a worker's save.</summary>
+    public IReadOnlyList<StoredController> Snapshot() {
+        lock (_sync) {
+            return Stored.ToArray();
+        }
+    }
+
+    private readonly object _sync = new object();
 }

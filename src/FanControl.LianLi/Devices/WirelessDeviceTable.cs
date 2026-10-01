@@ -15,9 +15,10 @@ namespace FanControl.LianLi.Devices;
 /// <list type="bullet">
 /// <item>a device heard for the first time is appended; if it names this master it is taken as bound,
 /// its receiver slot remembered and its targets started from what it reports;</item>
-/// <item>a device's countdown restarts whenever it is heard, and counts down on every read for a
-/// device that is not bound (the Lancool 217 excepted) and for a V150; the first one to reach zero
-/// is dropped from the table;</item>
+/// <item>a device's countdown restarts whenever it is heard, and counts down on every read for
+/// every device but a Lancool 217, bound or not; every one whose countdown has run out is dropped
+/// from the table before the read goes out, so a device that comes back is appended afresh and
+/// numbered last, as L-Connect numbers it;</item>
 /// <item>a bound device that shares its receiver slot with another of this master's devices more than
 /// four reads running is either a ghost - an address that differs from the other's only in a first
 /// byte of 1, which L-Connect removes for good - or a conflict L-Connect would settle by unbinding.</item>
@@ -26,11 +27,15 @@ namespace FanControl.LianLi.Devices;
 /// Where L-Connect would unbind a device the plugin never does (it never sends a bind index of 0):
 /// a device that already had a place on the table unbound and later names this master is taken as
 /// bound, where L-Connect unbinds it; a device beyond this master's twelfth is refused rather than
-/// unbound; and a receiver slot conflict is logged and left. On top of L-Connect's table the plugin
-/// counts, for every device, the reads in a row that did not carry it, and marks one unheard for
-/// <see cref="WirelessDevice.MaximumMissedReads"/> reads as lost, so its fans read 0 rather than a
-/// frozen last value. The masters in radio range are kept beside the devices, and while the user has
-/// L-Connect's device list locked the table is that list (<see cref="Lock"/>). Worker-thread only.
+/// unbound; and a receiver slot conflict is logged and left. A bound device that is dropped keeps
+/// its FanControl sensors, which the controller holds by address: they read 0 rpm and no temperature
+/// while the device is off the table, and its duty is sent again once it is heard, so the table
+/// follows L-Connect's numbering and the user's bindings survive. On top of L-Connect's table the
+/// plugin counts, for every device, the reads in a row that did not carry it, and marks one unheard
+/// for <see cref="WirelessDevice.MaximumMissedReads"/> reads while still on the table (the list
+/// locked, or no list read for want of a master) as lost, so its fans read 0 rather than a frozen
+/// last value there too. The masters in radio range are kept beside the devices, and while the user
+/// has L-Connect's device list locked the table is that list (<see cref="Lock"/>). Worker-thread only.
 /// </summary>
 internal sealed class WirelessDeviceTable {
     // RefreshList unbinds a newly heard device once twelve are bound, counting it.
@@ -48,6 +53,11 @@ internal sealed class WirelessDeviceTable {
     private readonly List<WirelessDevice> _devices = new List<WirelessDevice>();
     private readonly List<WirelessMaster> _masters = new List<WirelessMaster>();
     private readonly HashSet<string> _ghostAddresses = new HashSet<string>(StringComparer.Ordinal);
+
+    // The addresses of bound devices dropped from the table and not heard since, so that the log
+    // tells one heard again from one never heard before. An address leaves it only when its device
+    // returns, so one dropped for good stays for the controller's life.
+    private readonly HashSet<string> _droppedWhileBound = new HashSet<string>(StringComparer.Ordinal);
     private readonly int _index;
     private readonly ILog _log;
 
@@ -145,9 +155,11 @@ internal sealed class WirelessDeviceTable {
             throw new ArgumentNullException(nameof(masterMac));
         }
 
-        // RefreshList counts the read down before it is even sent.
+        // RefreshList counts the read down before it is even sent, for every device but a Lancool
+        // 217 (RecType[0] != LC217), and drops whatever has run out before the request goes out, so a
+        // read that then fails still drops. A locked list drops nothing.
         foreach (WirelessDevice device in _devices) {
-            if ((!device.IsBound && device.Kind != WirelessDeviceKind.CaseFans) || device.Kind == WirelessDeviceKind.V150) {
+            if (device.Kind != WirelessDeviceKind.CaseFans) {
                 device.Live--;
             }
 
@@ -158,7 +170,11 @@ internal sealed class WirelessDeviceTable {
             master.Live--;
         }
 
-        // RefreshList stops here for a failed read or an empty list; nothing is added or dropped.
+        if (!IsLocked) {
+            DropExpired();
+        }
+
+        // RefreshList stops here for a failed read or an empty list; nothing is added.
         if (list is null || list.Total == 0) {
             CountMisses();
             return;
@@ -166,7 +182,14 @@ internal sealed class WirelessDeviceTable {
 
         bool conflict = ApplyRecords(list.Records, masterMac);
         CountMisses();
-        DropExpired(conflict, masterClockMilliseconds);
+        // After the records RefreshList eases the conflict counts and runs the same removal again,
+        // which can find nothing the first did not, since every device it has just heard is back at
+        // its full countdown; then it takes the clock offsets, whatever was dropped.
+        if (!IsLocked) {
+            EaseConflicts(conflict);
+        }
+
+        UpdateClockOffsets(masterClockMilliseconds);
     }
 
     private bool ApplyRecords(IReadOnlyList<WirelessDeviceRecord> records, byte[] masterMac) {
@@ -189,6 +212,11 @@ internal sealed class WirelessDeviceTable {
 
                 device = new WirelessDevice(record);
                 _devices.Add(device);
+                if (_droppedWhileBound.Remove(record.MacText)) {
+                    // Back after being dropped: a fresh entry, tried as any device first heard is;
+                    // only the log tells it from a new one.
+                    _log.Write(string.Format(CultureInfo.InvariantCulture, "W{0}:{1} heard again", _index, device.MacText));
+                }
             } else {
                 device.Update(IsLocked ? record.WithLockedIdentity(device.Record) : record);
             }
@@ -239,7 +267,7 @@ internal sealed class WirelessDeviceTable {
             }
         }
 
-        // A refused device is looked at again on every read that carries it: a bound V150 can be
+        // A refused device is looked at again on every read that carries it: a bound device can be
         // dropped (its countdown runs even while bound), and then there is room for it. The refusal
         // is logged once, not on every read.
         if (bound >= MaximumBound) {
@@ -332,37 +360,40 @@ internal sealed class WirelessDeviceTable {
         }
     }
 
-    // After the records: without a conflict anywhere in this read every conflict count eases by
-    // one, and the first device whose countdown has run out is dropped - after which RefreshList
-    // returns, so nothing further this read eases, and no clock offset is taken.
-    private void DropExpired(bool conflict, long masterClockMilliseconds) {
-        // A locked list drops nothing, device or master, and settles no conflict.
-        if (IsLocked) {
-            UpdateClockOffsets(masterClockMilliseconds);
+    // RefreshList's rfList.RemoveAll(live <= 0 && !visual), and the same for the masters: every
+    // device and master whose countdown has run out goes, in one read.
+    private void DropExpired() {
+        for (int i = _devices.Count - 1; i >= 0; i--) {
+            WirelessDevice device = _devices[i];
+            if (device.Live > 0) {
+                continue;
+            }
+
+            _devices.RemoveAt(i);
+            if (device.IsBound) {
+                _droppedWhileBound.Add(device.MacText);
+            }
+
+            Report(device, string.Format(
+                CultureInfo.InvariantCulture,
+                "not heard for {0} list reads; dropped from the device list as L-Connect drops it, reading 0 rpm until it returns",
+                WirelessDevice.MaximumMissedReads));
+        }
+
+        _masters.RemoveAll(master => master.Live <= 0);
+    }
+
+    // After the records: without a conflict anywhere in this read every conflict count eases by one.
+    private void EaseConflicts(bool conflict) {
+        if (conflict) {
             return;
         }
 
         foreach (WirelessDevice device in _devices) {
-            if (!conflict && device.ConflictCount > 0) {
+            if (device.ConflictCount > 0) {
                 device.ConflictCount--;
             }
-
-            if (device.Live <= 0) {
-                _devices.Remove(device);
-                Report(device, "dropped from the device list after going unheard");
-                return;
-            }
         }
-
-        // Then the masters, the same way: at most one dropped a read, and only when no device was.
-        foreach (WirelessMaster master in _masters) {
-            if (master.Live <= 0) {
-                _masters.Remove(master);
-                return;
-            }
-        }
-
-        UpdateClockOffsets(masterClockMilliseconds);
     }
 
     private void UpdateClockOffsets(long masterClockMilliseconds) {

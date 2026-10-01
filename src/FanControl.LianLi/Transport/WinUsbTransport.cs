@@ -9,11 +9,11 @@ using FanControl.LianLi.Protocol;
 namespace FanControl.LianLi.Transport;
 
 /// <summary>
-/// The <see cref="IDeviceTransport"/> over a WinUSB device: one of the two L-Wireless dongles or
-/// the HydroShift II OLED Curve's pump MCU. Each is a plain USB device with one
+/// The <see cref="IDeviceTransport"/> over a WinUSB device: one of the two L-Wireless dongles, the
+/// HydroShift II OLED Curve's pump MCU or a FLEX receiver. Each is a plain USB device with one
 /// interrupt endpoint pair carrying 64-byte packets, so <see cref="Write"/> is one OUT transfer and
 /// <see cref="Read"/> gathers IN transfers - until the device stops sending, as L-Connect's
-/// <c>WinUsb.ReadAll</c> does for a dongle, or the one packet the pump MCU answers with - with the
+/// <c>WinUsb.ReadAll</c> does for a dongle, or the one packet the others answer with - with the
 /// pipe timeouts of the device's <see cref="WinUsbPipePolicy"/>; there are no HID reports, so the
 /// feature and input-report calls are not supported. Every call that reaches the device - transfer,
 /// reopen, close - is bounded. A device that stops taking writes or stops answering requests is
@@ -38,7 +38,8 @@ internal sealed class WinUsbTransport : IDeviceTransport {
     // The policy's pipe timeouts end a transfer only when WinUSB's own cancel completes; these bound
     // the whole call around them, so a driver stack that stops completing anything cannot hold the
     // thread. A write is a flush and one packet: its pipe timeout and the margin, and never less
-    // than a second. A read is one pipe timeout per packet it may read - those asked for, the
+    // than a second, so a FLEX receiver's 2000 ms write is given its whole window before the call
+    // is given up on. A read is one pipe timeout per packet it may read - those asked for, the
     // drain allowance where the policy drains, and the one that ends the reply - and the margin.
     // The margin is far beyond a healthy device's latency.
     private const int MinimumWriteCallTimeoutMilliseconds = 1000;

@@ -8,8 +8,8 @@ using FanControl.LianLi.Protocol;
 namespace FanControl.LianLi.Transport;
 
 /// <summary>
-/// Locates the plugin's WinUSB devices: the L-Wireless dongles and the HydroShift II OLED Curve's
-/// pump MCU. They are not HID devices - Windows binds them to WinUSB, so
+/// Locates the plugin's WinUSB devices: the L-Wireless dongles, the HydroShift II OLED Curve's
+/// pump MCU and the FLEX receivers. They are not HID devices - Windows binds them to WinUSB, so
 /// they have no HID interface for <see cref="HidDeviceLocator"/> to list - and the way to one is
 /// not the generic USB device interface but the interface GUID WinUSB registered for it in its
 /// hardware key, which is what Lian Li's own USB library reads (docs/wireless.md). So this walks
@@ -73,11 +73,13 @@ internal sealed class WinUsbDeviceLocator {
 
     /// <summary>
     /// Whether a vendor/product pair is a device the plugin reaches over WinUSB - one of the
-    /// L-Wireless dongles or the HydroShift II OLED Curve's pump MCU - so the scan
+    /// L-Wireless dongles, the HydroShift II OLED Curve's pump MCU or a FLEX receiver - so the scan
     /// lists it here and the enumerator opens it with <see cref="WinUsbTransport"/>.
     /// </summary>
     public static bool IsWinUsbDevice(int vendorId, int productId)
-        => WirelessProtocol.IsDongle(vendorId, productId) || HydroShiftCurveProtocol.IsPump(vendorId, productId);
+        => WirelessProtocol.IsDongle(vendorId, productId)
+            || HydroShiftCurveProtocol.IsPump(vendorId, productId)
+            || FlexReceiverProtocol.IsReceiver(vendorId, productId);
 
     /// <summary>
     /// Every present WinUSB device of the plugin's whose vendor and product id appear in both
@@ -115,9 +117,17 @@ internal sealed class WinUsbDeviceLocator {
         return located;
     }
 
-    // How a device is named in the log, so a line about the pump MCU does not call it a dongle.
-    private static string Role(int vendorId, int productId)
-        => WirelessProtocol.IsDongle(vendorId, productId) ? "wireless dongle" : "HydroShift II OLED Curve pump";
+    // How a device is named in the log, so a line about the pump MCU or a receiver does not call it
+    // a dongle.
+    private static string Role(int vendorId, int productId) {
+        if (WirelessProtocol.IsDongle(vendorId, productId)) {
+            return "wireless dongle";
+        }
+
+        return FlexReceiverProtocol.IsReceiver(vendorId, productId)
+            ? FlexReceiverProtocol.ProductName(FlexReceiverProtocol.FamilyOf(productId)) + " receiver"
+            : "HydroShift II OLED Curve pump";
+    }
 
     private IReadOnlyList<string> ListUsbDeviceInstances(CancellationToken token) {
         const uint flags = IdListFilterEnumerator | IdListFilterPresent;

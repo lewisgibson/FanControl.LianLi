@@ -35,6 +35,9 @@ internal sealed class FakeWirelessRecord {
 
     public int[] Rpm { get; set; } = new int[4];
 
+    /// <summary>The high nibble of each slot's RPM high byte, which the firmware fills with flags and its version.</summary>
+    public byte[] RpmHighNibbles { get; set; } = new byte[4];
+
     public byte[] Pwm { get; set; } = new byte[4];
 
     public byte Sequence { get; set; }
@@ -56,7 +59,7 @@ internal sealed class FakeWirelessRecord {
         Array.Copy(EffectIndex, 0, record, 20, 4);
         Array.Copy(FanTypes, 0, record, 24, 4);
         for (int slot = 0; slot < 4; slot++) {
-            record[28 + (slot * 2)] = (byte)(Rpm[slot] >> 8);
+            record[28 + (slot * 2)] = (byte)((Rpm[slot] >> 8) | (RpmHighNibbles[slot] << 4));
             record[29 + (slot * 2)] = (byte)Rpm[slot];
         }
 

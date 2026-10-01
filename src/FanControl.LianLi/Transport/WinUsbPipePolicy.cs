@@ -7,9 +7,9 @@ namespace FanControl.LianLi.Transport;
 /// device, taken from the timing L-Connect gives that device. The L-Wireless dongles answer from
 /// their own buffer within a few milliseconds with as many packets as they have queued, so a read
 /// gathers packets until one does not arrive (<c>WinUsb.ReadAll</c>); the HydroShift II OLED
-/// Curve's pump MCU answers every command with exactly one packet (<c>WinUsbHS2.SendAndReadLed</c>,
-/// one write then one read), so a read takes that packet and does not wait for a second that never
-/// comes.
+/// Curve's pump MCU and a FLEX receiver answer every command with exactly one packet
+/// (<c>WinUsbHS2.SendAndReadLed</c> and <c>WinUsbLed.SendAndRead</c>, each one write then one
+/// read), so a read takes that packet and does not wait for a second that never comes.
 /// </summary>
 internal sealed class WinUsbPipePolicy {
     // L-Connect gives a dongle packet write 100 ms (WinUsb.RfSend: writer.Write(bytes, 100, ...)); a
@@ -22,6 +22,11 @@ internal sealed class WinUsbPipePolicy {
     // WinUsbHS2.SendAndReadLed: writer.Write(bytes, 200), then WinUsb.Read's reader.Read(buffer, 200).
     private const uint PumpWriteTimeoutMilliseconds = 200;
     private const uint PumpReadTimeoutMilliseconds = 200;
+
+    // WinUsbLed.SendAndRead: writer.Write(sendBytes, 2000), since the receiver has to gather the
+    // chain's RF state to answer, then Led_Read with its default 100 ms.
+    private const uint FlexReceiverWriteTimeoutMilliseconds = 2000;
+    private const uint FlexReceiverReadTimeoutMilliseconds = 100;
 
     private WinUsbPipePolicy(uint writeTimeoutMilliseconds, uint readTimeoutMilliseconds, bool readsWholeReply) {
         WriteTimeoutMilliseconds = writeTimeoutMilliseconds;
@@ -37,6 +42,10 @@ internal sealed class WinUsbPipePolicy {
     public static WinUsbPipePolicy PumpMcu { get; } =
         new WinUsbPipePolicy(PumpWriteTimeoutMilliseconds, PumpReadTimeoutMilliseconds, readsWholeReply: false);
 
+    /// <summary>A FLEX or P28 V2 chain's USB receiver: 2000 ms per write, 100 ms for its one reply packet.</summary>
+    public static WinUsbPipePolicy FlexReceiver { get; } =
+        new WinUsbPipePolicy(FlexReceiverWriteTimeoutMilliseconds, FlexReceiverReadTimeoutMilliseconds, readsWholeReply: false);
+
     /// <summary>The OUT pipe's transfer timeout.</summary>
     public uint WriteTimeoutMilliseconds { get; }
 
@@ -51,7 +60,9 @@ internal sealed class WinUsbPipePolicy {
     /// </summary>
     public bool ReadsWholeReply { get; }
 
-    /// <summary>The policy for the WinUSB device with the given ids: the dongles' for anything that is not the pump MCU.</summary>
+    /// <summary>The policy for the WinUSB device with the given ids: the dongles' for anything that is not the pump MCU or a FLEX receiver.</summary>
     public static WinUsbPipePolicy For(int vendorId, int productId)
-        => HydroShiftCurveProtocol.IsPump(vendorId, productId) ? PumpMcu : Dongle;
+        => HydroShiftCurveProtocol.IsPump(vendorId, productId) ? PumpMcu
+            : FlexReceiverProtocol.IsReceiver(vendorId, productId) ? FlexReceiver
+            : Dongle;
 }

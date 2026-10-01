@@ -54,7 +54,8 @@ public sealed class WirelessDeviceTableTests {
     }
 
     // masterList: a master heard again takes its new channel and restarts its countdown; one unheard
-    // for 30 reads is dropped, but not on a read that already dropped a device.
+    // for 30 reads is dropped, in the same read as any device that ran out (RefreshList removes
+    // every expired device and master at once).
     [Fact]
     public void Apply_KeepsAMasterListWithTheSameCountdownAsDevices() {
         var (table, _) = NewTable();
@@ -64,15 +65,15 @@ public sealed class WirelessDeviceTableTests {
         Read(table, other, Rec(1, Other));
         Assert.Equal(12, Assert.Single(table.Masters).Channel);
 
-        // The unbound device and the master count down together; the device goes first.
-        for (int read = 0; read < WirelessDevice.MaximumMissedReads; read++) {
+        for (int read = 0; read < WirelessDevice.MaximumMissedReads - 1; read++) {
             Read(table, Rec(2, Other));
         }
 
-        Assert.DoesNotContain(table.Devices, d => d.MacText == "a00000000001");
+        Assert.Contains(table.Devices, d => d.MacText == "a00000000001");
         Assert.Single(table.Masters);
 
         Read(table, Rec(2, Other));
+        Assert.DoesNotContain(table.Devices, d => d.MacText == "a00000000001");
         Assert.Empty(table.Masters);
     }
 
@@ -138,10 +139,10 @@ public sealed class WirelessDeviceTableTests {
         Assert.Single(log.Messages, m => m.Contains("W3:a0000000000c names this master but 11 devices already do"));
     }
 
-    // A bound V150 counts down even while bound, so it can be dropped; the refused device is then
+    // A bound device counts down even while bound, so it can be dropped; the refused device is then
     // taken, on the next read that carries it.
     [Fact]
-    public void Apply_TakesARefusedDevice_OnceABoundV150IsDroppedAndThereIsRoom() {
+    public void Apply_TakesARefusedDevice_OnceABoundDeviceIsDroppedAndThereIsRoom() {
         var (table, log) = NewTable();
         FakeWirelessRecord v150 = Rec(1, type: 66, receiver: 1);
         FakeWirelessRecord[] others = Enumerable.Range(2, 11).Select(i => Rec(i, receiver: (byte)i)).ToArray();
@@ -159,8 +160,8 @@ public sealed class WirelessDeviceTableTests {
         Assert.Contains(log.Messages, m => m.Contains("W3:a0000000000c bound to this master (refused earlier, now there is room)"));
     }
 
-    // RefreshList: live-- for (!bind_to_master && not LC217) || V150, before the read; FindDev resets
-    // it; the first device at zero is removed.
+    // RefreshList: live-- for every device but a Lancool 217 (RecType[0] != LC217), before the
+    // read; FindDev resets it; every device at zero is removed.
     [Fact]
     public void Apply_DropsAnUnboundDeviceAfterThirtyReadsUnheard() {
         var (table, _) = NewTable();
@@ -175,16 +176,51 @@ public sealed class WirelessDeviceTableTests {
         Assert.Equal("a00000000002", Assert.Single(table.Devices).MacText);
     }
 
+    // A Lancool 217 never counts down, bound or not; a bound fan group does, and is dropped.
     [Fact]
-    public void Apply_NeverDropsABoundFanGroupOrAnUnboundLancool217() {
-        var (table, _) = NewTable();
-        Read(table, Rec(1), Rec(2, Other, type: 65), Rec(9));
+    public void Apply_DropsABoundFanGroup_ButNeverALancool217() {
+        var (table, log) = NewTable();
+        Read(table, Rec(1), Rec(2, Other, type: 65), Rec(3, type: 65), Rec(9));
 
         for (int read = 0; read < 40; read++) {
             Read(table, Rec(9));
         }
 
-        Assert.Equal(3, table.Devices.Count);
+        Assert.Equal(new[] { "a00000000002", "a00000000003", "a00000000009" }, table.Devices.Select(d => d.MacText));
+        Assert.Contains(
+            "W3:a00000000001 not heard for 30 list reads; dropped from the device list as L-Connect drops it, reading 0 rpm until it returns",
+            log.Messages);
+    }
+
+    // Once it is heard again a dropped device is appended as new, taken as bound afresh (its targets
+    // start from what it reports), and told from a device never heard before only by the log.
+    [Fact]
+    public void Apply_ADroppedBoundDevice_IsAppendedAgainWhenHeard() {
+        var (table, log) = NewTable();
+        Read(table, Rec(1), Rec(2, receiver: 2));
+        table.Devices[0].TargetPwm[0] = 9;
+        for (int read = 0; read < 30; read++) {
+            Read(table, Rec(2, receiver: 2));
+        }
+
+        Assert.Equal("a00000000002", Assert.Single(table.Devices).MacText);
+        Read(table, Rec(1), Rec(2, receiver: 2));
+
+        Assert.Equal(new[] { "a00000000002", "a00000000001" }, table.Devices.Select(d => d.MacText));
+        WirelessDevice back = table.Devices[1];
+        Assert.True(back.IsBound);
+        Assert.Equal(new byte[] { 50, 50, 50, 50 }, back.TargetPwm);
+        Assert.Contains("W3:a00000000001 heard again", log.Messages);
+        Assert.Equal(2, log.Messages.Count(m => m.StartsWith("W3:a00000000001 bound to this master", StringComparison.Ordinal)));
+
+        // An unbound device that comes back is simply new.
+        Read(table, Rec(3, Other));
+        for (int read = 0; read < 30; read++) {
+            Read(table, Rec(2, receiver: 2));
+        }
+
+        Read(table, Rec(3, Other));
+        Assert.Single(log.Messages, m => m.EndsWith(" heard again", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -197,67 +233,86 @@ public sealed class WirelessDeviceTableTests {
         }
 
         Assert.Equal("a00000000009", Assert.Single(table.Devices).MacText);
-        Assert.Contains("W3:a00000000001 dropped from the device list after going unheard", log.Messages);
+        Assert.Contains(log.Messages, m => m.StartsWith("W3:a00000000001 not heard for 30 list reads; dropped", StringComparison.Ordinal));
     }
 
-    // RefreshList returns after removing one device, so only the first expired goes per read.
+    // RefreshList's RemoveAll: every expired device goes in the one read.
     [Fact]
-    public void Apply_DropsOneExpiredDevicePerRead() {
+    public void Apply_DropsEveryExpiredDeviceInOneRead() {
         var (table, _) = NewTable();
         Read(table, Rec(1, Other), Rec(2, Other), Rec(9));
         for (int read = 0; read < 29; read++) {
             Read(table, Rec(9));
         }
 
-        Read(table, Rec(9));
-        Assert.Equal(new[] { "a00000000002", "a00000000009" }, table.Devices.Select(d => d.MacText));
+        Assert.Equal(3, table.Devices.Count);
         Read(table, Rec(9));
         Assert.Equal("a00000000009", Assert.Single(table.Devices).MacText);
     }
 
-    // The countdown runs even on a read that fails (it is taken before the request), but only a
-    // list that carries devices can drop one.
+    // The countdown runs, and the removal too, before the request goes out, so a read that fails
+    // or comes back empty still drops.
     [Fact]
-    public void Apply_AFailedOrEmptyReadCountsDownButDropsNothing() {
+    public void Apply_AFailedOrEmptyReadCountsDownAndDrops() {
         var (table, _) = NewTable();
-        Read(table, Rec(1, Other), Rec(9));
-        for (int read = 0; read < 35; read++) {
-            table.Apply(null, Master, 5000);
-        }
-
-        table.Apply(FakeWirelessRecords.List(0), Master, 5000);
-        Assert.Equal(2, table.Devices.Count);
-        Assert.True(table.Devices[0].Live <= 0);
-
-        Read(table, Rec(9));
-        Assert.Equal("a00000000009", Assert.Single(table.Devices).MacText);
-    }
-
-    // The plugin's lost mark: thirty reads in a row that did not carry the device.
-    [Fact]
-    public void Apply_MarksABoundDeviceLostAfterThirtyMissesAndFoundWhenHeard() {
-        var (table, log) = NewTable();
-        Read(table, Rec(1), Rec(2, Other));
-
+        Read(table, Rec(1, Other), Rec(2), Rec(9, type: 65));
         for (int read = 0; read < 29; read++) {
             table.Apply(null, Master, 5000);
         }
 
+        Assert.Equal(3, table.Devices.Count);
+        table.Apply(FakeWirelessRecords.List(0), Master, 5000);
+        Assert.Equal("a00000000009", Assert.Single(table.Devices).MacText);
+        table.Apply(null, Master, 5000);
+        Assert.Single(table.Devices);
+    }
+
+    // The plugin's lost mark, for a device that stays on the table: L-Connect reads no list without
+    // a master, so its countdown does not move, but thirty cycles nobody was heard in mark it lost.
+    [Fact]
+    public void MissRead_MarksABoundDeviceLostAfterThirtyMissesAndFoundWhenHeard() {
+        var (table, log) = NewTable();
+        Read(table, Rec(1), Rec(2, Other));
+
+        for (int read = 0; read < 29; read++) {
+            table.MissRead();
+        }
+
         Assert.False(table.Devices[0].IsLost);
         Assert.Equal(29, table.Devices[0].MissedReads);
-        table.Apply(null, Master, 5000);
+        table.MissRead();
         Assert.True(table.Devices[0].IsLost);
         Assert.True(table.Devices[1].IsLost);
+        Assert.Equal(30, table.Devices[0].Live);
         Assert.Contains("W3:a00000000001 not heard for 30 list reads; reading 0 rpm until it is", log.Messages);
         Assert.DoesNotContain(log.Messages, m => m.StartsWith("W3:a00000000002", StringComparison.Ordinal));
 
+        table.Devices[0].ScreenMode.Done = true;
         Read(table, Rec(1));
         Assert.False(table.Devices[0].IsLost);
         Assert.Equal(0, table.Devices[0].MissedReads);
+        Assert.False(table.Devices[0].ScreenMode.Done); // its commands are started over
         Assert.Contains("W3:a00000000001 heard again", log.Messages);
 
-        table.Apply(null, Master, 5000);
+        table.MissRead();
         Assert.Single(log.Messages, m => m.Contains("not heard for 30"));
+    }
+
+    // The same lost mark on a locked list, which drops nothing.
+    [Fact]
+    public void Apply_MarksALockedDeviceLostAfterThirtyMisses_RatherThanDropIt() {
+        var (table, log) = NewTable();
+        table.Lock(new[] { Locked(Rec(1)) });
+        Read(table, Rec(1));
+
+        for (int read = 0; read < 30; read++) {
+            table.Apply(null, Master, 5000);
+        }
+
+        WirelessDevice device = Assert.Single(table.Devices);
+        Assert.True(device.IsLost);
+        Assert.True(device.Live <= 0);
+        Assert.Contains("W3:a00000000001 not heard for 30 list reads; reading 0 rpm until it is", log.Messages);
     }
 
     // RefreshList: ConflictCnt++ for each other device of this master on the same rx_type, acting
@@ -392,9 +447,9 @@ public sealed class WirelessDeviceTableTests {
         Assert.False(WirelessDeviceTable.IsClockDrifted(table.Devices[2]));
     }
 
-    // RefreshList returns straight after a removal, before the clock offsets.
+    // RefreshList takes the clock offsets at its end whatever it dropped.
     [Fact]
-    public void Apply_ARemovalSkipsTheClockOffsetsThatRead() {
+    public void Apply_TakesTheClockOffsetsEvenOnAReadThatDropped() {
         var (table, _) = NewTable();
         table.Apply(FakeWirelessRecords.List(Rec(1, Other), Rec(2, type: 65)), Master, 1000);
         FakeWirelessRecord lancool = Rec(2, type: 65);
@@ -406,7 +461,7 @@ public sealed class WirelessDeviceTableTests {
         table.Apply(FakeWirelessRecords.List(lancool), Master, 9000);
 
         Assert.Single(table.Devices);
-        Assert.Equal(1000, table.Devices[0].ClockOffset);
+        Assert.Equal(8000, table.Devices[0].ClockOffset);
     }
 
     [Fact]

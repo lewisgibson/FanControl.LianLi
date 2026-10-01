@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using FanControl.LianLi.Protocol;
 using FanControl.LianLi.Tests.Fakes;
 using Xunit;
@@ -42,6 +43,32 @@ public sealed class WirelessProtocolTests {
         return reply;
     }
 
+    [Fact]
+    public void DecodeRecord_ReadsTheLayoutAlone_WithoutTheListReadsPwmRule() {
+        // Ten more than the true count marks the right-attached end cap; an all-zero PWM with a
+        // spinning first fan is read as is here, and as 100 by the list read.
+        var record = new FakeWirelessRecord(GroupMac, MasterMac) {
+            FanCountByte = 12,
+            FanTypes = B(51, 52, 0, 0),
+            Rpm = new[] { 1200, 1100, 0, 0 },
+            RpmHighNibbles = B(0xA, 0x3, 0x2, 0x6),
+            Sequence = 5,
+        };
+        byte[] reply = ListReply(1, record.ToBytes());
+
+        WirelessDeviceRecord alone = WirelessProtocol.DecodeRecord(reply, 4);
+
+        Assert.Equal(2, alone.FanCount);
+        Assert.True(alone.RightAttached);
+        Assert.Equal(new[] { 1200, 1100, 0, 0 }, alone.Rpm);
+        Assert.Equal(new byte[4], alone.Pwm);
+        Assert.Equal(new byte[] { 100, 100, 100, 100 }, Decode(record).Pwm);
+        Assert.Equal((byte)5, alone.CommandSequence);
+        Assert.Throws<ArgumentNullException>(() => WirelessProtocol.DecodeRecord(null!, 0));
+        Assert.Throws<ArgumentException>(() => WirelessProtocol.DecodeRecord(reply, -1));
+        Assert.Throws<ArgumentException>(() => WirelessProtocol.DecodeRecord(new byte[41], 0));
+    }
+
     // A buffer of the given length that is zero except where a (offset, bytes) pair says otherwise.
     private static byte[] Expected(int length, params (int Offset, byte[] Bytes)[] parts) {
         var buffer = new byte[length];
@@ -59,6 +86,9 @@ public sealed class WirelessProtocolTests {
 
     private static WirelessDeviceRecord Group(params int[] fanTypes)
         => Decode(new FakeWirelessRecord(GroupMac, MasterMac) { FanCountByte = 4, FanTypes = B(fanTypes) });
+
+    private static WirelessDeviceRecord AttachedGroup(int fanCountByte, params int[] fanTypes)
+        => Decode(new FakeWirelessRecord(GroupMac, MasterMac) { FanCountByte = (byte)fanCountByte, FanTypes = B(fanTypes) });
 
     // MasterDevice.QuerryMasterMac: [0] = 17, [1] = MasterChannel, the rest zero.
     [Fact]
@@ -158,6 +188,53 @@ public sealed class WirelessProtocolTests {
         Assert.Equal(new[] { 1234, 1500, 0, 0 }, decoded.Rpm);
         Assert.Equal(B(127, 127, 0, 0), decoded.Pwm);
         Assert.Equal(7, decoded.CommandSequence);
+        Assert.True(decoded.RightAttached);
+        Assert.False(Decode(new FakeWirelessRecord(GroupMac, MasterMac) { FanCountByte = 2 }).RightAttached);
+    }
+
+    // RefreshList masks the high nibble of fans_speed[0], [2], [4] and [6] before the
+    // RPM is read: slot 0's carries the sync, motherboard-light, PWM-line and tach flags, slot 1's
+    // the P28 V2 gear or the wireless-theme bits, and slots 2 and 3's the RF firmware version.
+    // Speeds[i] = (fans_speed[2i] << 8) + fans_speed[2i+1] on the masked bytes.
+    [Fact]
+    public void DecodeDeviceList_MasksTheFlagAndFirmwareNibblesOffEveryRpm() {
+        var record = new FakeWirelessRecord(GroupMac, MasterMac) {
+            FanCountByte = 4,
+            FanTypes = B(51, 51, 51, 51),
+            Rpm = new[] { 0x0FFF, 1500, 0x0123, 3200 },
+            RpmHighNibbles = B(0xF, 0x7, 0x1, 0x8), // every flag; gear 7; TL FLEX version 0x18
+        };
+
+        WirelessDeviceRecord decoded = Decode(record);
+
+        Assert.Equal(new[] { 0x0FFF, 1500, 0x0123, 3200 }, decoded.Rpm);
+    }
+
+    // Of the nibbles, RefreshList keeps two the plugin reads: IsSyncMbLight is bit 6 of
+    // fans_speed[0], and WiredlessThemeSwitch is the high nibble of fans_speed[2] on every group
+    // whose first fan is not a P28 V2 (63), whose nibble is its gear and sync line.
+    [Fact]
+    public void DecodeDeviceList_ReadsTheLightingSyncFlag_AndTheThemeSwitchBits() {
+        var lit = new FakeWirelessRecord(GroupMac, MasterMac) { FanTypes = B(51, 51, 51, 0), RpmHighNibbles = B(0x4, 0xB, 0, 0) };
+        var plain = new FakeWirelessRecord(GroupMac, MasterMac) { FanTypes = B(51, 51, 51, 0), RpmHighNibbles = B(0xB, 0x0, 0, 0) };
+        var p28 = new FakeWirelessRecord(GroupMac, MasterMac) { FanTypes = B(63, 63, 63, 0), RpmHighNibbles = B(0x4, 0xB, 0, 0) };
+
+        Assert.True(Decode(lit).LightingFollowsMotherboard);
+        Assert.Equal(0xB, Decode(lit).ThemeSwitches);
+        Assert.False(Decode(plain).LightingFollowsMotherboard);
+        Assert.Equal(0, Decode(plain).ThemeSwitches);
+        Assert.True(Decode(p28).LightingFollowsMotherboard);
+        Assert.Equal(0, Decode(p28).ThemeSwitches);
+    }
+
+    // The no-PWM rule tests the masked byte: a flag nibble alone is not a spinning fan.
+    [Theory]
+    [InlineData(0, 0xF, 0)]
+    [InlineData(256, 0xF, 100)]
+    public void DecodeDeviceList_TheUnreportedPwmRuleIgnoresTheFlagNibble(int rpm, int nibble, int expected) {
+        var record = new FakeWirelessRecord(GroupMac, MasterMac) { Rpm = new[] { rpm, 0, 0, 0 }, RpmHighNibbles = B(nibble, 0, 0, 0) };
+
+        Assert.Equal(B(expected, expected, expected, expected), Decode(record).Pwm);
     }
 
     // RefreshList subtracts 10 from a count of 10 or more, and RfDevice.FanNum subtracts 10 again
@@ -346,6 +423,78 @@ public sealed class WirelessProtocolTests {
         Assert.Equal(expected, payload);
     }
 
+    // SyncControlInfo's isTlv3CloseLight branch: the theme switch's layout with the source at 20.
+    [Theory]
+    [InlineData(true, 1)]
+    [InlineData(false, 0)]
+    public void EncodeLightingSyncPayload_CarriesTheSourceAt20(bool follow, byte source) {
+        byte[] device = { 1, 2, 3, 4, 5, 6 };
+        byte[] master = { 7, 8, 9, 10, 11, 12 };
+
+        byte[] payload = WirelessProtocol.EncodeLightingSyncPayload(device, master, 3, 8, 5, 42, follow);
+
+        Assert.Equal(Expected(240, (0, B(0x12, 0x27)), (2, device), (8, master), (14, B(3, 8, 5, 42)), (20, B(source))), payload);
+    }
+
+    // SyncControlInfo's isPlayWirelessTheme branch: the switch mask (WiredlessThemeSwitchTarget) at 20.
+    [Fact]
+    public void EncodeThemeSwitchPayload_CarriesTheSwitchMaskAt20() {
+        byte[] device = { 1, 2, 3, 4, 5, 6 };
+        byte[] master = { 7, 8, 9, 10, 11, 12 };
+
+        byte[] payload = WirelessProtocol.EncodeThemeSwitchPayload(device, master, 3, 8, 5, 42, 0b0111);
+
+        Assert.Equal(Expected(240, (0, B(0x12, 0x29)), (2, device), (8, master), (14, B(3, 8, 5, 42)), (20, B(0b0111))), payload);
+    }
+
+    // SyncControlInfo's isSendColors branch: the 76-byte buffer at 20, the fan's slot (its table
+    // index times 19) holding the six colours' red, green and blue and then the change marker,
+    // the other slots zero (UpdateSensorColors fills a fresh buffer).
+    [Theory]
+    [InlineData(0, 20)]
+    [InlineData(3, 77)]
+    public void EncodeScreenColoursPayload_PutsTheColoursAndTheMarkerInTheFansSlotAt20(int fan, int offset) {
+        byte[] device = { 1, 2, 3, 4, 5, 6 };
+        byte[] master = { 7, 8, 9, 10, 11, 12 };
+        byte[] colours = Enumerable.Range(1, 18).Select(i => (byte)i).ToArray();
+
+        byte[] payload = WirelessProtocol.EncodeScreenColoursPayload(device, master, 3, 8, 5, 42, fan, colours);
+
+        Assert.Equal(Expected(240, (0, B(0x12, 0x28)), (2, device), (8, master), (14, B(3, 8, 5, 42)), (offset, colours), (offset + 18, B(42))), payload);
+        Assert.Throws<ArgumentNullException>(() => WirelessProtocol.EncodeScreenColoursPayload(device, master, 3, 8, 5, 42, 0, null!));
+        Assert.Throws<ArgumentException>(() => WirelessProtocol.EncodeScreenColoursPayload(device, master, 3, 8, 5, 42, 0, new byte[17]));
+        Assert.Throws<ArgumentOutOfRangeException>(() => WirelessProtocol.EncodeScreenColoursPayload(device, master, 3, 8, 5, 42, 4, colours));
+        Assert.Throws<ArgumentOutOfRangeException>(() => WirelessProtocol.EncodeScreenColoursPayload(device, master, 3, 8, 5, 42, -1, colours));
+    }
+
+    // UpdateSensorColors draws the marker from random.Next(1, 254): the plugin's is 1 to 253 too,
+    // from the round's sequence (1 to 254), so consecutive rounds carry different markers.
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(2, 2)]
+    [InlineData(253, 253)]
+    [InlineData(254, 1)]
+    public void ScreenColoursMarker_IsOneToTwoHundredAndFiftyThree_FromTheSequence(int sequence, int marker)
+        => Assert.Equal((byte)marker, WirelessProtocol.ScreenColoursMarker((byte)sequence));
+
+    // TryRestoreWirelessThemeSwitches asks for every fan whose bit is clear, fan i at bit
+    // max(count, 3) - 1 - i (ToThemeSwitchPlayIndex), ored over what the device reports
+    // (PlayWiredlessThemeSwitch's target starts from WiredlessThemeSwitch).
+    [Theory]
+    [InlineData(0b0000, 4, 0b1111)]
+    [InlineData(0b0000, 3, 0b0111)]
+    [InlineData(0b0000, 2, 0b0110)]
+    [InlineData(0b0000, 1, 0b0100)]
+    [InlineData(0b0000, 0, 0b0000)]
+    [InlineData(0b0101, 3, 0b0111)]
+    [InlineData(0b1000, 2, 0b1110)]
+    [InlineData(0b0111, 3, 0b0111)]
+    public void ThemeSwitchesForAllScreens_SetsEveryFansBitInTheFirmwaresOrder(int reported, int fans, int expected) {
+        Assert.Equal((byte)expected, WirelessProtocol.ThemeSwitchesForAllScreens((byte)reported, fans));
+        Assert.Throws<ArgumentOutOfRangeException>(() => WirelessProtocol.ThemeSwitchesForAllScreens(0, 5));
+        Assert.Throws<ArgumentOutOfRangeException>(() => WirelessProtocol.ThemeSwitchesForAllScreens(0, -1));
+    }
+
     // A screen in advance mode keeps every saved setting, with theme 0 (WirelessAioPresentation zeroes
     // it), as L-Connect's setting handlers write it.
     [Fact]
@@ -373,10 +522,38 @@ public sealed class WirelessProtocolTests {
     public void EncodeAioParameters_NullPresentation_Throws()
         => Assert.Throws<ArgumentNullException>(() => WirelessProtocol.EncodeAioParameters(null!, 0));
 
-    // MasterDevice.SyncMasterClock: [0] 18, [1] 20, [8-13] master, everything else zero.
+    // MasterDevice.SyncMasterClock: [0] 18, [1] 20, [8-13] master, [14-233] cpuInfoParam:
+    // the 50-byte fixed block (RFController.GetFixedData's figures, all zero from the plugin, with
+    // the year big-endian at 32-33 then month, day, hour, minute, second at 34-38), the 168-byte
+    // screen table at 50 (MasterDevice.SetFanLcdInfo), then zeros.
     [Fact]
-    public void EncodeClockPayload_AddressesNobodyAndCarriesTheMaster()
-        => Assert.Equal(Expected(240, (0, B(0x12, 0x14)), (8, MasterMac)), WirelessProtocol.EncodeClockPayload(MasterMac));
+    public void EncodeClockPayload_AddressesNobody_CarriesTheMaster_TheLocalTime_AndTheScreenTable() {
+        var screens = new WirelessScreenTable();
+        screens.SetFan(1, 0, 7, 2, 3, 60);
+        screens.SetFan(13, 3, 255, 1, 0, 100);
+        var time = new DateTime(2026, 9, 29, 23, 58, 59, DateTimeKind.Local);
+
+        byte[] payload = WirelessProtocol.EncodeClockPayload(MasterMac, time, screens);
+
+        Assert.Equal(
+            Expected(240,
+                (0, B(0x12, 0x14)),
+                (8, MasterMac),
+                (46, B(0x07, 0xEA, 9, 29, 23, 58, 59)),
+                (64, B(7, 0, 0, 0, 0x43)), // slot 1: theme 7 on fan 0, direction 2 << 5 | source 3
+                (72, B(60)),
+                (64 + (12 * 12) + 3, B(255)), // slot 13: fan 3
+                (64 + (12 * 12) + 7, B(0x20, 100))),
+            payload);
+    }
+
+    [Fact]
+    public void EncodeClockPayload_AnEmptyTableLeavesTheBlockZeroButTheTime() {
+        byte[] payload = WirelessProtocol.EncodeClockPayload(MasterMac, new DateTime(2000, 1, 2, 3, 4, 5), new WirelessScreenTable());
+
+        Assert.Equal(Expected(240, (0, B(0x12, 0x14)), (8, MasterMac), (46, B(0x07, 0xD0, 1, 2, 3, 4, 5))), payload);
+        Assert.Throws<ArgumentNullException>(() => WirelessProtocol.EncodeClockPayload(MasterMac, DateTime.Now, null!));
+    }
 
     // MasterDevice.SaveConfig: [0] 18, [1] 21, [2-7] FF, [8-13] master, [14] FF, [15] 0, [16] 0.
     [Fact]
@@ -511,13 +688,50 @@ public sealed class WirelessProtocolTests {
     [InlineData(28, 26, 10)]
     [InlineData(28, 33, 10)]
     [InlineData(28, 22, 11)]
+    [InlineData(28, 51, 10)] // a TL V2 group with a TL FLEX LCD fan in it is an LCD group too
+    [InlineData(28, 48, 10)]
+    [InlineData(28, 53, 11)] // a TL FLEX LED fan is not
     [InlineData(36, 0, 11)]  // SLINFWFan120LED
     [InlineData(39, 0, 11)]  // SLINFWFan140LED
     [InlineData(40, 0, 10)]  // RL120: None
     [InlineData(41, 0, 10)]  // CL: None
+    [InlineData(43, 0, 10)]  // SLINFFlexFan120LCD
+    [InlineData(45, 0, 10)]  // SLINFFlexFan120LED
+    [InlineData(50, 0, 10)]  // SLINFFlexFan140LED
+    [InlineData(51, 0, 11)]  // TLFlexFan120LED (InitAttr sizes every TL FLEX code as 120)
+    [InlineData(58, 0, 11)]  // TLFlexFanReverse120LED
+    [InlineData(59, 0, 14)]  // SLV4Fan120LED
+    [InlineData(60, 0, 14)]  // SLV4FanReverse120LED
+    [InlineData(61, 0, 10)]  // SL V4 140: convertFanType has no 140 branch, None
+    [InlineData(62, 0, 10)]
+    [InlineData(63, 0, 8)]   // P28V2Fan120
+    [InlineData(126, 0, 10)] // CL V2: DevSize stays 0, None
+    [InlineData(127, 0, 10)]
     [InlineData(0, 20, 10)]  // an empty first slot: ALL, None
     public void GroupDutyFloor_IsPickedFromTheFirstSlotLikeConvertFanType(int first, int second, int expected)
         => Assert.Equal(expected, WirelessProtocol.GroupDutyFloor(Group(first, second, 0, 0)));
+
+    // getTemperatureDuty: a curve speed of 0 is 1 for P28V2Fan120 and 5 for everything else.
+    [Theory]
+    [InlineData(63, 1)]
+    [InlineData(20, 5)]
+    [InlineData(51, 5)]
+    [InlineData(0, 5)]
+    public void GroupIdleDuty_IsOneForP28V2AndFiveForTheRest(int first, int expected)
+        => Assert.Equal(expected, WirelessProtocol.GroupIdleDuty(Group(first, 0, 0, 0)));
+
+    [Fact]
+    public void GroupIdleDuty_IsFiveForAnyOtherKindOfDevice()
+        => Assert.Equal(5, WirelessProtocol.GroupIdleDuty(
+            Decode(new FakeWirelessRecord(GroupMac, MasterMac) { DeviceType = 10, FanTypes = B(63, 0, 0, 0) })));
+
+    // A P28 V2 group at 0 is sent 1%, which NumberHelper.Map truncates to PWM 2.
+    [Theory]
+    [InlineData(0, 1, 2)]
+    [InlineData(0, 5, 12)]
+    [InlineData(4, 1, 20)]
+    public void FanPwm_TakesTheGroupsIdleDuty(int duty, int idle, int expected)
+        => Assert.Equal((byte)expected, WirelessProtocol.FanPwm(duty, 8, idle));
 
     // A water block's fans are always CLFan120LED (addSettingDevice); V150 and unrecognised types are None.
     [Theory]
@@ -529,12 +743,15 @@ public sealed class WirelessProtocolTests {
         => Assert.Equal(10, WirelessProtocol.GroupDutyFloor(
             Decode(new FakeWirelessRecord(GroupMac, MasterMac) { DeviceType = (byte)deviceType, FanTypes = B(20, 20, 0, 0) })));
 
-    // MasterDevice.NeedSyncPwm steps only when RecType[0] == CLV1, which InitAttr sets for a fan group.
+    // MasterDevice.NeedSyncPwm steps only when RecType[0] == CLV1 or CLV2, which InitAttr sets for a fan group.
     [Fact]
-    public void IsClGroup_IsAFanGroupWhoseFirstSlotIsCl() {
+    public void IsClGroup_IsAFanGroupWhoseFirstSlotIsClOrClV2() {
         Assert.True(WirelessProtocol.IsClGroup(Group(41, 0, 0, 0)));
         Assert.True(WirelessProtocol.IsClGroup(Group(42, 0, 0, 0)));
+        Assert.True(WirelessProtocol.IsClGroup(Group(126, 0, 0, 0)));
+        Assert.True(WirelessProtocol.IsClGroup(Group(127, 0, 0, 0)));
         Assert.False(WirelessProtocol.IsClGroup(Group(20, 41, 0, 0)));
+        Assert.False(WirelessProtocol.IsClGroup(Group(0, 126, 0, 0)));
         Assert.False(WirelessProtocol.IsClGroup(
             Decode(new FakeWirelessRecord(GroupMac, MasterMac) { DeviceType = 10, FanTypes = B(41, 0, 0, 0) })));
     }
@@ -549,7 +766,8 @@ public sealed class WirelessProtocolTests {
     public void StepClReserved_StepsAroundTheReservedValues(int pwm, int expected)
         => Assert.Equal((byte)expected, WirelessProtocol.StepClReserved((byte)pwm));
 
-    // RfDevice.InitAttr: 20-26 SLV3 (num < 27), 27-35 TLV2 (num < 36), 36-39 SLINF, 40 RL120, 41-42 CLV1.
+    // RfDevice.InitAttr: 20-26 SLV3 (num < 27), 27-35 TLV2 (num < 36), 36-39 SLINF, 40 RL120,
+    // 41-42 CLV1, 43-50 SLINFV3, 51-58 TLV3, 59-62 SLV4, 63 P28V2, 126-127 CLV2.
     [Theory]
     [InlineData(20, "SlV3")]
     [InlineData(26, "SlV3")]
@@ -559,12 +777,63 @@ public sealed class WirelessProtocolTests {
     [InlineData(39, "SlInfinity")]
     [InlineData(41, "Cl")]
     [InlineData(42, "Cl")]
+    [InlineData(43, "SlInfinityFlex")]
+    [InlineData(50, "SlInfinityFlex")]
+    [InlineData(51, "TlFlex")]
+    [InlineData(58, "TlFlex")]
+    [InlineData(59, "SlV4")]
+    [InlineData(62, "SlV4")]
+    [InlineData(63, "P28V2")]
+    [InlineData(126, "ClV2")]
+    [InlineData(127, "ClV2")]
     [InlineData(0, "Unknown")]
     [InlineData(40, "Unknown")]
     [InlineData(19, "Unknown")]
-    [InlineData(43, "Unknown")]
+    [InlineData(64, "Unknown")]
+    [InlineData(125, "Unknown")]
+    [InlineData(128, "Unknown")]
     public void FamilyOf_MapsTheTypeCodeRanges(int fanType, string expected)
         => Assert.Equal(expected, WirelessProtocol.FamilyOf(fanType).ToString());
+
+    // RFController.UpdateSensorDataByWiredLess writes an entry for a bound group with RecType[0]
+    // TLV3 or SLINFV3 and BindLcd[0] (InitAttr: 43, 44, 47, 48, 51, 52, 55, 56).
+    [Theory]
+    [InlineData(43, true)]
+    [InlineData(44, true)]
+    [InlineData(45, false)]
+    [InlineData(46, false)]
+    [InlineData(47, true)]
+    [InlineData(48, true)]
+    [InlineData(49, false)]
+    [InlineData(50, false)]
+    [InlineData(51, true)]
+    [InlineData(52, true)]
+    [InlineData(53, false)]
+    [InlineData(54, false)]
+    [InlineData(55, true)]
+    [InlineData(56, true)]
+    [InlineData(57, false)]
+    [InlineData(58, false)]
+    [InlineData(24, false)] // an SL V3 LCD fan takes its screen over USB, not from the table
+    [InlineData(0, false)]
+    public void HasScreens_IsAFanGroupWhoseFirstSlotIsAnLcdFlexFan(int first, bool expected) {
+        Assert.Equal(expected, WirelessProtocol.HasScreens(Group(first, 0, 0, 0)));
+        Assert.False(WirelessProtocol.HasScreens(Group(0, first, 0, 0)));
+        Assert.False(WirelessProtocol.HasScreens(
+            Decode(new FakeWirelessRecord(GroupMac, MasterMac) { DeviceType = 10, FanTypes = B(first, 0, 0, 0) })));
+    }
+
+    // UpdateSensorSettingByWiredLess: FanIndex = FanNum - FanIndex - 1 when isINFRightAttach, or
+    // when the group is neither SLINFV3 nor SLINF; a left-attached SL-INF group keeps its order.
+    [Theory]
+    [InlineData(43, 2, true)]
+    [InlineData(43, 12, false)]
+    [InlineData(51, 2, false)]
+    [InlineData(51, 12, false)]
+    [InlineData(36, 2, true)]
+    [InlineData(36, 12, false)]
+    public void ScreensNumberedInReverse_ExceptOnALeftAttachedSlInfinityGroup(int first, int fanCountByte, bool inOrder)
+        => Assert.Equal(!inOrder, WirelessProtocol.ScreensNumberedInReverse(AttachedGroup(fanCountByte, first, first, 0, 0)));
 
     // WinUsb.GetRFSender / GetRFReciver: 0416:8040 / 8041 and 1A86:E304 / E305.
     [Theory]
@@ -601,9 +870,12 @@ public sealed class WirelessProtocolTests {
         Assert.Throws<ArgumentException>(() => WirelessProtocol.EncodeAioPayload(shortMac, MasterMac, 1, 8, parameters));
         Assert.Throws<ArgumentNullException>(() => WirelessProtocol.EncodeEffectPayloads(GroupMac, MasterMac, null!));
         Assert.Throws<ArgumentNullException>(() => WirelessProtocol.EncodeEffectPayloads(null!, MasterMac, effect));
-        Assert.Throws<ArgumentNullException>(() => WirelessProtocol.EncodeClockPayload(null!));
+        Assert.Throws<ArgumentNullException>(() => WirelessProtocol.EncodeClockPayload(null!, DateTime.Now, new WirelessScreenTable()));
         Assert.Throws<ArgumentException>(() => WirelessProtocol.EncodeSaveConfigurationPayload(shortMac));
         Assert.Throws<ArgumentNullException>(() => WirelessProtocol.GroupDutyFloor(null!));
+        Assert.Throws<ArgumentNullException>(() => WirelessProtocol.GroupIdleDuty(null!));
         Assert.Throws<ArgumentNullException>(() => WirelessProtocol.IsClGroup(null!));
+        Assert.Throws<ArgumentNullException>(() => WirelessProtocol.HasScreens(null!));
+        Assert.Throws<ArgumentNullException>(() => WirelessProtocol.ScreensNumberedInReverse(null!));
     }
 }

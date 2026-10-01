@@ -30,6 +30,128 @@ public sealed class PluginRuntimeTests {
             new FakeFanDevice(Array.Empty<string>(), Array.Empty<string>()),
             new FakeClock().UtcNow);
 
+    private static RememberedController Group(DeviceKind kind, int vendorId, int productId, string path, int index, params string[] ids)
+        => new RememberedController(
+            new ControllerPlan(kind, new LocatedDevice(vendorId, productId, path, null), new LocatedDevice(vendorId, productId, path + "/rx", null)),
+            index,
+            new FakeFanGroupDevice(ids[0], ids.Skip(1).ToArray()),
+            new FakeClock().UtcNow);
+
+    private static RememberedController Receiver(string path, int index, params string[] ids)
+        => new RememberedController(
+            new ControllerPlan(DeviceKind.FlexReceiver, new LocatedDevice(0x43A8, 0x0101, path, null)),
+            index,
+            ids.Length == 0 ? new FakeFanDevice() : new FakeFanGroupDevice(ids[0], ids.Skip(1).ToArray()),
+            new FakeClock().UtcNow);
+
+    private static RememberedController Pair(string path, int index, params string[] ids)
+        => Group(DeviceKind.WirelessTransmitter, 0x0416, 0x8040, path, index, ids);
+
+    private static ControllerPlan PairPlan(string path)
+        => new ControllerPlan(DeviceKind.WirelessTransmitter, new LocatedDevice(0x0416, 0x8040, path, null), new LocatedDevice(0x0416, 0x8041, path + "/rx", null));
+
+    private static ControllerPlan ReceiverPlan(string path)
+        => new ControllerPlan(DeviceKind.FlexReceiver, new LocatedDevice(0x43A8, 0x0101, path, null));
+
+    // A FLEX chain has the same ids on its USB receiver and on the dongles; whichever reports it
+    // takes it from the other's memory, so only one stands in with it.
+    [Fact]
+    public void Remember_TakesTheSensorsAControllerReports_FromEveryOtherRememberedController() {
+        var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore());
+        _ = runtime.Remember("dongles", Pair("dongles", 0, "LianLi/wa/ctl", "LianLi/wa/f0/fan", "LianLi/wb/ctl", "LianLi/wb/f0/fan"));
+
+        _ = runtime.Remember("usb", Receiver("usb", 1, "LianLi/wa/ctl", "LianLi/wa/f0/fan"));
+        Assert.Equal(new[] { "LianLi/wb/ctl", "LianLi/wb/f0/fan" }, runtime.Recall("dongles")!.Ids);
+        Assert.Equal(new[] { "LianLi/wa/ctl", "LianLi/wa/f0/fan" }, runtime.Recall("usb")!.Ids);
+
+        _ = runtime.Remember("dongles", Pair("dongles", 0, "LianLi/wa/ctl", "LianLi/wa/f0/fan"));
+        Assert.Empty(runtime.Recall("usb")!.Ids);
+        Assert.Equal(new[] { "LianLi/wa/ctl", "LianLi/wb/ctl", "LianLi/wb/f0/fan", "LianLi/wa/f0/fan" }, runtime.Recall("dongles")!.Ids);
+    }
+
+    // The wireless controller keeps a group's sensors after the group is unbound; a receiver keeps
+    // its chain's after the radio takes it. What a controller only retains is not added to its
+    // memory and is not taken from another controller: only what it drives is. A chain nobody
+    // drives stays with whoever drove it last.
+    [Fact]
+    public void Remember_AddsAndClaimsOnlyTheSensorsAControllerDrives_NotThoseItRetains() {
+        var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore());
+        _ = runtime.Remember("usb", Receiver("usb", 1, "LianLi/wa/ctl", "LianLi/wa/f0/fan"));
+
+        var pair = new FakeFanGroupDevice("LianLi/wa/ctl", "LianLi/wa/f0/fan");
+        pair.Retained.UnionWith(new[] { "LianLi/wa/ctl", "LianLi/wa/f0/fan" });
+        RememberedController pairMemory = runtime.Remember(
+            "dongles", new RememberedController(PairPlan("dongles"), 0, pair, new FakeClock().UtcNow), out IReadOnlyCollection<string> claimed);
+
+        Assert.Empty(pairMemory.Ids);
+        Assert.Empty(claimed);
+        Assert.Equal(new[] { "LianLi/wa/ctl", "LianLi/wa/f0/fan" }, runtime.Recall("usb")!.Ids);
+        Assert.True(runtime.IsNew("dongles"));
+
+        // Driven now: taken from the receiver, and the receiver retaining it adds nothing back.
+        pair.Retained.Clear();
+        _ = runtime.Remember("dongles", new RememberedController(PairPlan("dongles"), 0, pair, new FakeClock().UtcNow), out claimed);
+        Assert.Equal(new[] { "LianLi/wa/ctl", "LianLi/wa/f0/fan" }, claimed);
+        Assert.Empty(runtime.Recall("usb")!.Ids);
+        var receiver = new FakeFanGroupDevice("LianLi/wa/ctl", "LianLi/wa/f0/fan");
+        receiver.Retained.UnionWith(new[] { "LianLi/wa/ctl", "LianLi/wa/f0/fan" });
+        _ = runtime.Remember("usb", new RememberedController(ReceiverPlan("usb"), 1, receiver, new FakeClock().UtcNow), out claimed);
+        Assert.Empty(claimed);
+        Assert.Empty(runtime.Recall("usb")!.Ids);
+        Assert.Equal(new[] { "LianLi/wa/ctl", "LianLi/wa/f0/fan" }, runtime.Recall("dongles")!.Ids);
+
+        // Nobody drives it now: it stays where it was.
+        pair.Retained.UnionWith(new[] { "LianLi/wa/ctl", "LianLi/wa/f0/fan" });
+        _ = runtime.Remember("dongles", new RememberedController(PairPlan("dongles"), 0, pair, new FakeClock().UtcNow), out claimed);
+        Assert.Empty(claimed);
+        Assert.Equal(new[] { "LianLi/wa/ctl", "LianLi/wa/f0/fan" }, runtime.Recall("dongles")!.Ids);
+        Assert.Equal("dongles", runtime.OwnerOf("LianLi/wa/ctl"));
+        Assert.Null(runtime.OwnerOf("LianLi/wz/ctl"));
+        Assert.Throws<ArgumentNullException>(() => runtime.OwnerOf(null!));
+    }
+
+    [Fact]
+    public void Remember_SaysWhichIdsItTookFromOtherControllers() {
+        var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore());
+        _ = runtime.Remember("dongles", Pair("dongles", 0, "LianLi/wa/ctl", "LianLi/wa/f0/fan", "LianLi/wb/ctl"), out IReadOnlyCollection<string> claimed);
+        Assert.Empty(claimed);
+
+        _ = runtime.Remember("usb", Receiver("usb", 1, "LianLi/wa/ctl", "LianLi/wa/f0/fan"), out claimed);
+        Assert.Equal(new[] { "LianLi/wa/ctl", "LianLi/wa/f0/fan" }, claimed);
+        Assert.Equal("usb", runtime.OwnerOf("LianLi/wa/ctl"));
+        Assert.Equal("dongles", runtime.OwnerOf("LianLi/wb/ctl"));
+
+        _ = runtime.Remember("usb", Receiver("usb", 1, "LianLi/wa/ctl", "LianLi/wa/f0/fan"), out claimed);
+        Assert.Empty(claimed); // nothing left to take
+    }
+
+    // Load decides whose each id is from one snapshot of the memory, so a change of hands the
+    // worker makes while the pass runs cannot leave an id registered under both or neither.
+    [Fact]
+    public void Owners_IsASnapshotOfEveryIdAndItsController() {
+        var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore());
+        _ = runtime.Remember("dongles", Pair("dongles", 0, "LianLi/wa/ctl", "LianLi/wb/ctl"));
+        _ = runtime.Remember("usb", Receiver("usb", 1, "LianLi/wa/ctl"));
+
+        Dictionary<string, string> owners = runtime.Owners();
+
+        Assert.Equal(new Dictionary<string, string> { ["LianLi/wa/ctl"] = "usb", ["LianLi/wb/ctl"] = "dongles" }, owners);
+        _ = runtime.Remember("dongles", Pair("dongles", 0, "LianLi/wa/ctl", "LianLi/wb/ctl"));
+        Assert.Equal("usb", owners["LianLi/wa/ctl"]); // the snapshot does not follow the memory
+        Assert.Equal("dongles", runtime.OwnerOf("LianLi/wa/ctl"));
+    }
+
+    [Fact]
+    public void Remember_LeavesOtherControllersAlone_WhenNothingItReportsIsTheirs() {
+        var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore());
+        RememberedController pair = runtime.Remember("dongles", Pair("dongles", 0, "LianLi/wa/ctl", "LianLi/wa/f0/fan"));
+
+        _ = runtime.Remember("usb", Receiver("usb", 1, "LianLi/wb/ctl", "LianLi/wb/f0/fan"));
+        _ = runtime.Remember("empty", Receiver("empty", 2));
+
+        Assert.Same(pair, runtime.Recall("dongles"));
+    }
+
     // New: never remembered, or first remembered by this process and still without a sensor.
     [Fact]
     public void IsNew_UntilASensorIsRemembered_OrAnEarlierProcessRememberedIt() {
@@ -475,6 +597,87 @@ public sealed class PluginRuntimeTests {
         Assert.NotEqual(0, runtime.IndexFor("a", taken));
         Assert.Equal(0, runtime.IndexFor("b", taken));
         Assert.True(runtime.TryBeginBuildUnder(1, "a", 1));
+    }
+
+    // What Load registered is published under the memory's lock and handed to whoever remembers a
+    // controller, so a claim and the publication are ordered: one remembered before is in the
+    // memory Load reads after publishing, one remembered after is handed the published set.
+    [Fact]
+    public void Publish_KeepsWhatLoadRegistered_HandedToEveryClaimAfterIt_AndClearedWhenANewInstanceStarts() {
+        var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore());
+        var registered = new Dictionary<string, string>(StringComparer.Ordinal) { ["LianLi/wa/ctl"] = "usb" };
+        Assert.Null(runtime.Registered);
+        Assert.NotNull(runtime.RememberUnder(0, "usb", Receiver("usb", 0, "LianLi/wa/ctl"), out _, out Dictionary<string, string>? before));
+        Assert.Null(before);
+
+        runtime.Publish(registered);
+
+        Assert.Same(registered, runtime.Registered);
+        Assert.NotNull(runtime.RememberUnder(0, "dongles", Pair("dongles", 1, "LianLi/wa/ctl"), out IReadOnlyCollection<string> claimed, out Dictionary<string, string>? after));
+        Assert.Same(registered, after);
+        Assert.Equal(new[] { "LianLi/wa/ctl" }, claimed);
+        Assert.Throws<ArgumentNullException>(() => runtime.Publish(null!));
+
+        runtime.Start(new object(), Array.Empty<IFanDevice>(), new FakeLogger());
+        Assert.Null(runtime.Registered);
+        runtime.Stop();
+    }
+
+    [Fact]
+    public void IsBuilding_SaysWhetherABuildOfTheControllerIsRunning() {
+        var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore());
+
+        Assert.False(runtime.IsBuilding("a"));
+        Assert.True(runtime.TryBeginBuild("a", 0));
+        Assert.True(runtime.IsBuilding("a"));
+        runtime.EndBuild("a");
+        Assert.False(runtime.IsBuilding("a"));
+        Assert.Throws<ArgumentNullException>(() => runtime.IsBuilding(null!));
+    }
+
+    [Fact]
+    public void RememberUnder_AnEarlierNumbering_RemembersNothing_AndTakesNothing() {
+        var store = new FakeRememberedControllerStore { UnreadableLoads = 1 };
+        var runtime = new PluginRuntime(new FakeClock(), store);
+        var log = new FakeLogger();
+        runtime.Restore(log);
+        _ = runtime.Remember("usb", Receiver("usb", 0, "LianLi/wa/ctl", "LianLi/wa/f0/fan"));
+        runtime.Restore(log); // read now: the numbering moves on
+
+        Assert.Null(runtime.RememberUnder(0, "dongles", Pair("dongles", 1, "LianLi/wa/ctl", "LianLi/wa/f0/fan"), out IReadOnlyCollection<string> claimed, out _));
+        Assert.Empty(claimed);
+        Assert.Equal("usb", runtime.OwnerOf("LianLi/wa/ctl"));
+    }
+
+    // A stand-in's rebuild claims the device only for the instance that owns the worker, under the
+    // current numbering, and while no other build has it; an instance that has stopped, or been
+    // succeeded, claims nothing however late its rebuild thread gets here.
+    [Fact]
+    public void TryBeginRebuild_ClaimsOnlyForTheOwner_UnderTheCurrentNumbering_WhileNoOtherBuildHasTheDevice() {
+        var clock = new FakeClock();
+        var store = new FakeRememberedControllerStore { UnreadableLoads = 1 };
+        store.Stored.Add(new StoredController("b", Remembered("b", 0), clock.UtcNow));
+        var runtime = new PluginRuntime(clock, store);
+        object owner = new object();
+        Assert.Throws<ArgumentNullException>(() => runtime.TryBeginRebuild(null!, 0, "a", 0));
+        Assert.False(runtime.TryBeginRebuild(owner, 0, "a", 0)); // nothing running
+
+        runtime.Start(owner, Array.Empty<IFanDevice>(), new FakeLogger());
+        Assert.True(runtime.TryBeginRebuild(owner, 0, "a", 0));
+        Assert.False(runtime.TryBeginRebuild(owner, 0, "a", 0)); // that build still has it
+        runtime.EndBuild("a");
+        Assert.False(runtime.TryBeginRebuild(new object(), 0, "a", 0)); // another instance
+
+        runtime.Restore(new FakeLogger());
+        _ = runtime.Remember("a", Remembered("a", 0));
+        runtime.Restore(new FakeLogger()); // the numbering moves on
+        Assert.False(runtime.TryBeginRebuild(owner, 0, "a", 0));
+        Assert.True(runtime.TryBeginRebuild(owner, 1, "a", 1));
+        runtime.EndBuild("a");
+
+        runtime.Stop();
+        Assert.False(runtime.TryBeginRebuild(owner, 1, "a", 1));
+        Assert.False(runtime.IsBuilding("a"));
     }
 
     private static RememberedController Channels(string path, int index, params string[] ids)

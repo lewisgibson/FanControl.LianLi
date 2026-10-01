@@ -33,6 +33,40 @@ public sealed class RememberedControllerTests {
         Assert.All(new[] { "c0", "c2", "c0/fan", "c2/fan", "t0" }, id => Assert.Equal(Now, remembered.LastSeenUtc(id)));
     }
 
+    // A controller that keeps sensors it no longer drives says which it drives; any other
+    // controller, and one made from its saved parts, drives everything it has.
+    [Fact]
+    public void DrivenIds_AreWhatTheControllerDrives_OrEverythingForOneThatDrivesAllItReports() {
+        var group = new FakeFanGroupDevice("LianLi/wa/ctl", "LianLi/wa/f0/fan", "LianLi/wa/f1/fan");
+        group.Retained.Add("LianLi/wa/f1/fan");
+        var remembered = new RememberedController(Plan(), 0, group, Now);
+        Assert.Equal(new[] { "LianLi/wa/ctl", "LianLi/wa/f0/fan" }, remembered.DrivenIds.OrderBy(id => id));
+        Assert.Equal(new[] { "LianLi/wa/ctl", "LianLi/wa/f0/fan", "LianLi/wa/f1/fan" }, remembered.Ids);
+
+        var plain = new RememberedController(Plan(), 0, new FakeFanDevice("c0"), Now);
+        Assert.Equal(new[] { "c0", "c0/fan" }, plain.DrivenIds.OrderBy(id => id));
+
+        RememberedController fromParts = remembered.Without(new HashSet<string>(StringComparer.Ordinal) { "LianLi/wa/ctl" });
+        Assert.Equal(new[] { "LianLi/wa/f0/fan", "LianLi/wa/f1/fan" }, fromParts.DrivenIds.OrderBy(id => id));
+    }
+
+    [Fact]
+    public void Without_DropsTheGivenSensors_AndKeepsTheOthersWithTheirTimes() {
+        var device = new FakeFanDevice(new[] { "c0", "c1" }, new[] { "t0" });
+        var remembered = new RememberedController(Plan(), 3, device, Now);
+
+        RememberedController without = remembered.Without(new HashSet<string>(StringComparer.Ordinal) { "c1", "c1/fan", "t0", "not-there" });
+
+        Assert.Equal("c0", Assert.Single(without.Channels).ControlId);
+        Assert.Equal("c0/fan", Assert.Single(without.FanSpeeds).Id);
+        Assert.Empty(without.Temperatures);
+        Assert.Equal(Now, without.LastSeenUtc("c0"));
+        Assert.Equal(3, without.Index);
+        Assert.Same(remembered.Plan, without.Plan);
+        Assert.Equal(new[] { "c0", "c0/fan" }, without.Ids);
+        Assert.Throws<ArgumentNullException>(() => remembered.Without(null!));
+    }
+
     [Fact]
     public void ForADeviceWithoutTemperatures_HasNone() {
         // A wired controller measures no temperatures at all.

@@ -281,6 +281,7 @@ internal sealed class RememberedControllerFile : IRememberedControllerStore {
             || kind == DeviceKind.TlFan
             || kind == DeviceKind.Galahad2
             || kind == DeviceKind.HydroShiftCurve
+            || kind == DeviceKind.FlexReceiver
             || kind == DeviceKind.WirelessTransmitter;
 
     // A JSON string: quotes, backslashes and control characters escaped, everything else as is.
