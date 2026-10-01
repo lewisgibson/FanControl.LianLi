@@ -1,39 +1,19 @@
-**FanControl.LianLi v{{VERSION}}** - released {{DATE}}
+**FanControl.LianLi v{{VERSION}}**, released {{DATE}}
 
-An unofficial FanControl plugin for Lian Li Uni fan controllers. It adds each fan channel as a control you can put on a curve, and reports each fan's RPM.
+An unofficial [FanControl](https://getfancontrol.com/) plugin for Lian Li UNI FAN fans, STRIMER cables and GALAHAD II and HydroShift coolers. Every fan and pump becomes a control you can put on a curve, with its RPM, and the Lighting build keeps your L-Connect look without L-Connect running.
 
-## Which download?
+## Download and install
 
-Install **one**, not several:
+Pick one zip. Each holds a single `.dll` with `INSTALL.txt` and `LICENSE.txt` beside it; the `.sha256` file is that zip's checksum.
 
-### 🌀 Standard - `FanControl.LianLi-v{{VERSION}}.zip`
+- 🌀 `FanControl.LianLi-v{{VERSION}}.zip`: Standard. Fan speed and RPM, never touches lighting. Pick this if you're not sure.
+- 🌈 `FanControl.LianLi-Argb-v{{VERSION}}.zip`: ARGB. The same, and hands the fan lighting to your motherboard's ARGB header.
+- 🎨 `FanControl.LianLi-Lighting-v{{VERSION}}.zip`: Lighting. The same, and keeps the look you designed in L-Connect.
 
-Fan speed and RPM control. Lighting is left untouched - drive it yourself with OpenRGB if you want.
+Extract the `.dll`, right-click it, choose Properties, tick Unblock and click OK (FanControl silently ignores a blocked plugin). Then in FanControl open the menu, click Install plugin and pick the `.dll`. It loads straight away. To upgrade, do the same with the new `.dll`; your curves stay bound.
 
-### 🌈 ARGB - `FanControl.LianLi-Argb-v{{VERSION}}.zip`
+Don't run L-Connect at the same time as the plugin. The README explains [how to set up in L-Connect and then switch it off](https://github.com/lewisgibson/FanControl.LianLi#using-it-with-l-connect). Needs FanControl V243 or newer.
 
-Everything Standard does, and also hands the fan lighting to your motherboard's ARGB header at startup, so the motherboard's RGB software drives it. On controllers that do not save lighting to hardware (e.g. UNI FAN SL-Infinity 120 V1) the lighting resets to factory on every boot.
-
-### 🎨 Lighting - `FanControl.LianLi-Lighting-v{{VERSION}}.zip`
-
-Everything Standard does, and also re-applies a look you designed in L-Connect - set it up once in L-Connect, stop L-Connect, and keep the look. Uni SL-Infinity only; with no L-Connect config it behaves exactly like Standard.
-
-Each `.zip` contains a single DLL plus `LICENSE.txt` and `INSTALL.txt` at the root. The matching `.sha256` is that zip's SHA-256 checksum (optional integrity check).
-
-## Install
-
-1. Download the zip you picked above and extract the DLL (it sits at the zip root).
-2. **Unblock the DLL** (important): right-click it -> Properties -> tick **Unblock** -> OK. Windows blocks files downloaded from the internet, and FanControl silently ignores a blocked plugin.
-3. In FanControl, open the menu, click **Install plugin**, and pick the DLL. It loads immediately - **no restart needed**.
-
-Your Lian Li channels then appear as controls (assign each to a fan curve) and as RPM sensors.
-
-## Do not run L-Connect at the same time
-
-Lian Li's **L-Connect** drives the same USB controller as this plugin and writes to it aggressively, so the two fight each other. Uninstall L-Connect, or fully exit it and stop its background process (`L ConnectSystem.exe` in Task Manager) before using this plugin. Leaving it running is the most common cause of erratic fan speeds or lighting.
-
-## Upgrading
-
-Download the newer zip, unblock the DLL, and install it through FanControl the same way - no restart needed. Your fan-curve bindings are preserved.
+Full details are in the [README](https://github.com/lewisgibson/FanControl.LianLi#readme), and if something isn't working, see [troubleshooting](https://github.com/lewisgibson/FanControl.LianLi/blob/main/docs/troubleshooting.md).
 
 ## What's changed

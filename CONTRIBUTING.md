@@ -18,7 +18,7 @@ Thanks for your interest in improving FanControl.LianLi. This is a small project
 | `dotnet test -c Release -p:CollectCoverage=true` | Run them and fail below full line and branch coverage   |
 | `./build.ps1`                                    | Run the whole gate: restore, format-verify, build, test |
 
-`./build.ps1` mirrors what CI runs (it builds and tests all three variants - standard, ARGB, and Lighting); run it before opening a PR. To target a single variant yourself, pass the matching flag: `-p:EnableArgb=true` for ARGB or `-p:EnableLighting=true` for Lighting (for example `dotnet test -c Release -p:EnableLighting=true`). The two flags are mutually exclusive - never combine them.
+`./build.ps1` mirrors what CI runs (it builds and tests all three variants - standard, ARGB, and Lighting); run it before opening a PR. To target a single variant yourself, pass the matching flag: `-p:EnableArgb=true` for ARGB or `-p:EnableLighting=true` for Lighting (for example `dotnet test -c Release -p:EnableLighting=true`). The two flags are mutually exclusive - never combine them. Add `-p:AssemblyName=FanControl.LianLi.Argb` or `-p:AssemblyName=FanControl.LianLi.Lighting` to a build to get the DLL name the release ships.
 
 Every line and every branch of the plugin that a variant compiles has to run under that variant's tests; CI and `./build.ps1` fail the build otherwise, and the report lands in `coverage/coverage.cobertura.xml`. The only exemption is `[ExcludeFromCodeCoverage]`, which is reserved for the P/Invoke seams that need a real Windows device; everything they decide is pulled out into plain code so it can be tested.
 

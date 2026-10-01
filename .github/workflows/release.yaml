@@ -1,6 +1,6 @@
 name: Release
 
-# Every push to main builds all three plugin variants (standard + ARGB + Lighting),
+# Every push to main builds all three plugin variants (standard, ARGB and Lighting),
 # bumps the semver to 1.1.<run_number> and publishes a versioned GitHub release with a
 # zip per variant. GitHub automatically marks the newest release as "Latest", so the
 # /releases/latest URL always resolves to it. (A rolling "latest" tag is
@@ -117,7 +117,7 @@ jobs:
             - name: Package
               # PowerShell so packaging does not depend on `zip`/`sha256sum` being present in
               # the runner's bash. Each variant ships as its own zip holding a SINGLE plugin
-              # DLL plus license and install notes. The host supplies FanControl.Plugins.dll;
+              # DLL and the license and install notes. The host supplies FanControl.Plugins.dll;
               # the plugin reaches the controllers through Windows' own hid.dll, winusb.dll and
               # cfgmgr32.dll, so nothing else ships beside it.
               shell: pwsh
@@ -141,15 +141,19 @@ jobs:
                           "     Windows blocks files downloaded from the internet and FanControl",
                           "     silently ignores a blocked plugin.",
                           "  2. In FanControl, open the menu, click 'Install plugin', and pick $dll.",
-                          "     It loads immediately - no restart needed.",
+                          "     It loads straight away with no restart.",
                           "",
-                          "  That single DLL is all you need.",
+                          "  That single DLL is all you need. To upgrade later, do the same with",
+                          "  the new DLL; your curves stay bound.",
                           "",
-                          "Do NOT run Lian Li L-Connect at the same time. Both drive the same",
-                          "controllers, and the wireless dongles can only be open in one program.",
-                          "Keep L-Connect installed, but in services.msc set 'L-Connect Service",
-                          "Watcher' and then 'L-Connect Service' to Disabled and stop them, then",
-                          "restart FanControl. The README has the details."
+                          "Do not run Lian Li L-Connect at the same time. Both drive the same",
+                          "devices, and the wireless dongles can only be open in one program.",
+                          "Keep L-Connect installed (the plugin reads what you saved in it), but",
+                          "switch its service off: in services.msc set 'L-Connect Service' to",
+                          "Disabled and stop it (and 'L-Connect Service Watcher' too, if an older",
+                          "L-Connect left it there), then restart 'FanControl Service'. The README",
+                          "has the exact PowerShell commands:",
+                          "https://github.com/lewisgibson/FanControl.LianLi#using-it-with-l-connect"
                       ) + $extraNotes + @(
                           "",
                           "License: MIT (see LICENSE.txt)."
@@ -163,42 +167,46 @@ jobs:
                       Set-Content -Path "dist/$zipName.sha256" -Value $sha -Encoding ascii
                   }
 
-                  New-PluginPackage "artifacts/standard/FanControl.LianLi.dll" "standard" "FanControl.LianLi" @(
+                  New-PluginPackage "artifacts/standard/FanControl.LianLi.dll" "Standard" "FanControl.LianLi" @(
                       "",
-                      "This standard build controls fan speed and reads RPM. It never touches",
-                      "lighting, so it stays out of the way of OpenRGB, L-Connect, or your",
-                      "motherboard's RGB software. To sync the fan lighting to your motherboard's",
-                      "ARGB header use the ARGB build (FanControl.LianLi.Argb.dll); to re-apply a",
-                      "look you designed in L-Connect use the Lighting build",
-                      "(FanControl.LianLi.Lighting.dll). Install only one build at a time."
+                      "This Standard build controls fan speed and reads RPM. It never touches",
+                      "lighting, so it stays out of the way of OpenRGB or any other lighting tool.",
+                      "The ARGB build (FanControl.LianLi.Argb.dll) hands the fan lighting to your",
+                      "motherboard's ARGB header; the Lighting build (FanControl.LianLi.Lighting.dll)",
+                      "keeps the look you designed in L-Connect. Install only one build at a time."
                   )
 
                   New-PluginPackage "artifacts/argb/FanControl.LianLi.Argb.dll" "ARGB" "FanControl.LianLi-Argb" @(
                       "",
-                      "This ARGB build also syncs the fans' lighting to the motherboard's ARGB",
-                      "header at startup. On controllers that do not save config to hardware",
-                      "(e.g. SL-Infinity 120 V1) this resets lighting to factory defaults on every",
-                      "startup. If you do not want that, use the standard build",
-                      "(FanControl.LianLi.dll). Install only one build at a time."
+                      "This ARGB build also hands the fan lighting to your motherboard's ARGB header",
+                      "when it starts. On a controller that does not keep its lighting in its own",
+                      "memory (the UNI FAN SL-Infinity 120 V1, for one) the lighting resets to the",
+                      "factory rainbow every time the plugin starts. If you do not want that, use the",
+                      "Standard build (FanControl.LianLi.dll). Install only one build at a time."
                   )
 
                   New-PluginPackage "artifacts/lighting/FanControl.LianLi.Lighting.dll" "Lighting" "FanControl.LianLi-Lighting" @(
                       "",
-                      "This Lighting build re-applies a lighting look you designed in Lian Li's",
-                      "L-Connect: set it up once, stop L-Connect, and this build reads L-Connect's",
-                      "own saved config and keeps the look with no Lian Li software running. It drives",
-                      "lighting only when L-Connect has a saved look (Uni SL-Infinity only); with none",
-                      "it behaves exactly like the standard build and leaves lighting untouched. Do NOT",
-                      "run it alongside another lighting tool (OpenRGB, L-Connect, motherboard RGB) --",
-                      "both would fight over the LEDs. See the project's docs/lighting.md for details.",
-                      "Install only one build at a time."
+                      "This Lighting build also keeps the look you designed in L-Connect: set it up",
+                      "once in L-Connect, switch L-Connect off, and the plugin reads L-Connect's own",
+                      "saved settings and re-applies the look on every boot, for every supported",
+                      "device. With no saved look it behaves exactly like the Standard build. Do not",
+                      "run it alongside another lighting tool (OpenRGB, SignalRGB, L-Connect or your",
+                      "motherboard's RGB software); both would fight over the LEDs. Install only one",
+                      "build at a time."
                   )
 
             - name: Build Release Notes
               id: notes
-              # Fill the verbose body template with this version + today's date, then append
-              # the commit changelog (titles + bodies) plus a compare link when the range is
-              # non-empty; otherwise "No source changes since <tag>." or "First release.".
+              # Fill the body template with this version and today's date, then append the
+              # commit changelog and a compare link when the range is non-empty; otherwise
+              # "No source changes since <tag>." or "First release.". Each commit is a heading
+              # (its subject) and, for a commit by a person, its body: a Dependabot commit
+              # (author dependabot[bot], or a subject starting "Bump ") gets the subject alone,
+              # since its body is pull-request boilerplate. Commit bodies are prose, one
+              # paragraph per line; a body an editor hard-wrapped is joined back onto one line
+              # per paragraph so GitHub does not render it with ragged line breaks, while
+              # list items, headings, quotes, tables and fenced code are kept as they are.
               # body_path feeds the result to the release below.
               run: |
                   set -euo pipefail
@@ -209,11 +217,40 @@ jobs:
                   prev_tag="$(git tag --list 'v*' --sort=-version:refname | head -n1 || true)"
                   sed "s/{{VERSION}}/${version}/g; s/{{DATE}}/${released}/g" \
                       .github/release-body-template.md > release-notes.md
+                  unwrap_paragraphs() {
+                      awk '
+                          function flush() { if (line != "") { print line; line = "" } }
+                          /^[[:space:]]*```/ { flush(); fenced = !fenced; print; next }
+                          fenced { print; next }
+                          /^[[:space:]]*$/ { flush(); print ""; next }
+                          /^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]/ || /^[[:space:]]*[#>|]/ {
+                              flush(); line = $0; next
+                          }
+                          {
+                              sub(/^[[:space:]]+/, ""); sub(/[[:space:]]+$/, "")
+                              line = (line == "") ? $0 : line " " $0
+                          }
+                          END { flush() }
+                      '
+                  }
                   # Capture the commit list once (the same --no-merges text we emit), so the
                   # empty-range guard tests exactly what gets printed - no second history walk.
                   changelog=""
                   if [ -n "$prev_tag" ]; then
-                      changelog="$(git log "${prev_tag}..HEAD" --no-merges --reverse --pretty=format:'### %s%n%n%b')"
+                      changelog="$(
+                          for sha in $(git rev-list --reverse --no-merges "${prev_tag}..HEAD"); do
+                              author="$(git log -1 --format='%an' "$sha")"
+                              subject="$(git log -1 --format='%s' "$sha")"
+                              printf '### %s\n\n' "$subject"
+                              if [ "$author" = 'dependabot[bot]' ] || [ "${subject#Bump }" != "$subject" ]; then
+                                  continue
+                              fi
+                              body="$(git log -1 --format='%b' "$sha" | unwrap_paragraphs)"
+                              if [ -n "$body" ]; then
+                                  printf '%s\n\n' "$body"
+                              fi
+                          done
+                      )"
                   fi
                   {
                       echo

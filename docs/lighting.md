@@ -1,6 +1,6 @@
 # Lighting replay (the `Lighting` build)
 
-This document describes the **Lighting** build variant (`FanControl.LianLi.Lighting.dll`): what it does, how it works, the SL-Infinity wire protocol it reproduces, and how it stays fail-safe. For the user-facing summary see the [Lighting section of the README](../README.md#lighting-keep-your-l-connect-look-without-l-connect). What it says L-Connect does was read out of L-Connect 3's own binaries (assembly version 2.1.29); where 2.1.11 differs, it says so.
+This document describes the **Lighting** build variant (`FanControl.LianLi.Lighting.dll`): what it does, how it works, the SL-Infinity wire protocol it reproduces, and how it stays fail-safe. For the user-facing summary see the README's [Which download?](../README.md#which-download) and [Using it with L-Connect](../README.md#using-it-with-l-connect) sections. What it says L-Connect does was read out of L-Connect 3's own binaries (assembly version 2.1.29); where 2.1.11 differs, it says so.
 
 ## What it is for
 
