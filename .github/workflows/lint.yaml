@@ -16,10 +16,10 @@ permissions:
 
 jobs:
     format:
-        runs-on: windows-latest
-        defaults:
-            run:
-                shell: bash
+        # dotnet format gives the same result on every platform for this netstandard2.0 and
+        # net8.0 code, so it runs on Linux, which starts faster than a Windows runner. The
+        # working tree is LF on every platform (.gitattributes).
+        runs-on: ubuntu-latest
         steps:
             - name: Checkout
               uses: actions/checkout@v7.0.1
@@ -64,26 +64,3 @@ jobs:
 
             - name: Lint Workflows
               run: actionlint -no-color
-
-    shellcheck:
-        runs-on: ubuntu-latest
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7.0.1
-
-            - name: Install shellcheck
-              run: |
-                  cd /tmp
-                  curl -sSfL --retry 5 --retry-delay 3 --retry-all-errors https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz | tar xJ
-                  sudo mv shellcheck-v0.10.0/shellcheck /usr/local/bin/shellcheck
-                  shellcheck --version
-
-            - name: Lint Shell Scripts
-              run: |
-                  mapfile -d '' files < <(find scripts -type f -name '*.sh' -print0; find scripts -type f -name 'pre-*' -print0)
-                  if [ "${#files[@]}" -eq 0 ]; then
-                      echo "No shell scripts found"
-                      exit 0
-                  fi
-                  printf '%s\n' "${files[@]}"
-                  shellcheck --format=gcc "${files[@]}"

@@ -47,10 +47,9 @@ jobs:
                   gitleaks detect --source . --no-banner --verbose --log-opts="${RANGE}"
 
     dependencies:
-        runs-on: windows-latest
-        defaults:
-            run:
-                shell: bash
+        # The package scan reads the restored dependency graph, which is the same on every
+        # platform, so it runs on Linux, which starts faster than a Windows runner.
+        runs-on: ubuntu-latest
         steps:
             - name: Checkout
               uses: actions/checkout@v7.0.1

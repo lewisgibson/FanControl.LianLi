@@ -1,0 +1,5 @@
+This ARGB build also hands the fan lighting to your motherboard's ARGB header
+when it starts. On a controller that does not keep its lighting in its own
+memory (the UNI FAN SL-Infinity 120 V1, for one) the lighting resets to the
+factory rainbow every time the plugin starts. If you do not want that, use the
+Standard build (FanControl.LianLi.dll). Install only one build at a time.

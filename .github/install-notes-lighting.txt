@@ -1,0 +1,7 @@
+This Lighting build also keeps the look you designed in L-Connect: set it up
+once in L-Connect, switch L-Connect off, and the plugin reads L-Connect's own
+saved settings and re-applies the look on every boot, for every supported
+device. With no saved look it behaves exactly like the Standard build. Do not
+run it alongside another lighting tool (OpenRGB, SignalRGB, L-Connect or your
+motherboard's RGB software); both would fight over the LEDs. Install only one
+build at a time.

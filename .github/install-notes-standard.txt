@@ -1,0 +1,5 @@
+This Standard build controls fan speed and reads RPM. It never touches
+lighting, so it stays out of the way of OpenRGB or any other lighting tool.
+The ARGB build (FanControl.LianLi.Argb.dll) hands the fan lighting to your
+motherboard's ARGB header; the Lighting build (FanControl.LianLi.Lighting.dll)
+keeps the look you designed in L-Connect. Install only one build at a time.

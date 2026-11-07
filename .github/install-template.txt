@@ -1,0 +1,26 @@
+FanControl.LianLi v{{VERSION}} ({{VARIANT}} build)
+
+Requires FanControl V243 or newer.
+
+Install:
+  1. Unblock the DLL: right-click {{DLL}} -> Properties -> tick 'Unblock' -> OK.
+     Windows blocks files downloaded from the internet and FanControl
+     silently ignores a blocked plugin.
+  2. In FanControl, open the menu, click 'Install plugin', and pick {{DLL}}.
+     It loads straight away with no restart.
+
+  That single DLL is all you need. To upgrade later, do the same with
+  the new DLL; your curves stay bound.
+
+Do not run Lian Li L-Connect at the same time. Both drive the same
+devices, and the wireless dongles can only be open in one program.
+Keep L-Connect installed (the plugin reads what you saved in it), but
+switch its service off: in services.msc set 'L-Connect Service' to
+Disabled and stop it (and 'L-Connect Service Watcher' too, if an older
+L-Connect left it there), then restart 'FanControl Service'. The README
+has the exact PowerShell commands:
+https://github.com/lewisgibson/FanControl.LianLi#using-it-with-l-connect
+
+{{NOTES}}
+
+License: MIT (see LICENSE.txt).
