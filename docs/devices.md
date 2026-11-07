@@ -21,6 +21,10 @@ The UNI FAN SL, AL, SL-Infinity, SL V2, AL V2, SL Redragon edition and the older
 
 The TL hub speaks a different command protocol from the other UNI FAN hubs (it shares it with the GALAHAD II). The plugin drives its fans and reports their RPM, and the Lighting build replays the saved look. A TL fan that answers after the others is added once the hub has reported it three polls in a row, as L-Connect waits for. The TL LCD's screen is left alone.
 
+- **One control per fan.** The TL hub talks to every fan in a daisy chain on its own, so each fan gets its own control and its own RPM reading (`Port 1 Fan 1`, `Port 1 Fan 2` and so on). The other UNI FAN hubs can't do that: their chained fans share one signal wire, so a channel is one control however many fans are on it.
+- **L-Connect groups them in software.** L-Connect puts a port's fans into groups (three to a group unless you change it, at most four groups of four) and sends every fan in a group the same speed. The hub itself has no group speed. To run a port, or any set of fans, as one, pick the same curve on each fan's control, or give the others a Sync curve that copies one of them.
+- **One program at a time.** The plugin, L-Connect and any other plugin that talks to the TL hub all send it commands, so only one of them can drive it.
+
 ## AIO coolers
 
 - **GALAHAD II Trinity**: the fan and the pump are each a control, both report RPM, and the Lighting build replays the fan and pump lighting. The pump control's bottom end is about 2600 rpm, a margin above the pump's real minimum, not a hardware limit. A 0% curve point on the fan sends duty 0, which spins the radiator fans down to roughly 250 to 350 rpm rather than stopping them. Commanded speeds persist in the controller across a full power cut, and the cooler has no thermal failsafe of its own, which is why the plugin keeps re-asserting the speed every 15 seconds.

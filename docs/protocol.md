@@ -114,6 +114,18 @@ The manual-mode channel selector byte is `0x10 << ch`, so:
 - ch2 -> `0x40`
 - ch3 -> `0x80`
 
+## The Uni Fan TL hub
+
+The Uni Fan TL hub (vendor `0x0416`, pid `0x7372`) uses the 64-byte command packet that the Galahad II below also uses (report id `0x01`, written as an output report and answered on interrupt-IN). Every fan is addressed by one byte: the port (0-3) in the high nibble and the fan's place in that port's daisy chain (0-15) in the low nibble. The commands the plugin uses, verified against L-Connect 3 (2.1.29) `TLFanDevice`:
+
+- **Handshake `0xA1`**: the reply's payload is a run of 3-byte records, one per fan. Byte 0 has bit 7 set when the fan is detected, bit 6 set while it is being upgraded, the port in bits 4-5 and the fan index in bits 0-3; bytes 1-2 are its RPM, big-endian (`TLFanHandshakeInfo.Parse`). L-Connect reads it once a second, and so does the plugin.
+- **Set speed `0xAA [address, pwm]`**: one fan's duty. L-Connect's service sends 1 for a stop and otherwise clamps the duty to 12-100 (`TLFanController.startWriteFanSpeedTimer`). The plugin sends the same bytes: 0% goes out as 1 and 1-11% as 12.
+- **Motherboard sync `0xB1 [sync << 7 | address]`**: hands one fan to the motherboard's PWM header or takes it back (`SetMBRPMSync`). The plugin sends it with the flag clear for every fan when it starts, for a fan found later and after the hub reconnects, which is what L-Connect sends with its motherboard sync switched off.
+
+The hub answers every command. L-Connect reads each answer straight away; the plugin leaves the answers to its speed and sync writes queued and reads past them, up to 32 reports, when it next reads a handshake.
+
+**One control per fan.** The firmware has no command that sets a group of fans: every speed goes to one fan's address. The fan groups are L-Connect's own: its service keeps up to four groups per port of up to four fans each, three to a group by default (`initFanGroupConfig`, `TLFanLightingGroupManager`), and on each one-second tick it writes the group's duty to each fan in the group in turn, only to the fans whose duty has changed. The app shows a group's speed as its first fan's RPM. The plugin exposes every fan the handshake reports as its own control and RPM sensor instead, keyed on the fan's address (`LianLi/<n>/p<port>f<fan>/ctl` and `/fan`), so a fan added to or removed from a chain does not re-key any other. A port runs as one when its controls share a curve. The plugin also re-sends each duty on its 15-second keepalive, where L-Connect sends a duty only when it changes.
+
 ## The 0x0416 coolers: Galahad II Trinity
 
 The Galahad II Trinity (vendor `0x0416`, pid `0x7371` Performance / `0x7373` Regular) does not speak the `0xE0` feature-report protocol above. It uses the 64-byte command packet shared with the Uni Fan TL (report id `0x01`, on the interface whose usage page is `0xFF1B`), written as an output report and answered on interrupt-IN. The commands the plugin uses, verified against L-Connect's `Galahad2TrinityDevice` (decompiled) and confirmed on a real `0x7373` over raw hidraw by a community member in [issue #30](https://github.com/lewisgibson/FanControl.LianLi/issues/30):
