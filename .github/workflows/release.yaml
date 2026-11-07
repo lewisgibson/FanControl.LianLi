@@ -1,16 +1,32 @@
 name: Release
 
-# Every push to main builds all three plugin variants (standard, ARGB and Lighting),
-# bumps the semver to 1.1.<run_number> and publishes a versioned GitHub release with a
-# zip per variant. GitHub automatically marks the newest release as "Latest", so the
-# /releases/latest URL always resolves to it. (A rolling "latest" tag is
-# not used: GitHub immutable releases can permanently reserve a
-# reused tag name, which breaks a moving tag.)
+# Every push to main that changes what ships builds all three plugin variants (standard,
+# ARGB and Lighting), bumps the semver to 1.1.<run_number> and publishes a versioned GitHub
+# release with a zip per variant. A push that changes only the docs, the tests or CI
+# publishes nothing; to release a change to this workflow's packaging alone, run it by
+# hand. GitHub automatically marks the newest release as "Latest", so the /releases/latest
+# URL always resolves to it. (A rolling "latest" tag is not used: GitHub immutable releases
+# can permanently reserve a reused tag name, which breaks a moving tag.)
 
 on:
     workflow_dispatch: {}
     push:
         branches: [main]
+        # What goes into a zip: the plugin's source and the host contract it compiles against,
+        # the build settings and SDK that compile it, the license and the install notes. The
+        # notes kept beside the source and the host contract's XML docs are neither compiled
+        # in nor shipped, so they are left out. So is Directory.Packages.props: the plugin has
+        # no package references (only the test project does); if it ever takes one, add that
+        # file here. Keep in step with shipped_paths below.
+        paths:
+            - 'src/FanControl.LianLi/**'
+            - '!src/FanControl.LianLi/**/*.md'
+            - '!src/FanControl.LianLi/dlls/FanControl.Plugins.xml'
+            - 'Directory.Build.props'
+            - 'Directory.Build.targets'
+            - 'global.json'
+            - 'LICENSE'
+            - '.github/install-*.txt'
 
 permissions:
     contents: write
@@ -125,39 +141,25 @@ jobs:
                   $version = "${{ steps.vars.outputs.version }}"
                   New-Item -ItemType Directory -Force -Path "dist" | Out-Null
 
-                  function New-PluginPackage($dllPath, $variant, $zipBase, $extraNotes) {
+                  function New-PluginPackage($dllPath, $variant, $zipBase, $notes) {
                       $dll = Split-Path $dllPath -Leaf
                       $stage = "dist/$zipBase"
                       New-Item -ItemType Directory -Force -Path $stage | Out-Null
                       Copy-Item $dllPath $stage
                       Copy-Item "LICENSE" "$stage/LICENSE.txt"
-                      $install = @(
-                          "FanControl.LianLi v$version ($variant build)",
-                          "",
-                          "Requires FanControl V243 or newer.",
-                          "",
-                          "Install:",
-                          "  1. Unblock the DLL: right-click $dll -> Properties -> tick 'Unblock' -> OK.",
-                          "     Windows blocks files downloaded from the internet and FanControl",
-                          "     silently ignores a blocked plugin.",
-                          "  2. In FanControl, open the menu, click 'Install plugin', and pick $dll.",
-                          "     It loads straight away with no restart.",
-                          "",
-                          "  That single DLL is all you need. To upgrade later, do the same with",
-                          "  the new DLL; your curves stay bound.",
-                          "",
-                          "Do not run Lian Li L-Connect at the same time. Both drive the same",
-                          "devices, and the wireless dongles can only be open in one program.",
-                          "Keep L-Connect installed (the plugin reads what you saved in it), but",
-                          "switch its service off: in services.msc set 'L-Connect Service' to",
-                          "Disabled and stop it (and 'L-Connect Service Watcher' too, if an older",
-                          "L-Connect left it there), then restart 'FanControl Service'. The README",
-                          "has the exact PowerShell commands:",
-                          "https://github.com/lewisgibson/FanControl.LianLi#using-it-with-l-connect"
-                      ) + $extraNotes + @(
-                          "",
-                          "License: MIT (see LICENSE.txt)."
-                      )
+                      # INSTALL.txt is the template with this build's notes in place of {{NOTES}};
+                      # the text lives in .github so a change to it is a change to what ships. A
+                      # placeholder left in it (a mistyped one) fails the release.
+                      $install = foreach ($line in Get-Content ".github/install-template.txt") {
+                          if ($line -eq "{{NOTES}}") {
+                              Get-Content ".github/install-notes-$notes.txt"
+                          } else {
+                              $line.Replace("{{VERSION}}", $version).Replace("{{VARIANT}}", $variant).Replace("{{DLL}}", $dll)
+                          }
+                      }
+                      if ($install -match "\{\{") {
+                          throw "INSTALL.txt for the $variant build has a placeholder left in it"
+                      }
                       Set-Content -Path "$stage/INSTALL.txt" -Value $install -Encoding ascii
                       $zipName = "$zipBase-v$version.zip"
                       # Zip the staged FILES, not the folder, so the DLL sits at the zip root --
@@ -167,40 +169,17 @@ jobs:
                       Set-Content -Path "dist/$zipName.sha256" -Value $sha -Encoding ascii
                   }
 
-                  New-PluginPackage "artifacts/standard/FanControl.LianLi.dll" "Standard" "FanControl.LianLi" @(
-                      "",
-                      "This Standard build controls fan speed and reads RPM. It never touches",
-                      "lighting, so it stays out of the way of OpenRGB or any other lighting tool.",
-                      "The ARGB build (FanControl.LianLi.Argb.dll) hands the fan lighting to your",
-                      "motherboard's ARGB header; the Lighting build (FanControl.LianLi.Lighting.dll)",
-                      "keeps the look you designed in L-Connect. Install only one build at a time."
-                  )
-
-                  New-PluginPackage "artifacts/argb/FanControl.LianLi.Argb.dll" "ARGB" "FanControl.LianLi-Argb" @(
-                      "",
-                      "This ARGB build also hands the fan lighting to your motherboard's ARGB header",
-                      "when it starts. On a controller that does not keep its lighting in its own",
-                      "memory (the UNI FAN SL-Infinity 120 V1, for one) the lighting resets to the",
-                      "factory rainbow every time the plugin starts. If you do not want that, use the",
-                      "Standard build (FanControl.LianLi.dll). Install only one build at a time."
-                  )
-
-                  New-PluginPackage "artifacts/lighting/FanControl.LianLi.Lighting.dll" "Lighting" "FanControl.LianLi-Lighting" @(
-                      "",
-                      "This Lighting build also keeps the look you designed in L-Connect: set it up",
-                      "once in L-Connect, switch L-Connect off, and the plugin reads L-Connect's own",
-                      "saved settings and re-applies the look on every boot, for every supported",
-                      "device. With no saved look it behaves exactly like the Standard build. Do not",
-                      "run it alongside another lighting tool (OpenRGB, SignalRGB, L-Connect or your",
-                      "motherboard's RGB software); both would fight over the LEDs. Install only one",
-                      "build at a time."
-                  )
+                  New-PluginPackage "artifacts/standard/FanControl.LianLi.dll" "Standard" "FanControl.LianLi" "standard"
+                  New-PluginPackage "artifacts/argb/FanControl.LianLi.Argb.dll" "ARGB" "FanControl.LianLi-Argb" "argb"
+                  New-PluginPackage "artifacts/lighting/FanControl.LianLi.Lighting.dll" "Lighting" "FanControl.LianLi-Lighting" "lighting"
 
             - name: Build Release Notes
               id: notes
               # Fill the body template with this version and today's date, then append the
               # commit changelog and a compare link when the range is non-empty; otherwise
-              # "No source changes since <tag>." or "First release.". Each commit is a heading
+              # "No source changes since <tag>." or "First release.". Only commits that touch
+              # what ships are listed, the same paths that trigger a push release, so the docs,
+              # test and CI commits since the last release stay out of it. Each commit is a heading
               # (its subject) and, for a commit by a person, its body: a Dependabot commit
               # (author dependabot[bot], or a subject starting "Bump ") gets the subject alone,
               # since its body is the pull-request template text. Commit bodies are prose, one
@@ -213,6 +192,7 @@ jobs:
                   version="${{ steps.vars.outputs.version }}"
                   released="$(date -u +'%Y-%m-%d')"
                   repo="${{ github.repository }}"
+                  shipped_paths=(src/FanControl.LianLi ':(exclude,glob)src/FanControl.LianLi/**/*.md' ':(exclude)src/FanControl.LianLi/dlls/FanControl.Plugins.xml' Directory.Build.props Directory.Build.targets global.json LICENSE ':(glob).github/install-*.txt')
                   # Highest existing release tag; this run's own tag is not created until publish.
                   prev_tag="$(git tag --list 'v*' --sort=-version:refname | head -n1 || true)"
                   sed "s/{{VERSION}}/${version}/g; s/{{DATE}}/${released}/g" \
@@ -238,7 +218,7 @@ jobs:
                   changelog=""
                   if [ -n "$prev_tag" ]; then
                       changelog="$(
-                          for sha in $(git rev-list --reverse --no-merges "${prev_tag}..HEAD"); do
+                          for sha in $(git rev-list --reverse --no-merges "${prev_tag}..HEAD" -- "${shipped_paths[@]}"); do
                               author="$(git log -1 --format='%an' "$sha")"
                               subject="$(git log -1 --format='%s' "$sha")"
                               printf '### %s\n\n' "$subject"
