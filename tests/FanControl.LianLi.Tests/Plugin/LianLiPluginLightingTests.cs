@@ -114,7 +114,7 @@ public sealed class LianLiPluginLightingTests : IDisposable
             hid, logger, gate, new FakeTransferDelay(), CancellationToken.None);
         var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()) { WorkerTickIntervalMilliseconds = 20 };
         using var plugin = new LianLiPlugin(
-            new OpenedEnumerator(Device(0xA102, DevicePath), transport), new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, _lConnect.Locations, runtime);
+            new OpenedEnumerator(Device(0xA102, DevicePath), transport), new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, _lConnect.Locations, runtime, CopyGuardFixture.Alone());
 
         // The population probe reads the input report six times at Initialize; the ninth read is
         // the worker's third poll, which loses the device. Everything runs on the worker's thread
@@ -794,7 +794,7 @@ public sealed class LianLiPluginLightingTests : IDisposable
         => NewPlugin(enumerator, new FakeLogger());
 
     private LianLiPlugin NewPlugin(FakeEnumerator enumerator, FakeLogger logger)
-        => new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, _lConnect.Locations, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        => new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, _lConnect.Locations, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
     private static LocatedDevice Device(int productId, string devicePath)
         => new LocatedDevice(0x0CF2, productId, devicePath, null);
@@ -862,7 +862,7 @@ public sealed class LianLiPluginLightingTests : IDisposable
             {
                 FailOpenWhen = device => scan == 1 && device.DevicePath == devices[1].DevicePath,
             };
-            using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), clock, new FakeDelay(), new FakeLogger(), _lConnect.Locations, runtime);
+            using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), clock, new FakeDelay(), new FakeLogger(), _lConnect.Locations, runtime, CopyGuardFixture.Alone());
             plugin.Initialize();
             var sensors = new FakeSensorsContainer();
             plugin.Load(sensors);
@@ -933,7 +933,7 @@ public sealed class LianLiPluginLightingTests : IDisposable
         }
 
         var enumerator = new FakeEnumerator(devices);
-        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), new FakeLogger(), _lConnect.Locations, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), new FakeLogger(), _lConnect.Locations, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
         plugin.Initialize();
         var sensors = new FakeSensorsContainer();
         plugin.Load(sensors);

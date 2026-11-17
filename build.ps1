@@ -30,10 +30,10 @@ Invoke-Step 'test (standard)' { dotnet test -c Release --no-build -p:CollectCove
 # protocol arguments, so the rename is reserved for the shippable artifact below.
 Invoke-Step 'test (argb)' { dotnet test -c Release -p:EnableArgb=true -p:CollectCoverage=true }
 
-# Shippable ARGB artifact: same ENABLE_ARGB behavior, renamed to FanControl.LianLi.Argb
+# Shippable ARGB artifact: same ENABLE_ARGB behavior, renamed to FanControl.LianLi-Argb
 # so it ships as a distinct second DLL. Built (plugin project only, no test) so the
 # release artifact is proven to compile locally.
-Invoke-Step 'build (argb)' { dotnet build $plugin -c Release --no-restore -p:EnableArgb=true -p:AssemblyName=FanControl.LianLi.Argb }
+Invoke-Step 'build (argb)' { dotnet build $plugin -c Release --no-restore -p:EnableArgb=true -p:AssemblyName=FanControl.LianLi-Argb }
 
 # Lighting variant behavior: EnableLighting defines ENABLE_LIGHTING, which compiles in
 # the startup L-Connect-look replay. Like the ARGB pass, the assembly name is kept
@@ -43,8 +43,8 @@ Invoke-Step 'build (argb)' { dotnet build $plugin -c Release --no-restore -p:Ena
 Invoke-Step 'test (lighting)' { dotnet test -c Release -p:EnableLighting=true -p:CollectCoverage=true }
 
 # Shippable Lighting artifact: same ENABLE_LIGHTING behavior, renamed to
-# FanControl.LianLi.Lighting so it ships as a distinct third DLL. Built (plugin project
+# FanControl.LianLi-Lighting so it ships as a distinct third DLL. Built (plugin project
 # only, no test) so the release artifact is proven to compile locally.
-Invoke-Step 'build (lighting)' { dotnet build $plugin -c Release --no-restore -p:EnableLighting=true -p:AssemblyName=FanControl.LianLi.Lighting }
+Invoke-Step 'build (lighting)' { dotnet build $plugin -c Release --no-restore -p:EnableLighting=true -p:AssemblyName=FanControl.LianLi-Lighting }
 
 Write-Host 'All checks passed.' -ForegroundColor Green

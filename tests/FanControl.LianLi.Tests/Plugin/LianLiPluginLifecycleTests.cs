@@ -23,7 +23,7 @@ public sealed class LianLiPluginLifecycleTests {
     private static LocatedDevice Sli(string path) => new LocatedDevice(0x0CF2, 0xA102, path, null);
 
     private static LianLiPlugin NewPlugin(FakeEnumerator enumerator, PluginRuntime runtime, FakeLogger? logger = null, IClock? clock = null)
-        => new LianLiPlugin(enumerator, new DeviceCatalog(), clock ?? new FakeClock(), new FakeDelay(), logger ?? new FakeLogger(), LConnectDirectory.Absent, runtime);
+        => new LianLiPlugin(enumerator, new DeviceCatalog(), clock ?? new FakeClock(), new FakeDelay(), logger ?? new FakeLogger(), LConnectDirectory.Absent, runtime, CopyGuardFixture.Alone());
 
     private static FakeSensorsContainer Load(LianLiPlugin plugin) {
         plugin.Initialize();
@@ -1404,7 +1404,7 @@ public sealed class LianLiPluginLifecycleTests {
         var clock = new FakeClock();
         var runtime = new PluginRuntime(clock, new FakeRememberedControllerStore());
         var log = new FakeLogger();
-        using var plugin = new LianLiPlugin(new RigEnumerator(rig), new DeviceCatalog(), clock, new FakeDelay(), log, files.Locations, runtime);
+        using var plugin = new LianLiPlugin(new RigEnumerator(rig), new DeviceCatalog(), clock, new FakeDelay(), log, files.Locations, runtime, CopyGuardFixture.Alone());
         plugin.Initialize();
         var container = new FakeSensorsContainer();
         plugin.Load(container);
@@ -1425,7 +1425,7 @@ public sealed class LianLiPluginLifecycleTests {
         var clock = new FakeClock();
         var runtime = new PluginRuntime(clock, new FakeRememberedControllerStore()) { WorkerTickIntervalMilliseconds = 20 };
         var log = new FakeLogger();
-        using var plugin = new LianLiPlugin(new SingleEnumerator(transport), new DeviceCatalog(), clock, new FakeDelay(), log, LConnectDirectory.Absent, runtime);
+        using var plugin = new LianLiPlugin(new SingleEnumerator(transport), new DeviceCatalog(), clock, new FakeDelay(), log, LConnectDirectory.Absent, runtime, CopyGuardFixture.Alone());
         try {
             plugin.Initialize();
             Assert.True(pollEntered.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
@@ -1452,7 +1452,7 @@ public sealed class LianLiPluginLifecycleTests {
         var transport = new LateTlTransport(allowLateReply, pollEntered, fansAtFirst: 0);
         var clock = new FakeClock();
         var runtime = new PluginRuntime(clock, new FakeRememberedControllerStore()) { WorkerTickIntervalMilliseconds = 20 };
-        using var plugin = new LianLiPlugin(new SingleEnumerator(transport), new DeviceCatalog(), clock, new FakeDelay(), new FakeLogger(), LConnectDirectory.Absent, runtime);
+        using var plugin = new LianLiPlugin(new SingleEnumerator(transport), new DeviceCatalog(), clock, new FakeDelay(), new FakeLogger(), LConnectDirectory.Absent, runtime, CopyGuardFixture.Alone());
         try {
             plugin.Initialize();
             Assert.True(pollEntered.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));

@@ -27,7 +27,7 @@ public class LianLiPluginTests {
 #endif
 
     private static LianLiPlugin NewPlugin(FakeEnumerator enumerator)
-        => new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), new FakeLogger(), LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        => new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), new FakeLogger(), LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
     private static LocatedDevice Sli(int index)
         => new LocatedDevice(0x0CF2, 0xA102, "fake/" + index, null);
@@ -177,7 +177,7 @@ public class LianLiPluginTests {
         var logger = new FakeLogger();
         using var plugin = new LianLiPlugin(
             enumerator, new DeviceCatalog(), new FakeClock(), delay, logger, LConnectDirectory.Absent,
-            new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+            new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         plugin.Initialize();
         var container = new FakeSensorsContainer();
@@ -193,7 +193,7 @@ public class LianLiPluginTests {
     public void Initialize_SkipsAWirelessDongleWithoutItsPartner() {
         var logger = new FakeLogger();
         var enumerator = new FakeEnumerator(WirelessTransmitter()) { ConfigureTransport = SeedWirelessDongles };
-        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         plugin.Initialize();
         var container = new FakeSensorsContainer();
@@ -285,7 +285,7 @@ public class LianLiPluginTests {
         // pump off the motherboard header.
         var logger = new FakeLogger();
         var enumerator = new FakeEnumerator(HydroShiftCurve());
-        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         plugin.Initialize();
         var container = new FakeSensorsContainer();
@@ -310,7 +310,7 @@ public class LianLiPluginTests {
         // wireless controller would key the same chain on the dongles.
         var logger = new FakeLogger();
         var enumerator = new FakeEnumerator(FlexReceiver()) { ConfigureTransport = FlexChain(new byte[] { 0xA1, 0xB2, 0xC3, 0xD4, 0xE5, 0xF6 }) };
-        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         plugin.Initialize();
         var container = new FakeSensorsContainer();
@@ -356,7 +356,7 @@ public class LianLiPluginTests {
             },
         };
         var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore());
-        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, runtime);
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, runtime, CopyGuardFixture.Alone());
         bool masterHeld = false;
         bool identifiedWhileHeld = false;
         bool settledWhileHeld = true;
@@ -400,7 +400,7 @@ public class LianLiPluginTests {
             FailOpenWhen = info => info.ProductId == 0x8040,
             ConfigureTransport = (info, transport) => FlexChain(chain)(info, transport),
         };
-        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         plugin.Initialize();
         var container = new FakeSensorsContainer();
@@ -416,7 +416,7 @@ public class LianLiPluginTests {
     public void AFlexReceiverThatDoesNotAnswer_IsSkipped_AndItsTransportClosed() {
         var logger = new FakeLogger();
         var enumerator = new FakeEnumerator(FlexReceiver());
-        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         plugin.Initialize();
         var container = new FakeSensorsContainer();
@@ -433,7 +433,7 @@ public class LianLiPluginTests {
         // worker re-asserts it after a reconnect and when the pump reports it follows the header.
         var logger = new FakeLogger();
         var enumerator = new FakeEnumerator(HydroShiftCurve()) { FailWrites = true };
-        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         plugin.Initialize();
         var container = new FakeSensorsContainer();
@@ -533,7 +533,7 @@ public class LianLiPluginTests {
     public void Initialize_WhenEnumerationThrows_IsLoggedAndRegistersNothing() {
         var logger = new FakeLogger();
         var enumerator = new FakeEnumerator(Sli(0)) { FailLocate = true };
-        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         plugin.Initialize(); // enumeration throws; it must be caught, logged, and degrade to no controllers
         var container = new FakeSensorsContainer();
@@ -548,7 +548,7 @@ public class LianLiPluginTests {
     public void Initialize_WhenAScanCannotComplete_KeepsThePreviousScansSensors() {
         var logger = new FakeLogger();
         var enumerator = new FakeEnumerator(Sli(0));
-        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         // A first scan finds the controller and registers its four channels.
         plugin.Initialize();
@@ -578,7 +578,7 @@ public class LianLiPluginTests {
     public void Initialize_WhenADeviceWillNotOpenAgain_KeepsItsSensorsAndRebuildsInTheBackground() {
         var logger = new FakeLogger();
         var enumerator = new FakeEnumerator(Sli(0));
-        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         plugin.Initialize();
         var first = new FakeSensorsContainer();
@@ -605,7 +605,7 @@ public class LianLiPluginTests {
     public void Initialize_WhenAScanFailsWithNothingRemembered_RegistersNothing() {
         var logger = new FakeLogger();
         var enumerator = new FakeEnumerator(Sli(0)) { FailLocate = true };
-        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         plugin.Initialize();
         var container = new FakeSensorsContainer();
@@ -637,7 +637,7 @@ public class LianLiPluginTests {
         // control recovers if the device accepts writes later.
         var logger = new FakeLogger();
         var enumerator = new FakeEnumerator(Sli(0)) { FailFeatures = true };
-        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         plugin.Initialize();
         var container = new FakeSensorsContainer();
@@ -703,7 +703,7 @@ public class LianLiPluginTests {
     public void Initialize_ATlHubWhoseHandshakeFails_IsReleasedAndSkipped() {
         var logger = new FakeLogger();
         var enumerator = new FakeEnumerator(TlHub()) { ConfigureTransport = (_, t) => t.FailReads = true };
-        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         plugin.Initialize();
         var container = new FakeSensorsContainer();
@@ -719,7 +719,7 @@ public class LianLiPluginTests {
         // is found - and belongs to nothing.
         var logger = new FakeLogger();
         var enumerator = new FakeEnumerator(new LocatedDevice(0x0CF2, 0x7372, "fake/odd", null));
-        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         plugin.Initialize();
 
@@ -731,7 +731,7 @@ public class LianLiPluginTests {
     public void Initialize_SkipsAWirelessReceiverWithoutATransmitter() {
         var logger = new FakeLogger();
         var enumerator = new FakeEnumerator(WirelessReceiver()) { ConfigureTransport = SeedWirelessDongles };
-        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         plugin.Initialize();
 
@@ -760,7 +760,7 @@ public class LianLiPluginTests {
         File.WriteAllText(Path.Combine(lConnect.Locations.WirelessDirectory, "112233445566.config"), "21");
         var enumerator = new FakeEnumerator(WirelessTransmitter(), WirelessReceiver()) { ConfigureTransport = SeedWirelessDongles };
         var logger = new FakeLogger();
-        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, lConnect.Locations, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, lConnect.Locations, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         plugin.Initialize();
 
@@ -779,7 +779,7 @@ public class LianLiPluginTests {
         File.WriteAllText(channelFile, "21");
         var enumerator = new FakeEnumerator(WirelessTransmitter(), WirelessReceiver()) { ConfigureTransport = SeedWirelessDongles };
         var logger = new FakeLogger();
-        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, lConnect.Locations, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, lConnect.Locations, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         // Held open exclusively, as L-Connect would while writing it.
         using (new FileStream(channelFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) {
@@ -796,7 +796,7 @@ public class LianLiPluginTests {
         using var lConnect = new LConnectDirectory();
         WriteStartStopProfile(lConnect, "fake/0", "{\"SubProfiles\":[{\"GroupIndex\":0,\"RPMSetting\":{\"Mode\":0,\"Profiles\":{\"Quiet\":{\"Mode\":0,\"IsStartStop\":true}}}}]}");
         var logger = new FakeLogger();
-        using var plugin = new LianLiPlugin(new FakeEnumerator(Sli(0)), new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, lConnect.Locations, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(new FakeEnumerator(Sli(0)), new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, lConnect.Locations, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         plugin.Initialize();
 
@@ -810,7 +810,7 @@ public class LianLiPluginTests {
         Directory.CreateDirectory(lConnect.Locations.ProfileDirectory);
         File.WriteAllText(Path.Combine(lConnect.Locations.ProfileDirectory, StartStopConfigurationReader.ProfileFileName("fake/0")), "not gzip");
         var logger = new FakeLogger();
-        using var plugin = new LianLiPlugin(new FakeEnumerator(Sli(0)), new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, lConnect.Locations, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(new FakeEnumerator(Sli(0)), new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, lConnect.Locations, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         plugin.Initialize();
         var container = new FakeSensorsContainer();
@@ -841,13 +841,14 @@ public class LianLiPluginTests {
         var delay = new FakeDelay();
         var logger = new FakeLogger();
 
-        Assert.Throws<ArgumentNullException>(() => new LianLiPlugin(null!, catalog, clock, delay, logger, lConnect, runtime));
-        Assert.Throws<ArgumentNullException>(() => new LianLiPlugin(enumerator, null!, clock, delay, logger, lConnect, runtime));
-        Assert.Throws<ArgumentNullException>(() => new LianLiPlugin(enumerator, catalog, null!, delay, logger, lConnect, runtime));
-        Assert.Throws<ArgumentNullException>(() => new LianLiPlugin(enumerator, catalog, clock, null!, logger, lConnect, runtime));
-        Assert.Throws<ArgumentNullException>(() => new LianLiPlugin(enumerator, catalog, clock, delay, null!, lConnect, runtime));
-        Assert.Throws<ArgumentNullException>(() => new LianLiPlugin(enumerator, catalog, clock, delay, logger, null!, runtime));
-        Assert.Throws<ArgumentNullException>(() => new LianLiPlugin(enumerator, catalog, clock, delay, logger, lConnect, null!));
+        Assert.Throws<ArgumentNullException>(() => new LianLiPlugin(null!, catalog, clock, delay, logger, lConnect, runtime, CopyGuardFixture.Alone()));
+        Assert.Throws<ArgumentNullException>(() => new LianLiPlugin(enumerator, null!, clock, delay, logger, lConnect, runtime, CopyGuardFixture.Alone()));
+        Assert.Throws<ArgumentNullException>(() => new LianLiPlugin(enumerator, catalog, null!, delay, logger, lConnect, runtime, CopyGuardFixture.Alone()));
+        Assert.Throws<ArgumentNullException>(() => new LianLiPlugin(enumerator, catalog, clock, null!, logger, lConnect, runtime, CopyGuardFixture.Alone()));
+        Assert.Throws<ArgumentNullException>(() => new LianLiPlugin(enumerator, catalog, clock, delay, null!, lConnect, runtime, CopyGuardFixture.Alone()));
+        Assert.Throws<ArgumentNullException>(() => new LianLiPlugin(enumerator, catalog, clock, delay, logger, null!, runtime, CopyGuardFixture.Alone()));
+        Assert.Throws<ArgumentNullException>(() => new LianLiPlugin(enumerator, catalog, clock, delay, logger, lConnect, null!, CopyGuardFixture.Alone()));
+        Assert.Throws<ArgumentNullException>(() => new LianLiPlugin(enumerator, catalog, clock, delay, logger, lConnect, runtime, null!));
     }
 
     [Fact]
@@ -858,7 +859,7 @@ public class LianLiPluginTests {
             WirelessReceiver(),
             new LocatedDevice(0x0416, 0x8040, "fake/wireless/tx2", null),
             new LocatedDevice(0x0416, 0x8041, "fake/wireless/rx2", null)) { ConfigureTransport = SeedWirelessDongles };
-        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         plugin.Initialize();
 
@@ -877,7 +878,7 @@ public class LianLiPluginTests {
             new LocatedDevice(0x0416, 0x8041, "fake/wireless/rx", null, "{kit-a}"),
             new LocatedDevice(0x0416, 0x8040, "fake/wireless/tx2", null, "{kit-a}"),
             new LocatedDevice(0x0416, 0x8041, "fake/wireless/rx2", null, "{kit-b}")) { ConfigureTransport = SeedWirelessDongles };
-        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+        using var plugin = new LianLiPlugin(enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         plugin.Initialize();
 
@@ -892,7 +893,7 @@ public class LianLiPluginTests {
         var logger = new FakeLogger();
         var enumerator = new FakeEnumerator(WirelessTransmitter(), WirelessReceiver());
         using var plugin = new LianLiPlugin(
-            enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()));
+            enumerator, new DeviceCatalog(), new FakeClock(), new FakeDelay(), logger, LConnectDirectory.Absent, new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore()), CopyGuardFixture.Alone());
 
         plugin.Initialize();
 

@@ -65,7 +65,7 @@ The Uni controllers are request-response: a `HidD_GetInputReport` returns a stal
 
 ## ARGB-sync report (ARGB build, and a synced controller on the Lighting build)
 
-ARGB sync is compiled in when the plugin is built with the `ENABLE_ARGB` symbol (`-p:EnableArgb=true`), which ships as the separate `FanControl.LianLi.Argb.dll`, where every Uni controller is told once at startup (and again after a reconnect) to take its LED lighting from the motherboard's ARGB header. The Lighting build sends the same report to a Uni controller whose per-controller L-Connect "sync to motherboard" switch is on, in place of that controller's saved look, as L-Connect 2.1.29 does at its start and after a resume (see [lighting.md](lighting.md#motherboard-argb-sync-the-l-connect-switch)). The standard build never emits it. It is asserted with the feature report:
+ARGB sync is compiled in when the plugin is built with the `ENABLE_ARGB` symbol (`-p:EnableArgb=true`), which ships as the separate `FanControl.LianLi-Argb.dll`, where every Uni controller is told once at startup (and again after a reconnect) to take its LED lighting from the motherboard's ARGB header. The Lighting build sends the same report to a Uni controller whose per-controller L-Connect "sync to motherboard" switch is on, in place of that controller's saved look, as L-Connect 2.1.29 does at its start and after a resume (see [lighting.md](lighting.md#motherboard-argb-sync-the-l-connect-switch)). The standard build never emits it. It is asserted with the feature report:
 
 ```
 { 224, 16, argbReg, 1, 0, 0, 0 }

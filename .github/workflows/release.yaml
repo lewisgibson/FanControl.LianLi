@@ -105,28 +105,31 @@ jobs:
 
             - name: Build ARGB
               # The ARGB variant: EnableArgb defines ENABLE_ARGB (compiles in the startup
-              # ARGB-sync write) and the assembly is renamed to FanControl.LianLi.Argb so it
+              # ARGB-sync write) and the assembly is renamed to FanControl.LianLi-Argb so it
               # ships as a distinct second DLL beside the standard one (install one OR the
-              # other). Its own -o output dir keeps it from clobbering the standard build.
+              # other). A hyphen, not a dot: FanControl's Install plugin button only takes a
+              # file named FanControl.<Name>.dll, exactly three dot-separated parts. Its own
+              # -o output dir keeps it from clobbering the standard build.
               run: >
                   dotnet build src/FanControl.LianLi/FanControl.LianLi.csproj
                   -c Release --no-restore -o artifacts/argb
                   -p:EnableArgb=true
-                  -p:AssemblyName=FanControl.LianLi.Argb
+                  -p:AssemblyName=FanControl.LianLi-Argb
                   -p:Version=${{ steps.vars.outputs.version }}
                   -p:InformationalVersion=${{ steps.vars.outputs.version }}+${{ steps.vars.outputs.sha_short }}
 
             - name: Build Lighting
               # The Lighting variant: EnableLighting defines ENABLE_LIGHTING (compiles in
               # the startup L-Connect-look replay) and the assembly is renamed to
-              # FanControl.LianLi.Lighting so it ships as a distinct third DLL beside the
-              # other two (install one of the three). Its own -o output dir keeps it from
-              # clobbering the standard and ARGB builds.
+              # FanControl.LianLi-Lighting so it ships as a distinct third DLL beside the
+              # other two (install one of the three), with a hyphen for the same reason as
+              # the ARGB build. Its own -o output dir keeps it from clobbering the standard
+              # and ARGB builds.
               run: >
                   dotnet build src/FanControl.LianLi/FanControl.LianLi.csproj
                   -c Release --no-restore -o artifacts/lighting
                   -p:EnableLighting=true
-                  -p:AssemblyName=FanControl.LianLi.Lighting
+                  -p:AssemblyName=FanControl.LianLi-Lighting
                   -p:Version=${{ steps.vars.outputs.version }}
                   -p:InformationalVersion=${{ steps.vars.outputs.version }}+${{ steps.vars.outputs.sha_short }}
 
@@ -170,8 +173,8 @@ jobs:
                   }
 
                   New-PluginPackage "artifacts/standard/FanControl.LianLi.dll" "Standard" "FanControl.LianLi" "standard"
-                  New-PluginPackage "artifacts/argb/FanControl.LianLi.Argb.dll" "ARGB" "FanControl.LianLi-Argb" "argb"
-                  New-PluginPackage "artifacts/lighting/FanControl.LianLi.Lighting.dll" "Lighting" "FanControl.LianLi-Lighting" "lighting"
+                  New-PluginPackage "artifacts/argb/FanControl.LianLi-Argb.dll" "ARGB" "FanControl.LianLi-Argb" "argb"
+                  New-PluginPackage "artifacts/lighting/FanControl.LianLi-Lighting.dll" "Lighting" "FanControl.LianLi-Lighting" "lighting"
 
             - name: Build Release Notes
               id: notes

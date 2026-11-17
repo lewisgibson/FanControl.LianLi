@@ -12,6 +12,14 @@ Install:
   That single DLL is all you need. To upgrade later, do the same with
   the new DLL; your curves stay bound.
 
+  If you copied an older FanControl.LianLi.Argb.dll or
+  FanControl.LianLi.Lighting.dll into FanControl's Plugins folder by
+  hand, leave it: the plugin removes it from the folder itself and
+  takes over at FanControl's next refresh, or straight away if you
+  restart FanControl. If you copied FanControl.LianLi.dll into the
+  Plugins folder itself by hand, close FanControl and delete that copy
+  first: FanControl can't load two files of the same name.
+
 Do not run Lian Li L-Connect at the same time. Both drive the same
 devices, and the wireless dongles can only be open in one program.
 Keep L-Connect installed (the plugin reads what you saved in it), but

@@ -25,7 +25,7 @@ The binding engineering standards are in `.claude/rules/` (the layering, the dev
 
 ## Deployment
 
-Ship only `FanControl.LianLi.dll` (or `FanControl.LianLi.Argb.dll` for the ARGB variant); it has no dependencies to ship beside it. Users install it with FanControl's in-app **Install plugin** button, which loads the plugin immediately - no restart of FanControl is needed. FanControl runs plugins in its background service (`FanControl.Service`, as LocalSystem), so the plugin runs as SYSTEM and its file log lands under the SYSTEM profile. See `docs/deployment.md`.
+Ship only `FanControl.LianLi.dll` (or `FanControl.LianLi-Argb.dll` for the ARGB variant, `FanControl.LianLi-Lighting.dll` for the Lighting variant); it has no dependencies to ship beside it. Users install it with FanControl's in-app **Install plugin** button, which loads the plugin immediately - no restart of FanControl is needed. FanControl runs plugins in its background service (`FanControl.Service`, as LocalSystem), so the plugin runs as SYSTEM and its file log lands under the SYSTEM profile. See `docs/deployment.md`.
 
 ## Rules
 

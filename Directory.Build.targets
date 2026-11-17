@@ -4,7 +4,7 @@
        startup. The default build leaves it undefined, so the standard DLL never
        touches lighting. This is a compile-time switch, not a runtime flag: the two
        behaviors ship as two separate DLLs (the ARGB DLL is renamed at ship time via
-       -p:AssemblyName=FanControl.LianLi.Argb; see
+       -p:AssemblyName=FanControl.LianLi-Argb; see
        src/FanControl.LianLi/FanControl.LianLi.csproj). Imported from
        Directory.Build.targets (last) so the append survives the SDK's own
        DefineConstants handling, and applied repo-wide so the test project compiles
@@ -16,7 +16,7 @@
   <!-- Lighting build variant. `dotnet build -p:EnableLighting=true` defines the
        ENABLE_LIGHTING compile symbol, which compiles in the opt-in replay of a
        captured L-Connect look at controller startup. It ships as its own renamed DLL
-       (-p:AssemblyName=FanControl.LianLi.Lighting), separate from the standard and
+       (-p:AssemblyName=FanControl.LianLi-Lighting), separate from the standard and
        ARGB variants, so a user who manages lighting elsewhere (OpenRGB, L-Connect)
        can choose a DLL that never touches it. Applied repo-wide so the test project
        compiles the lighting tests when EnableLighting is set. The variants are

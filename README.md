@@ -62,7 +62,7 @@ Install only one of these.
 2. Right-click the `.dll`, choose Properties, tick Unblock and click OK.
 3. In FanControl, open the menu, click Install plugin and pick the `.dll`.
 
-To upgrade, do the same with the new version. Your curves stay as they are.
+To upgrade, do the same with the new version. Your curves stay as they are. If you copied an older ARGB or Lighting DLL into FanControl's `Plugins` folder by hand, you don't need to remove it: the plugin takes it out of the folder itself, and the new one takes over the fans at FanControl's next refresh, or straight away if you restart FanControl. If you copied the Standard `FanControl.LianLi.dll` into `Plugins` by hand, delete that copy with FanControl closed before installing, since FanControl can't load two files of the same name.
 
 ## Using it with L-Connect
 

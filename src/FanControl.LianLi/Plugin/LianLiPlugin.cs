@@ -60,6 +60,13 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     // every refresh and never closes one that registered no sensors.
     private readonly PluginRuntime _runtime;
 
+    // Which copy of the plugin drives the controllers when FanControl has loaded more than one.
+    private readonly PluginCopyGuard _guard;
+
+    // Set by Initialize when another copy of the plugin drives the controllers: this instance then
+    // registers nothing and leaves the devices alone. Read by Load and Update on FanControl's threads.
+    private volatile bool _idle;
+
     // Where L-Connect's saved documents are: the machine's own in the host, a fixture in a test.
     private readonly LConnectLocations _lConnect;
 
@@ -86,7 +93,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     // enumeration probe that fails leaves a trace. A separate ctor because the enumerator and the
     // log are siblings the public ctor cannot reference from a single chained call.
     private LianLiPlugin(ILog log)
-        : this(new WindowsDeviceEnumerator(log), new DeviceCatalog(), new SystemClock(), new SystemDelay(), log, LConnectLocations.Machine, PluginRuntime.Process) {
+        : this(new WindowsDeviceEnumerator(log), new DeviceCatalog(), new SystemClock(), new SystemDelay(), log, LConnectLocations.Machine, PluginRuntime.Process, PluginCopyGuard.Process) {
     }
 
     /// <summary>Composition/test constructor that accepts fakes for every dependency.</summary>
@@ -97,7 +104,8 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
         IDelay delay,
         ILog log,
         LConnectLocations lConnect,
-        PluginRuntime runtime) {
+        PluginRuntime runtime,
+        PluginCopyGuard guard) {
         _enumerator = enumerator ?? throw new ArgumentNullException(nameof(enumerator));
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
@@ -105,6 +113,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _lConnect = lConnect ?? throw new ArgumentNullException(nameof(lConnect));
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
+        _guard = guard ?? throw new ArgumentNullException(nameof(guard));
     }
 
     /// <summary>Plugin name shown in the FanControl UI. Each build variant advertises a
@@ -124,10 +133,18 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     /// <summary>
     /// Scan for controllers, build a <see cref="FanController"/> for each known
     /// device, and start the keepalive worker. Safe to call repeatedly: any
-    /// previous state is torn down first.
+    /// previous state is torn down first. When another copy of the plugin is loaded and drives the
+    /// controllers (see <see cref="PluginCopyGuard"/>), this one stops anything it was running and
+    /// stays idle instead.
     /// </summary>
     public void Initialize() {
         lock (_sync) {
+            _idle = !Activate();
+            if (_idle) {
+                Reset();
+                return;
+            }
+
             InitializeLocked();
         }
     }
@@ -148,14 +165,33 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     /// </summary>
     public event Action? RefreshRequested;
 
-    private void InitializeLocked() {
-        // Whatever is running goes first: this instance's own last run, or an earlier instance's
-        // that FanControl never closed because it had registered no sensors.
+    // Whether this copy drives the controllers. A failure to decide (the claim's kernel object, a
+    // file time, the assembly scan) must not cost the fans, so it is logged and this copy drives:
+    // the guard exists to stop two copies fighting, and a single copy has to fail open.
+    private bool Activate() {
+        try {
+            return _guard.TryActivate(this, _log);
+        }
+#pragma warning disable CA1031 // host boundary: failing to decide is logged, and the plugin drives the fans as a lone copy would
+        catch (Exception ex) {
+#pragma warning restore CA1031
+            _log.Write("could not check for another copy of the plugin, so this copy drives the fans: " + ex.ToString());
+            return true;
+        }
+    }
+
+    // Whatever is running goes first: this instance's own last run, or an earlier instance's
+    // that FanControl never closed because it had registered no sensors.
+    private void Reset() {
         _runtime.Stop();
         _controllers.Clear();
         _lateStandIns.Clear();
         _mayStillRegister = false;
         _standInKeys.Clear();
+    }
+
+    private void InitializeLocked() {
+        Reset();
         _runtime.Restore(_log);
         _numberingEpoch = _runtime.NumberingEpoch;
         _runtime.ForgetExpired(_log);
@@ -1125,6 +1161,12 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
             throw new ArgumentNullException(nameof(container));
         }
 
+        // An idle copy registers nothing, so the copy that drives the controllers is the only one
+        // whose sensors FanControl shows.
+        if (_idle) {
+            return;
+        }
+
         // Each sensor id is registered once, under the controller it belongs to. A FLEX chain has
         // the same ids on its USB receiver and on the dongles, and between the scan and this call
         // the radio may have taken it or let it go; the controller that drives it now remembers it
@@ -1248,18 +1290,30 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     /// Host update tick. It does no device I/O - FanControl calls it holding the lock that
     /// serialises every device it drives, so the worker thread does all of that - and only raises
     /// <see cref="RefreshRequested"/> here, on FanControl's own thread, when a refresh is wanted.
+    /// While another copy of the plugin is loaded beside a driving one, it also checks that this
+    /// copy's file is still there: once the other copy has renamed it away, a refresh hands that
+    /// copy the fans (see <see cref="PluginCopyGuard.OwnFileRemoved"/>).
     /// </summary>
     public void Update() {
+        if (_idle) {
+            return;
+        }
+
+        if (_guard.OwnFileRemoved()) {
+            _runtime.RequestRefresh("a newer copy of the plugin removed this copy's file, so a refresh hands it the fans", _log);
+        }
+
         if (_runtime.TryTakeRefresh(this, out string reason)) {
             _log.Write("requesting a FanControl refresh: " + reason);
             RefreshRequested?.Invoke();
         }
     }
 
-    /// <summary>Stop the worker and release the controllers, if this instance is the one running them.</summary>
+    /// <summary>Stop the worker and release the controllers, and the claim on driving them, if this instance is the one running them.</summary>
     public void Close() {
         lock (_sync) {
             _runtime.StopIfOwnedBy(this);
+            _guard.Release(this);
             _controllers.Clear();
             _standInKeys.Clear();
             _lateStandIns.Clear();

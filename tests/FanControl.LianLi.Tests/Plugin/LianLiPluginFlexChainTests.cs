@@ -45,7 +45,7 @@ public sealed class LianLiPluginFlexChainTests {
     private static LocatedDevice Receiver() => new LocatedDevice(0x0416, 0x8041, ReceiverPath, null);
 
     private static LianLiPlugin NewPlugin(FakeEnumerator enumerator, PluginRuntime runtime, FakeLogger? logger = null, IClock? clock = null)
-        => new LianLiPlugin(enumerator, new DeviceCatalog(), clock ?? new FakeClock(), new FakeDelay(), logger ?? new FakeLogger(), LConnectDirectory.Absent, runtime);
+        => new LianLiPlugin(enumerator, new DeviceCatalog(), clock ?? new FakeClock(), new FakeDelay(), logger ?? new FakeLogger(), LConnectDirectory.Absent, runtime, CopyGuardFixture.Alone());
 
     private static FakeSensorsContainer Load(LianLiPlugin plugin) {
         plugin.Initialize();

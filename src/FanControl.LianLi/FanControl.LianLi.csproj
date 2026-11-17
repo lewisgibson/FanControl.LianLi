@@ -5,7 +5,9 @@
     <!-- The ARGB build ships as a distinct, separately-named assembly so it can never
          collide with the standard DLL on load and so a user can see at a glance which
          variant they installed. The rename is applied only when building the shippable
-         artifact (-p:AssemblyName=FanControl.LianLi.Argb), not during the test build:
+         artifact (-p:AssemblyName=FanControl.LianLi-Argb, and FanControl.LianLi-Lighting for
+         the Lighting build; a hyphen, because FanControl's Install plugin button only takes
+         a FanControl.<Name>.dll of exactly three dot-separated parts), not during the test build:
          renaming the assembly under test breaks xUnit's resolution of the [InlineData]
          typeof(...) protocol arguments. The sensor identifiers are independent of the
          assembly name, so a user's existing fan-curve bindings survive switching between
