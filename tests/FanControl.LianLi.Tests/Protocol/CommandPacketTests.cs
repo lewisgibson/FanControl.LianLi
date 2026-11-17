@@ -50,6 +50,19 @@ public sealed class CommandPacketTests {
         Assert.Equal(new byte[] { 0x90, 0x05, 0xDC }, CommandPacket.Payload(packet, 3));
     }
 
+    // L-Connect's TryParse rejects a packet whose report id is not 0x01 before it compares the command.
+    [Fact]
+    public void IsReply_NeedsTheReportIdAndTheEchoedCommand() {
+        byte[] packet = CommandPacket.Build(0xA1);
+
+        Assert.True(CommandPacket.IsReply(packet, 0xA1));
+        Assert.False(CommandPacket.IsReply(packet, 0xAA));
+        packet[0] = 0x02;
+        Assert.False(CommandPacket.IsReply(packet, 0xA1));
+        Assert.Throws<ArgumentNullException>(() => CommandPacket.IsReply(null!, 0xA1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => CommandPacket.IsReply(new byte[] { 0x01 }, 0xA1));
+    }
+
     [Fact]
     public void RejectsMissingOrTruncatedPackets() {
         Assert.Throws<ArgumentNullException>(() => CommandPacket.Build(0x01, null!));

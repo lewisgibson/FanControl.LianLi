@@ -34,7 +34,15 @@ A controller that is slow to answer at boot is remembered from the last run: its
 
 ## Fan speeds or lighting are erratic
 
-L-Connect is almost certainly running alongside the plugin. Both write to the same controller and fight each other. Switch L-Connect's service off as described in the README section [Using it with L-Connect](../README.md#using-it-with-l-connect) and restart FanControl.
+L-Connect is almost certainly running alongside the plugin. Both write to the same controller and fight each other. Switch L-Connect's service off as described in the README section [Using it with L-Connect](../README.md#using-it-with-l-connect) and restart FanControl. Another FanControl plugin for the same hub, or a second copy of this one in the Plugins folder, does the same.
+
+These lines in the log show a TL hub or a GALAHAD II cooler not answering the plugin's RPM request:
+
+- `T<n>: the hub did not answer the handshake (...)`: the TL hub was asked for its fans' RPM, twice unless the first ask used up the 450 ms a poll allows, and sent something else each time. The readings stay where they were until it answers, which is logged as `T<n>: the hub answers the handshake again`, or `for the first time` if it never answered when the plugin started.
+- `G<n>: the cooler did not answer the handshake (...)`: the same for a GALAHAD II or HydroShift LCD cooler, which gets one ask and up to a second, with `G<n>: the cooler answers the handshake again` (or `for the first time`) once it does.
+- `HidD_FlushQueue failed on <path> ...`: Windows would not empty the plugin's queue of the controller's replies before a write. The write still went out, but an older reply may be read as the answer to the next request. It is logged once until a flush succeeds.
+
+Another program talking to the same controller is the usual cause of the first two.
 
 ## Lighting resets to the factory rainbow on every boot
 

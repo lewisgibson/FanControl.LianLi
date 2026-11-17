@@ -57,6 +57,12 @@ internal interface IHidApi {
     /// <summary><c>HidD_SetNumInputBuffers</c>: how many input reports the HID class driver queues for the handle.</summary>
     bool SetInputBufferCount(SafeHandle handle, int count, out int error);
 
+    /// <summary>
+    /// <c>HidD_FlushQueue</c>: discard every input report the HID class driver has queued for this handle.
+    /// Other handles on the same interface, the plugin's own and other programs', keep theirs.
+    /// </summary>
+    bool FlushInputQueue(SafeHandle handle, out int error);
+
     /// <summary><c>HidD_SetFeature</c>: SET_REPORT(Feature); byte 0 of <paramref name="buffer"/> is the report id.</summary>
     bool SetFeature(SafeHandle handle, byte[] buffer, out int error);
 

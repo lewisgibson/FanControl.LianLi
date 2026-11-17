@@ -83,6 +83,9 @@ internal sealed class WindowsHidApi : IHidApi, IHidOverlappedApi {
     public bool SetInputBufferCount(SafeHandle handle, int count, out int error)
         => Report(NativeMethods.HidD_SetNumInputBuffers(handle, (uint)count), out error);
 
+    public bool FlushInputQueue(SafeHandle handle, out int error)
+        => Report(NativeMethods.HidD_FlushQueue(handle), out error);
+
     public bool SetFeature(SafeHandle handle, byte[] buffer, out int error)
         => Report(NativeMethods.HidD_SetFeature(handle, buffer, buffer.Length), out error);
 
@@ -294,6 +297,11 @@ internal sealed class WindowsHidApi : IHidApi, IHidOverlappedApi {
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         [return: MarshalAs(UnmanagedType.U1)]
         public static extern bool HidD_SetNumInputBuffers(SafeHandle handle, uint numberBuffers);
+
+        [DllImport("hid.dll", SetLastError = true)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        [return: MarshalAs(UnmanagedType.U1)]
+        public static extern bool HidD_FlushQueue(SafeHandle handle);
 
         [DllImport("hid.dll", SetLastError = true)]
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]

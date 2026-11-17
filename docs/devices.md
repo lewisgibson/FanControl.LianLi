@@ -23,7 +23,7 @@ The TL hub speaks a different command protocol from the other UNI FAN hubs (it s
 
 - **One control per fan.** The TL hub talks to every fan in a daisy chain on its own, so each fan gets its own control and its own RPM reading (`Port 1 Fan 1`, `Port 1 Fan 2` and so on). The other UNI FAN hubs can't do that: their chained fans share one signal wire, so a channel is one control however many fans are on it.
 - **L-Connect groups them in software.** L-Connect puts a port's fans into groups (three to a group unless you change it, at most four groups of four) and sends every fan in a group the same speed. The hub itself has no group speed. To run a port, or any set of fans, as one, pick the same curve on each fan's control, or give the others a Sync curve that copies one of them.
-- **One program at a time.** The plugin, L-Connect and any other plugin that talks to the TL hub all send it commands, so only one of them can drive it.
+- **One program at a time.** The plugin, L-Connect and any other plugin that talks to the TL hub all send it commands, so only one of them can drive it. A second program no longer makes the plugin's RPM readings fall behind, but both still send speeds, the fans follow whichever wrote last, and commands can still be lost between them.
 
 ## AIO coolers
 

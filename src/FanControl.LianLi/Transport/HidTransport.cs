@@ -10,7 +10,8 @@ namespace FanControl.LianLi.Transport;
 /// <summary>
 /// The <see cref="IDeviceTransport"/> over a HID interface, on handles the plugin opens and owns.
 /// Output reports and interrupt-IN reads are overlapped <c>WriteFile</c> / <c>ReadFile</c> transfers on
-/// a stream handle, each waited for with a deadline of the transport's own. Feature writes and RPM
+/// a stream handle, each waited for with a deadline of the transport's own; every write first empties the
+/// handle's input queue (<c>HidD_FlushQueue</c>), so the reads after it see only what answers it. Feature writes and RPM
 /// telemetry are control transfers - SET_REPORT(Feature) (<c>HidD_SetFeature</c>) and GET_REPORT(Input)
 /// (<c>HidD_GetInputReport</c>) - on a synchronous handle opened beside it. A handle the device has gone
 /// away underneath (USB re-enumeration across sleep/wake or hibernate) is marked faulted and reopened on
@@ -68,8 +69,9 @@ internal sealed class HidTransport : IDeviceTransport {
     private const int DefaultFeatureReportLength = 65;
 
     // The input reports the HID class driver queues on the stream handle between reads, raised from
-    // its default of 32 so a reply the 0x0416 family sends while no read is pending waits there for the
-    // next read instead of being pushed out by the reports that follow it.
+    // its default of 32. Every write empties the queue first, so it only has to hold what arrives
+    // between a write and the reads that follow it; 512 stays so a burst from another program in that
+    // window cannot push the 0x0416 family's reply out before it is read.
     private const int InputBufferCount = 512;
 
     // Win32 errors a control transfer returns only when its handle no longer reaches a device: the
@@ -107,6 +109,10 @@ internal sealed class HidTransport : IDeviceTransport {
     // transfers to 640 - about five seconds to five minutes at the worker's two transfers a tick.
     private readonly DoublingBackoff _reopenBackoff = new DoublingBackoff(10, 640);
     private int _faultedTransfers;
+
+    // Whether the last write's flush failed, so a run of them is logged once, not per write.
+    // Worker-thread only, like the handles.
+    private bool _flushFailing;
 
     // Moved on by every fault - when the handle is lost, not when it is reopened - so the controller
     // above sees it before its next transfer reopens the device inside its own call, and replays
@@ -216,7 +222,46 @@ internal sealed class HidTransport : IDeviceTransport {
         Array.Copy(report, padded, report.Length);
         SafeHandle stream = _handles.Stream;
         Func<IHidTransfer> begin = () => _hid.BeginWrite(stream, padded);
-        RunStreamCall("WriteFile", stream, token => _ = RunStreamTransfer("WriteFile", begin, token));
+        bool flushed = false;
+        int flushError = 0;
+        RunStreamCall("WriteFile", stream, token => {
+            // A write starts a new request/reply exchange, so first drop the input reports the HID class
+            // driver has queued for this handle. The 0x0416 devices answer commands whose answers the
+            // plugin never reads, and Windows gives every open handle its own copy of every report, so
+            // without this an answer to an earlier request, or to another program's, is read as this
+            // one's. Only what the driver already holds is dropped: an answer still on its way arrives
+            // after the flush, and the controller reads past it. A flush that fails does not stop the
+            // write; it is logged below. RunStreamTransfer checks the token again before the write.
+            token.ThrowIfCancellationRequested();
+            flushed = _hid.FlushInputQueue(stream, out flushError);
+            _ = RunStreamTransfer("WriteFile", begin, token);
+        });
+
+        // Reached only when the call returned: one given up on may still be writing the two locals on
+        // its own thread, and a write that threw is the failure worth reporting.
+        RecordFlush(flushed, flushError);
+    }
+
+    // A flush that fails leaves whatever the driver still held in front of the next reply, where a
+    // controller reading to the reply that echoes its command can take an older answer to the same
+    // command as this one. Worth a line, with its code; once per run of failures, since a flush that
+    // fails once tends to fail on every write until the handle is reopened.
+    private void RecordFlush(bool flushed, int error) {
+        if (flushed) {
+            _flushFailing = false;
+            return;
+        }
+
+        if (_flushFailing) {
+            return;
+        }
+
+        _flushFailing = true;
+        _log.Write(string.Format(
+            CultureInfo.InvariantCulture,
+            "  HidD_FlushQueue failed on {0} (error {1}); the write went ahead, and a reply still queued from an earlier request may be read before the next one (logged once until a flush succeeds)",
+            _device.DevicePath,
+            error));
     }
 
     public void SetFeature(byte[] report) {

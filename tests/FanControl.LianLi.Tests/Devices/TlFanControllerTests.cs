@@ -193,8 +193,9 @@ public class TlFanControllerTests {
         Assert.Equal(1600f, controller.GetRpm(1));
     }
 
-    // The hub answers every command, so the answers to the speed writes sit ahead of the handshake's:
-    // the poll reads past them to the reply that echoes the handshake.
+    // The transport empties the queue before the handshake is written, but answers can still arrive
+    // after that and ahead of the handshake's (to a write made a moment earlier, or to another
+    // program's command): the poll reads past them to the reply that echoes the handshake.
     [Fact]
     public void PollRpm_ReadsPastTheAnswersQueuedAheadOfTheHandshakeReply() {
         var (controller, transport, _) = NewController((0, 0, 1000));
@@ -210,24 +211,139 @@ public class TlFanControllerTests {
         Assert.Equal(reads + 3, transport.InterruptReadCount);
     }
 
-    // With no handshake reply among the reports a poll reads, it takes no reading and adds no fan,
-    // and a bounded number of reports is read.
+    // With no handshake reply among the reports a poll reads, it asks once more, as L-Connect does,
+    // then takes no reading and adds no fan, and a bounded number of reports is read.
     [Fact]
     public void PollRpm_WithNoHandshakeReply_ReadsABoundedNumber_AndAddsNothing() {
         var (controller, transport, _) = NewController((0, 0, 1000));
         transport.ReadReplies.Enqueue(HandshakeReply((0, 0, 1500)));
         controller.PollRpm();
-        for (int i = 0; i < 40; i++) {
+        for (int i = 0; i < 70; i++) {
             transport.ReadReplies.Enqueue(CommandPacket.Build(TlSpeedCommand, 0xB3, 0x05, 0xDC));
         }
 
         int reads = transport.InterruptReadCount;
+        transport.Writes.Clear();
 
         controller.PollRpm();
 
-        Assert.Equal(reads + 32, transport.InterruptReadCount);
+        Assert.Equal(reads + 64, transport.InterruptReadCount);
+        Assert.Equal(2, transport.Writes.Count(w => w[1] == 0xA1));
         Assert.Equal(1, controller.ChannelCount);
         Assert.Equal(1500f, controller.GetRpm(0));
+    }
+
+    [Fact]
+    public void PollRpm_AHandshakeReplyOnTheSecondAsk_IsUsed() {
+        var transport = new FakeDeviceTransport();
+        transport.ReadReplies.Enqueue(HandshakeReply((0, 0, 1000)));
+        var logger = new FakeLogger();
+        var controller = new TlFanController(0, transport, new FakeClock(), logger);
+        for (int i = 0; i < 32; i++) {
+            transport.ReadReplies.Enqueue(CommandPacket.Build(0xB1, 0x00));
+        }
+
+        transport.ReadReplies.Enqueue(HandshakeReply((0, 0, 1500)));
+        transport.Writes.Clear();
+
+        controller.PollRpm();
+
+        Assert.Equal(1500f, controller.GetRpm(0));
+        Assert.Equal(2, transport.Writes.Count(w => w[1] == 0xA1));
+        Assert.Empty(logger.Messages);
+    }
+
+    // A hub that stops answering is said once, with the command the last report echoed, and once more
+    // when it answers again.
+    [Fact]
+    public void PollRpm_WithNoHandshakeReply_IsLoggedOnce_AndOnceWhenOneComesAgain() {
+        var transport = new FakeDeviceTransport();
+        transport.ReadReplies.Enqueue(HandshakeReply((0, 0, 1000)));
+        var logger = new FakeLogger();
+        var controller = new TlFanController(0, transport, new FakeClock(), logger);
+        transport.ReplyFor = _ => CommandPacket.Build(TlSpeedCommand, 0x00, 0x32);
+
+        controller.PollRpm();
+        controller.PollRpm();
+        Poll(controller, transport, 2, (0, 0, 1500));
+
+        Assert.Equal(
+            new[] {
+                "T0: the hub did not answer the handshake (2 ask(s), 64 report(s) read, the last echoing command 0xAA); fans and RPM left as they were (logged once until it does)",
+                "T0: the hub answers the handshake again",
+            },
+            logger.Messages);
+        Assert.Equal(1500f, controller.GetRpm(0));
+    }
+
+    // A poll the hub did not answer says nothing about which fans exist, so it does not restart a
+    // late fan's count (L-Connect's updateFanGroupStatus ignores an invalid handshake the same way).
+    [Fact]
+    public void PollRpm_AnUnansweredPoll_DoesNotRestartALateFansCount() {
+        var (controller, transport, _) = NewController((0, 0, 1000));
+
+        Poll(controller, transport, 2, (0, 0, 1500), (1, 3, 1200));
+        controller.PollRpm(); // nothing queued: every report read is zeros, none a handshake reply
+        Assert.Equal(1, controller.ChannelCount);
+        Poll(controller, transport, 1, (0, 0, 1500), (1, 3, 1200));
+
+        Assert.Equal(2, controller.ChannelCount);
+        Assert.Equal("LianLi/0/p1f3/ctl", controller.Describe(1).ControlId);
+    }
+
+    // A hub that does not answer at construction starts with no fans and says so; the late-fan path
+    // adds them once it answers.
+    [Fact]
+    public void Constructor_WithNoHandshakeReply_StartsWithNoFans_AndSaysSo() {
+        var transport = new FakeDeviceTransport();
+        var logger = new FakeLogger();
+
+        var controller = new TlFanController(0, transport, new FakeClock(), logger);
+
+        Assert.Equal(0, controller.ChannelCount);
+        Assert.Equal(2, transport.Writes.Count);
+        Assert.Equal(64, transport.InterruptReadCount);
+        Assert.Equal(
+            "T0: the hub did not answer the handshake (2 ask(s), 64 report(s) read, the last echoing command 0x00); fans and RPM left as they were (logged once until it does)",
+            Assert.Single(logger.Messages));
+    }
+
+    // A hub that never answered at construction is not answering "again" when it first does.
+    [Fact]
+    public void PollRpm_TheFirstAnswerAfterAnUnansweredConstruction_IsLoggedAsTheFirst() {
+        var transport = new FakeDeviceTransport();
+        var logger = new FakeLogger();
+        var controller = new TlFanController(0, transport, new FakeClock(), logger);
+
+        Poll(controller, transport, 1, (0, 0, 1500));
+
+        Assert.Equal(2, logger.Messages.Count);
+        Assert.Equal("T0: the hub answers the handshake for the first time", logger.Messages[1]);
+    }
+
+    // A stream of other reports cannot hold the tick: the poll stops reading once L-Connect's worst
+    // case of 450 ms has passed, even short of the report count, and does not ask a second time.
+    [Fact]
+    public void PollRpm_StopsReadingOnceTheTimeLimitHasPassed() {
+        var transport = new FakeDeviceTransport();
+        transport.ReadReplies.Enqueue(HandshakeReply((0, 0, 1000)));
+        var clock = new FakeClock();
+        var logger = new FakeLogger();
+        var controller = new TlFanController(0, transport, clock, logger);
+        transport.Clear();
+        transport.ReplyFor = _ => {
+            clock.Advance(TimeSpan.FromMilliseconds(100));
+            return CommandPacket.Build(TlSpeedCommand, 0x00, 0x32);
+        };
+
+        controller.PollRpm();
+
+        Assert.Equal(5, transport.InterruptReadCount); // reads at 0-400 ms; the one due at 500 ms is not made
+        Assert.Single(transport.Writes, w => w[1] == 0xA1);
+        Assert.Equal(1, controller.ChannelCount);
+        Assert.Equal(
+            "T0: the hub did not answer the handshake (1 ask(s), 5 report(s) read, the last echoing command 0xAA); fans and RPM left as they were (logged once until it does)",
+            Assert.Single(logger.Messages));
     }
 
     private static void Poll(TlFanController controller, FakeDeviceTransport transport, int polls, params (int port, int fan, int rpm)[] fans) {

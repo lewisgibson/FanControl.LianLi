@@ -32,7 +32,11 @@ internal interface IDeviceTransport : IDisposable {
     /// </summary>
     bool IsFaulted { get; }
 
-    /// <summary>Write a raw output report. No-ops if the stream is not writable.</summary>
+    /// <summary>
+    /// Write a raw output report. A write starts a new request/reply exchange, so both transports
+    /// first discard whatever input is queued and unread: read the reply to one write before making
+    /// the next. No-ops if the stream is not writable.
+    /// </summary>
     void Write(byte[] report);
 
     /// <summary>
@@ -54,7 +58,7 @@ internal interface IDeviceTransport : IDisposable {
 
     /// <summary>
     /// Read a raw interrupt-IN report of <paramref name="length"/> bytes from the
-    /// device's input endpoint (<c>HidStream.Read</c>), bounded by a read timeout so
+    /// device's input endpoint (an overlapped <c>ReadFile</c>), bounded by a read timeout so
     /// a silent device cannot freeze the caller. Used by the 0x0416 command-packet
     /// family, which answers a handshake or telemetry write on the interrupt-IN
     /// endpoint; the Uni 0x0CF2 family does not stream input reports and pulls RPM

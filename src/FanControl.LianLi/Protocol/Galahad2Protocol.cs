@@ -44,12 +44,25 @@ internal static class Galahad2Protocol {
     public static byte[] EncodeHandshakeRequest() => CommandPacket.Build(HandshakeCommand);
 
     /// <summary>
+    /// Whether a received packet answers a handshake: report id 0x01 and the command byte echoing 0x81,
+    /// the checks <c>Galahad2TrinityDevice.GetHandshakeInfo</c> and
+    /// <c>Galahad2VisionDevice.ReadACommandPacket</c> make before they take a packet as RPM.
+    /// </summary>
+    public static bool IsHandshakeReply(byte[] reply) => CommandPacket.IsReply(reply, HandshakeCommand);
+
+    /// <summary>
     /// Decode a handshake reply into the fan and pump RPM. The reply forces a 4-byte payload: the
     /// fan RPM is the big-endian pair at payload bytes 0-1, the pump RPM the pair at bytes 2-3.
+    /// Callers match the reply with <see cref="IsHandshakeReply"/> first; a packet that is not one
+    /// throws <see cref="ArgumentException"/>, so the echo of a set command is never read as RPM.
     /// </summary>
     public static Galahad2Reading DecodeHandshake(byte[] reply) {
         if (reply is null) {
             throw new ArgumentNullException(nameof(reply));
+        }
+
+        if (!IsHandshakeReply(reply)) {
+            throw new ArgumentException("The packet does not answer a handshake.", nameof(reply));
         }
 
         byte[] payload = CommandPacket.Payload(reply, 4);

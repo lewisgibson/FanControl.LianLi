@@ -12,7 +12,7 @@ namespace FanControl.LianLi.Devices;
 /// pump. Like <see cref="FanController"/> the FanControl-thread methods only mutate locked
 /// in-memory state and every USB transfer happens on the worker-thread methods, but the 0x0416
 /// family writes a command packet and reads its reply instead of pulling an input report: a
-/// keepalive write per channel, and an RPM poll that writes a handshake and reads the answer. The
+/// keepalive write per channel, and an RPM poll that writes a handshake and reads to the answer. The
 /// pump duty is floored in <see cref="Galahad2Protocol"/> so a curve can never stop the pump.
 /// </summary>
 internal sealed class Galahad2Controller : IFanDevice {
@@ -22,6 +22,19 @@ internal sealed class Galahad2Controller : IFanDevice {
 
     // The 0x0416 handshake reply is one 64-byte command-packet frame.
     private const int HandshakeReplyLength = 64;
+
+    // The transport empties the input queue before the handshake is written, so a poll reads past
+    // only what arrives after that and before the cooler's answer: another program's reply, or a packet
+    // the Vision and HydroShift LCD send unasked (L-Connect's own reader for those takes every packet
+    // and keeps the ones that echo the handshake). Up to this many; L-Connect asks once a second and
+    // no more, so there is no second ask.
+    private const int MaxReportsPerHandshake = 32;
+
+    // The longest a poll keeps reading for the handshake's answer. L-Connect waits 200 ms for the
+    // Trinity's one answer (Galahad2TrinityDevice.ReadTimeout) and reads the Vision and HydroShift LCD
+    // in 20 ms slices (ReadACommandPacket(20)) on a reader of its own, but on every one of them it asks
+    // again each second, so an answer later than a second is overtaken by the next ask there too.
+    private static readonly TimeSpan HandshakeTimeLimit = TimeSpan.FromSeconds(1);
 
     private readonly int _index;
     private readonly IDeviceTransport _transport;
@@ -42,6 +55,11 @@ internal sealed class Galahad2Controller : IFanDevice {
     // Worker-thread only; the replay is registered before the worker starts.
     private int _setUpGeneration;
     private readonly ReconnectReplay _reconnectReplay;
+
+    // Whether the last handshake went unanswered, so the log says it once, and whether any has been
+    // answered, so the line when one is says which. Worker only.
+    private bool _handshakeMissing;
+    private bool _handshakeAnswered;
 
     public Galahad2Controller(int index, IDeviceTransport transport, IClock clock, ILog log) {
         _index = index;
@@ -142,8 +160,11 @@ internal sealed class Galahad2Controller : IFanDevice {
 
     /// <summary>Write a handshake and decode the reply into the fan and pump RPM cache.</summary>
     public void PollRpm() {
-        _transport.Write(Galahad2Protocol.EncodeHandshakeRequest());
-        byte[] reply = _transport.Read(HandshakeReplyLength);
+        // Without an answer both readings stay as they were, as L-Connect leaves them.
+        if (Handshake() is not byte[] reply) {
+            return;
+        }
+
         Galahad2Reading reading = Galahad2Protocol.DecodeHandshake(reply);
 
         List<string>? transitions = null;
@@ -161,6 +182,66 @@ internal sealed class Galahad2Controller : IFanDevice {
 
     public void Dispose() {
         _transport.Dispose();
+    }
+
+    // Write a handshake and read to the reply that answers it, past whatever else arrives after the
+    // write. Gives up once HandshakeTimeLimit has passed as well as after MaxReportsPerHandshake
+    // reports, so a stream of other reports cannot hold the tick. Null when none answers it.
+    private byte[]? Handshake() {
+        DateTime started = _clock.UtcNow;
+        _transport.Write(Galahad2Protocol.EncodeHandshakeRequest());
+        int reads = 0;
+        byte lastCommand = 0;
+        for (int read = 0; read < MaxReportsPerHandshake && !HandshakeTimedOut(read, started); read++) {
+            byte[] reply = _transport.Read(HandshakeReplyLength);
+            reads++;
+            if (Galahad2Protocol.IsHandshakeReply(reply)) {
+                RecordHandshake(answered: true, reads, lastCommand);
+                return reply;
+            }
+
+            lastCommand = CommandPacket.CommandOf(reply);
+        }
+
+        RecordHandshake(answered: false, reads, lastCommand);
+        return null;
+    }
+
+    // The first read always goes ahead, so a slow write never costs the poll its answer; every later
+    // read waits on the limit. A clock that stepped back counts as within it, and the report count
+    // still bounds the poll.
+    private bool HandshakeTimedOut(int read, DateTime started)
+        => read > 0 && ClockSpan.IsOlderThan(_clock.UtcNow, started, HandshakeTimeLimit);
+
+    // A cooler that stops answering the handshake tends to stay that way for a while, so the log says
+    // so on the change only: once when it stops, with how far the poll got and the command the last
+    // report read echoed, and once when it answers - again, or for the first time when it never had.
+    private void RecordHandshake(bool answered, int reads, byte lastCommand) {
+        if (answered) {
+            bool answeredBefore = _handshakeAnswered;
+            _handshakeAnswered = true;
+            if (_handshakeMissing) {
+                _handshakeMissing = false;
+                _log.Write(string.Format(
+                    CultureInfo.InvariantCulture,
+                    answeredBefore ? "G{0}: the cooler answers the handshake again" : "G{0}: the cooler answers the handshake for the first time",
+                    _index));
+            }
+
+            return;
+        }
+
+        if (_handshakeMissing) {
+            return;
+        }
+
+        _handshakeMissing = true;
+        _log.Write(string.Format(
+            CultureInfo.InvariantCulture,
+            "G{0}: the cooler did not answer the handshake ({1} report(s) read, the last echoing command 0x{2:X2}); RPM left as it was (logged once until it does)",
+            _index,
+            reads,
+            lastCommand));
     }
 
     // A reopened transport means the cooler was re-enumerated and may have come back reset. Nothing

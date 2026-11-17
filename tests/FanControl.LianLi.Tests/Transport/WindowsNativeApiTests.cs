@@ -81,6 +81,29 @@ public class WindowsNativeApiTests {
     }
 
     [WindowsFact]
+    public void HidApi_FlushesTheInputQueueOfAStreamHandle() {
+        // Only vendor-defined collections, and only the test's own new handle is emptied: every other
+        // handle on the interface keeps its queue. On a machine with no such interface (a CI runner,
+        // most likely) the loop body never runs and nothing is checked.
+        foreach (string path in HidInterfaces()) {
+            using (SafeHandle? query = Hid.OpenQueryHandle(path, out _)) {
+                if (query is null || !HidDeviceLocator.ReadCapabilities(Hid, query, out HidCapabilities capabilities, out _, CancellationToken.None)
+                    || capabilities.UsagePage < 0xFF00 || capabilities.InputReportLength <= 0) {
+                    continue;
+                }
+            }
+
+            using SafeHandle? stream = Hid.OpenStreamHandle(path, out _);
+            if (stream is null) {
+                continue;
+            }
+
+            Assert.True(Hid.FlushInputQueue(stream, out int error), path + " error " + error);
+            Assert.Equal(0, error);
+        }
+    }
+
+    [WindowsFact]
     public void HidApi_AnOverlappedReadThatIsCancelled_Completes_AndSaysItWasAborted() {
         // Only vendor-defined collections, which no input stack claims, and only reads: nothing any
         // other program relies on is touched. A read that a device happens to answer is fine too.

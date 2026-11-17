@@ -47,17 +47,18 @@ internal static class TlFanProtocol {
     }
 
     /// <summary>
-    /// Whether a received packet answers a handshake: its command byte echoes 0xA1, the one check
-    /// <c>TLFanDevice.GetHandshakeInfo</c> makes before it trusts a reply. The hub answers every
-    /// command, so the other replies queue ahead of it.
+    /// Whether a received packet answers a handshake: report id 0x01 and the command byte echoing 0xA1,
+    /// the checks <c>LEDPacket.TryParse</c> and <c>TLFanDevice.GetHandshakeInfo</c> make before they
+    /// trust a reply.
     /// </summary>
-    public static bool IsHandshakeReply(byte[] reply) => CommandPacket.CommandOf(reply) == HandshakeCommand;
+    public static bool IsHandshakeReply(byte[] reply) => CommandPacket.IsReply(reply, HandshakeCommand);
 
     /// <summary>
     /// Decode a handshake reply into the detected fans and their RPM. The payload is a run of
     /// 3-byte records: byte 0 packs detected/port/fan-index, bytes 1-2 are the big-endian RPM.
-    /// Undetected records are skipped, a second record for an address replaces the first, and a
-    /// packet that is not a handshake reply holds no fans.
+    /// Undetected records are skipped and a second record for an address replaces the first.
+    /// Callers match the reply with <see cref="IsHandshakeReply"/> first; a packet that is not one
+    /// throws <see cref="ArgumentException"/>, so the answer to another command is never read as fans.
     /// </summary>
     public static IReadOnlyList<TlFanReading> DecodeHandshake(byte[] reply) {
         if (reply is null) {
@@ -65,7 +66,7 @@ internal static class TlFanProtocol {
         }
 
         if (!IsHandshakeReply(reply)) {
-            return Array.Empty<TlFanReading>();
+            throw new ArgumentException("The packet does not answer a handshake.", nameof(reply));
         }
 
         // LEDPacket.Data reads at most the 58 bytes a 64-byte frame holds after its header, whatever

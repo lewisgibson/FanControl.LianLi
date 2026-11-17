@@ -263,7 +263,9 @@ public class LianLiPluginTests {
     public void InitializeThenLoad_RegistersFanAndPumpSensorsForAGalahad() {
         // A 0x0416 Galahad classifies to the command-packet builder and exposes two channels: a fan
         // and a pump, each with its own control and rpm sensor.
-        var enumerator = new FakeEnumerator(Galahad(0));
+        var enumerator = new FakeEnumerator(Galahad(0)) {
+            ConfigureTransport = (_, transport) => transport.ReplyFor = _ => CommandPacket.Build(0x81, 0x04, 0xB0, 0x0A, 0xF0),
+        };
         using LianLiPlugin plugin = NewPlugin(enumerator);
 
         plugin.Initialize();
@@ -682,9 +684,10 @@ public class LianLiPluginTests {
     private static LocatedDevice TlHub()
         => new LocatedDevice(0x0416, 0x7372, "fake/tl/0", null);
 
-    // One TL fan on port 0, fan 0, at 1000 rpm: the discovery handshake the hub answers with.
+    // One TL fan on port 0, fan 0, at 1000 rpm: what the hub answers every handshake with, the
+    // discovery handshake and each poll's.
     private static void SeedTlHandshake(LocatedDevice info, FakeDeviceTransport transport)
-        => transport.ReadReplies.Enqueue(CommandPacket.Build(0xA1, 0x80, 0x03, 0xE8));
+        => transport.ReplyFor = _ => CommandPacket.Build(0xA1, 0x80, 0x03, 0xE8);
 
     [Fact]
     public void InitializeThenLoad_RegistersAFanPerDiscoveredTlFan() {

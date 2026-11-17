@@ -787,8 +787,9 @@ public sealed class LianLiPluginLightingTests : IDisposable
             () => logger.Messages.Any(m => m.Contains("lighting-only open failed pid=0xa200")), TimeSpan.FromSeconds(5)));
     }
 
+    // One TL fan at 1000 rpm, answering every handshake, so a poll never reads to its bound.
     private static void SeedTlHandshake(LocatedDevice info, FakeDeviceTransport transport)
-        => transport.ReadReplies.Enqueue(CommandPacket.Build(0xA1, 0x80, 0x03, 0xE8));
+        => transport.ReplyFor = _ => CommandPacket.Build(0xA1, 0x80, 0x03, 0xE8);
 
     private LianLiPlugin NewPlugin(FakeEnumerator enumerator)
         => NewPlugin(enumerator, new FakeLogger());

@@ -193,6 +193,108 @@ public class Galahad2ControllerTests {
         Assert.Equal(2800f, controller.GetRpm(PumpChannel));
     }
 
+    // A packet that arrives after the handshake is written and before the cooler's answer (another
+    // program's reply, or one the Vision sends unasked) is read past, not decoded.
+    [Fact]
+    public void PollRpm_ReadsPastOtherReportsToTheHandshakeReply() {
+        var (controller, transport, _) = NewController();
+        transport.ReadReplies.Enqueue(CommandPacket.Build(0x8A, 0x00, 0x50));
+        transport.ReadReplies.Enqueue(HandshakeReply(1200, 2800));
+
+        controller.PollRpm();
+
+        Assert.Equal(2, transport.InterruptReadCount);
+        Assert.Equal(1200f, controller.GetRpm(FanChannel));
+        Assert.Equal(2800f, controller.GetRpm(PumpChannel));
+    }
+
+    [Fact]
+    public void PollRpm_AReportThatIsNotAHandshakeReply_IsNeverTakenAsRpm() {
+        var (controller, transport, _) = NewController();
+        transport.ReadReplies.Enqueue(HandshakeReply(1200, 2800));
+        controller.PollRpm();
+        for (int i = 0; i < 40; i++) {
+            transport.ReadReplies.Enqueue(CommandPacket.Build(0x8A, 0x03, 0xE8, 0x07, 0xD0)); // would decode to a plausible 1000 and 2000 rpm
+        }
+
+        transport.Clear();
+
+        controller.PollRpm();
+
+        Assert.Equal(0x81, Assert.Single(transport.Writes)[1]);
+        Assert.Equal(32, transport.InterruptReadCount);
+        Assert.Equal(1200f, controller.GetRpm(FanChannel));
+        Assert.Equal(2800f, controller.GetRpm(PumpChannel));
+    }
+
+    // A cooler that stops answering is said once, with how far the poll got and the command the last
+    // report echoed, and once more when it answers again.
+    [Fact]
+    public void PollRpm_WithNoHandshakeReply_IsLoggedOnce_AndOnceWhenOneComesAgain() {
+        var transport = new FakeDeviceTransport();
+        var logger = new FakeLogger();
+        var controller = new Galahad2Controller(0, transport, new FakeClock(), logger);
+        transport.ReadReplies.Enqueue(HandshakeReply(1200, 2700));
+        controller.PollRpm();
+        transport.ReplyFor = _ => CommandPacket.Build(0x8B, 0x00, 0x32);
+
+        controller.PollRpm();
+        controller.PollRpm();
+        transport.ReadReplies.Enqueue(HandshakeReply(1500, 2800));
+        controller.PollRpm();
+        transport.ReadReplies.Enqueue(HandshakeReply(1500, 2800));
+        controller.PollRpm();
+
+        Assert.Equal(
+            new[] {
+                "G0: the cooler did not answer the handshake (32 report(s) read, the last echoing command 0x8B); RPM left as it was (logged once until it does)",
+                "G0: the cooler answers the handshake again",
+            },
+            logger.Messages);
+        Assert.Equal(1500f, controller.GetRpm(FanChannel));
+    }
+
+    // A cooler that has never answered is not answering "again" when it first does.
+    [Fact]
+    public void PollRpm_TheFirstAnswerAfterAMiss_IsLoggedAsTheFirst() {
+        var transport = new FakeDeviceTransport();
+        var logger = new FakeLogger();
+        var controller = new Galahad2Controller(0, transport, new FakeClock(), logger);
+
+        controller.PollRpm();
+        transport.ReadReplies.Enqueue(HandshakeReply(1500, 2800));
+        controller.PollRpm();
+
+        Assert.Equal(
+            new[] {
+                "G0: the cooler did not answer the handshake (32 report(s) read, the last echoing command 0x00); RPM left as it was (logged once until it does)",
+                "G0: the cooler answers the handshake for the first time",
+            },
+            logger.Messages);
+    }
+
+    // A stream of other reports cannot hold the tick: the poll stops reading once a second has passed,
+    // even short of the report count.
+    [Fact]
+    public void PollRpm_StopsReadingOnceTheTimeLimitHasPassed() {
+        var transport = new FakeDeviceTransport();
+        var clock = new FakeClock();
+        var logger = new FakeLogger();
+        var controller = new Galahad2Controller(0, transport, clock, logger);
+        transport.ReplyFor = _ => {
+            clock.Advance(TimeSpan.FromMilliseconds(200));
+            return CommandPacket.Build(0x8A, 0x00, 0x50);
+        };
+
+        controller.PollRpm();
+
+        Assert.Equal(6, transport.InterruptReadCount); // reads at 0-1000 ms; the one due at 1200 ms is not made
+        Assert.Single(transport.Writes);
+        Assert.Equal(
+            "G0: the cooler did not answer the handshake (6 report(s) read, the last echoing command 0x8A); RPM left as it was (logged once until it does)",
+            Assert.Single(logger.Messages));
+    }
+
     [Fact]
     public void PollRpm_IgnoresImplausibleReading_AndKeepsLastGood() {
         var (controller, transport, _) = NewController();

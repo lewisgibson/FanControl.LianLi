@@ -15,7 +15,8 @@ namespace FanControl.LianLi.Tests.Fakes;
 /// 65-byte report of each kind on the vendor page when none are set); each open, attribute or capability
 /// read fails with the error scripted for it. Control transfers take their outcome from
 /// <see cref="TransferResults"/> (an empty queue is a success) and an input report is filled from
-/// <see cref="InputReports"/>. A stream transfer is the next <see cref="Transfers"/> entry, or one that
+/// <see cref="InputReports"/>. An input-queue flush fails with <see cref="FlushError"/> when one is set.
+/// A stream transfer is the next <see cref="Transfers"/> entry, or one that
 /// completes at once and in full.
 /// </summary>
 internal sealed class FakeHidApi : IHidApi {
@@ -55,6 +56,9 @@ internal sealed class FakeHidApi : IHidApi {
     public Queue<int> StreamOpenErrors { get; } = new Queue<int>();
 
     public int? InputBufferError { get; set; }
+
+    /// <summary>Win32 error every <c>HidD_FlushQueue</c> fails with while set; null means it succeeds.</summary>
+    public int? FlushError { get; set; }
 
     /// <summary>Win32 errors the next control-handle opens fail with, in order; empty means the open succeeds.</summary>
     public Queue<int> ControlOpenErrors { get; } = new Queue<int>();
@@ -131,6 +135,11 @@ internal sealed class FakeHidApi : IHidApi {
     public bool SetInputBufferCount(SafeHandle handle, int count, out int error) {
         Record(string.Format(CultureInfo.InvariantCulture, "HidD_SetNumInputBuffers {0} {1}", handle, count));
         return Result(InputBufferError ?? 0, out error);
+    }
+
+    public bool FlushInputQueue(SafeHandle handle, out int error) {
+        Record("HidD_FlushQueue " + handle);
+        return Result(FlushError ?? 0, out error);
     }
 
     public bool SetFeature(SafeHandle handle, byte[] buffer, out int error) {

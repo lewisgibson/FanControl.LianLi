@@ -47,6 +47,13 @@ internal static class CommandPacket {
     /// <summary>The command byte of a received packet (byte 1).</summary>
     public static byte CommandOf(byte[] packet) => Read(packet, CommandIndex);
 
+    /// <summary>
+    /// Whether a received packet is a command-packet frame answering <paramref name="command"/>: report id
+    /// 0x01 in byte 0 and the command echoed in byte 1, the two checks L-Connect's <c>TryParse</c> and its
+    /// callers make before they trust a reply.
+    /// </summary>
+    public static bool IsReply(byte[] packet, byte command) => Read(packet, 0) == ReportId && CommandOf(packet) == command;
+
     /// <summary>The declared payload length of a received packet (byte 5).</summary>
     public static int PayloadLengthOf(byte[] packet) => Read(packet, LengthIndex);
 

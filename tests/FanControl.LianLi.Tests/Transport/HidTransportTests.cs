@@ -331,7 +331,8 @@ public class HidTransportTests {
         Assert.Equal(64, sent.Length);
         Assert.Equal(new byte[] { 0x01, 0x02 }, sent.Take(2));
         Assert.All(sent.Skip(2), b => Assert.Equal(0, b));
-        Assert.Equal("WriteFile " + Stream() + " 64", _hid.Calls.Last());
+        Assert.Equal(new[] { "HidD_FlushQueue " + Stream(), "WriteFile " + Stream() + " 64" }, _hid.Calls.Skip(3));
+        Assert.Empty(_log.Messages);
         FakeHidTransfer transfer = Assert.Single(_hid.Started);
         Assert.Equal(new[] { 500 }, transfer.Waits);
         Assert.True(transfer.DisposedAfterCompletion);
@@ -477,9 +478,68 @@ public class HidTransportTests {
             failure.Message);
         Assert.Equal("CancelIoEx " + Stream(), _hid.Calls.Last());
 
-        // Given up on before it started, the abandoned write never reaches the device.
+        // Given up on before it started, the abandoned write never reaches the device, nor flushes it.
         Assert.Throws<OperationCanceledException>(() => Assert.Single(_calls.Abandoned)(FakeDeviceCallRunner.Cancelled));
         Assert.Empty(_hid.Written);
+        Assert.DoesNotContain(_hid.Calls, call => call.StartsWith("HidD_FlushQueue", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Write_AFlushThatFails_DoesNotStopTheWrite_AndIsLoggedOncePerRun() {
+        using HidTransport transport = Open();
+        _hid.FlushError = 31;
+
+        transport.Write(new byte[] { 0x01 });
+        transport.Write(new byte[] { 0x01 });
+
+        Assert.Equal(2, _hid.Written.Count);
+        Assert.Equal(
+            "  HidD_FlushQueue failed on " + Path + " (error 31); the write went ahead, and a reply still queued from an earlier request may be read before the next one (logged once until a flush succeeds)",
+            Assert.Single(_log.Messages));
+
+        _hid.FlushError = null;
+        transport.Write(new byte[] { 0x01 });
+        _hid.FlushError = 31;
+        transport.Write(new byte[] { 0x01 });
+        Assert.Equal(2, _log.Messages.Count);
+        Assert.Equal(0, transport.Generation);
+    }
+
+    [Fact]
+    public void Write_GivenUpOnDuringTheFlush_NeverIssuesTheWrite() {
+        // The deadline lands while the flush is in flight: the stream's I/O is cancelled, the flush
+        // returns, and the write that would have followed with nothing left to cancel it is not issued.
+        using HidTransport transport = Open();
+        _hid.FlushError = 31;
+        _hid.OnCall = call => {
+            if (call.StartsWith("HidD_FlushQueue", StringComparison.Ordinal)) {
+                _calls.AbandonRunning();
+            }
+        };
+
+        IOException failure = Assert.Throws<IOException>(() => transport.Write(new byte[] { 0x01 }));
+
+        Assert.Equal(
+            "WriteFile did not return within 1000 ms; pending transfer cancelled; device unresponsive, handle faulted.",
+            failure.Message);
+        Assert.Equal(new[] { "HidD_FlushQueue " + Stream(), "CancelIoEx " + Stream() }, _hid.Calls.Skip(3));
+        Assert.Empty(_hid.Written);
+        Assert.True(transport.IsFaulted);
+        Assert.Empty(_log.Messages);
+        Assert.Empty(_calls.LateFailures);
+    }
+
+    [Fact]
+    public void Write_AFlushThatFails_ThenAWriteThatFails_ReportsTheWrite() {
+        using HidTransport transport = Open();
+        _hid.FlushError = 31;
+        _hid.Transfers.Enqueue(new FakeHidTransfer { Error = 22 });
+
+        IOException failure = Assert.Throws<IOException>(() => transport.Write(new byte[] { 0x01 }));
+
+        Assert.Equal("WriteFile failed, handle faulted: WriteFile failed (error 22)", failure.Message);
+        Assert.True(transport.IsFaulted);
+        Assert.Empty(_log.Messages);
     }
 
     [Fact]

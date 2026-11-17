@@ -27,7 +27,9 @@ internal sealed class FakeDeviceTransport : IDeviceTransport {
     /// <summary>
     /// Replies dequeued in order from <see cref="Read"/>, simulating the 0x0416
     /// interrupt-IN answers a device sends after a command write. A reply shorter than
-    /// the requested length is zero-padded; an empty queue yields an all-zero buffer.
+    /// the requested length is zero-padded; an empty queue yields an all-zero buffer. The real
+    /// transports empty their input queue before every write, so the replies held here stand for what
+    /// arrives after the write; the fake does not model the flush.
     /// </summary>
     public Queue<byte[]> ReadReplies { get; } = new Queue<byte[]>();
 

@@ -60,14 +60,26 @@ public sealed class TlFanProtocolTests {
         Assert.Equal(1500, reading.Rpm);
     }
 
-    // TLFanDevice.GetHandshakeInfo trusts a reply only when it echoes the handshake command.
+    // TLFanDevice.GetHandshakeInfo trusts a reply only when it echoes the handshake command; a caller
+    // matches first, so decoding anything else is a caller bug and throws.
     [Fact]
-    public void DecodeHandshake_APacketAnsweringAnotherCommand_HoldsNoFans() {
+    public void DecodeHandshake_APacketAnsweringAnotherCommand_IsNeverReadAsFans() {
         byte[] speedAnswer = CommandPacket.Build(0xAA, 0x90, 0x05, 0xDC);
 
         Assert.False(TlFanProtocol.IsHandshakeReply(speedAnswer));
         Assert.True(TlFanProtocol.IsHandshakeReply(CommandPacket.Build(0xA1)));
-        Assert.Empty(TlFanProtocol.DecodeHandshake(speedAnswer));
+        System.ArgumentException failure = Assert.Throws<System.ArgumentException>(() => TlFanProtocol.DecodeHandshake(speedAnswer));
+        Assert.Equal("reply", failure.ParamName);
+    }
+
+    // LEDPacket.TryParse rejects a frame whose report id is not 0x01, whatever command it carries.
+    [Fact]
+    public void DecodeHandshake_APacketWithAnotherReportId_IsNeverReadAsFans() {
+        byte[] reply = CommandPacket.Build(0xA1, 0x90, 0x05, 0xDC);
+        reply[0] = 0x02;
+
+        Assert.False(TlFanProtocol.IsHandshakeReply(reply));
+        Assert.Throws<System.ArgumentException>(() => TlFanProtocol.DecodeHandshake(reply));
     }
 
     // TLFanHandshakeInfo.Parse stores each record at its address, so the later of two wins.

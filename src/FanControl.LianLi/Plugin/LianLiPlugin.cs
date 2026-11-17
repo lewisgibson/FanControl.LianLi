@@ -1125,8 +1125,9 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
             // The controller owns the transport now, so clear the local BEFORE the lighting step: a
             // throw from ApplyLighting must not make the catch dispose a handle the controller will
             // also dispose. The borrowed reference drives the one-time replay, applied AFTER the
-            // discovery handshake (the TL constructor reads it) so a pending lighting ack cannot
-            // corrupt fan discovery; a later RPM poll self-corrects. ApplyLighting never throws.
+            // discovery handshake (the TL constructor reads it) so fan discovery never waits behind
+            // the lighting writes; their acks are dropped by the transport before the next write, and
+            // a poll only ever takes the reply that echoes its handshake. ApplyLighting never throws.
             IDeviceTransport ownedTransport = transport;
             transport = null;
             _ = ApplyLighting(ownedTransport, info, _lightingConfigurations);

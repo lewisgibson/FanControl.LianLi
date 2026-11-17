@@ -15,17 +15,28 @@ namespace FanControl.LianLi.Devices;
 /// later RPM poll (one that was slow to come back after a wake) is added once three polls in a row
 /// report it, after the others. Like the other 0x0416
 /// devices it writes a command packet and reads the reply: a keepalive speed write per fan, and an
-/// RPM poll that writes a handshake and matches the reply back to the fans. The FanControl-thread
+/// RPM poll that writes a handshake, reads to the reply that answers it, and matches that reply back
+/// to the fans; a poll the hub does not answer leaves every reading as it was. The FanControl-thread
 /// methods only mutate locked state; all USB I/O is on the worker-thread methods.
 /// </summary>
 internal sealed class TlFanController : IFanDevice {
     // The 0x0416 handshake reply is one 64-byte command-packet frame.
     private const int HandshakeReplyLength = 64;
 
-    // The hub answers every command, and the plugin reads only the handshake's answer, so the speed,
-    // sync and lighting answers queue ahead of it (the input buffer holds 512). A poll reads past
-    // those to the handshake reply, up to this many reports, which drains the queue as it goes.
+    // The transport empties the input queue before the handshake is written, so what a poll reads past
+    // is only what arrives after that: the answer to a write made a moment earlier, or to another
+    // program's command. Up to this many per ask; each read returns at once while reports keep coming,
+    // and the transport faults the handle when one does not come.
     private const int MaxReportsPerHandshake = 32;
+
+    // L-Connect's getHandshakeInfo asks once more when the first answer is not a handshake.
+    private const int HandshakeAttempts = 2;
+
+    // The longest a poll keeps reading for the handshake's answer: L-Connect's own worst case. Its
+    // getHandshakeInfo reads the answer with TLFanDevice's 100 ms timeout, then discards up to five
+    // packets at 50 ms each (discardInputPacket) and reads the second ask's answer for 100 ms more:
+    // 100 + 5 x 50 + 100 = 450 ms.
+    private static readonly TimeSpan HandshakeTimeLimit = TimeSpan.FromMilliseconds(450);
 
     // L-Connect's TLFanController.updateFanGroupStatus acts on a change in the fans a hub reports only
     // once three valid handshakes in a row differ from the last it accepted (MaxHandshakeInfoChangedCount),
@@ -50,6 +61,11 @@ internal sealed class TlFanController : IFanDevice {
     // How many polls in a row have reported each address that is not a channel yet. Worker only.
     private readonly Dictionary<int, int> _unconfirmed = new Dictionary<int, int>();
 
+    // Whether the last handshake went unanswered, so the log says it once, and whether any has been
+    // answered, so the line when one is says which. Set at construction, then worker only.
+    private bool _handshakeMissing;
+    private bool _handshakeAnswered;
+
     // The transport generation this hub last took software control under. A newer one means the
     // transport lost its handle to the device after that, and a re-enumerated hub may have been
     // power-cycled and reverted to motherboard sync with its saved look lost, so once the transport
@@ -67,10 +83,14 @@ internal sealed class TlFanController : IFanDevice {
 
         // Discover the fans once. Order by (port, fan-index) so the channel order - and therefore the
         // sensor ids below - is deterministic regardless of the reply's record order.
-        TlFanReading[] detected = TlFanProtocol.DecodeHandshake(Handshake())
-            .OrderBy(r => r.Port)
-            .ThenBy(r => r.FanIndex)
-            .ToArray();
+        // A hub that does not answer starts with no fans, and the late-fan path adds them once it does.
+        byte[]? reply = Handshake();
+        TlFanReading[] detected = reply is null
+            ? Array.Empty<TlFanReading>()
+            : TlFanProtocol.DecodeHandshake(reply)
+                .OrderBy(r => r.Port)
+                .ThenBy(r => r.FanIndex)
+                .ToArray();
 
         foreach (TlFanReading fan in detected) {
             AddChannel(fan.Port, fan.FanIndex);
@@ -194,7 +214,14 @@ internal sealed class TlFanController : IFanDevice {
 
     /// <summary>Write a handshake and match the reply's RPM records back to the fan channels.</summary>
     public void PollRpm() {
-        IReadOnlyList<TlFanReading> readings = TlFanProtocol.DecodeHandshake(Handshake());
+        // A poll the hub did not answer says nothing about which fans exist, so it neither updates a
+        // reading nor restarts a late fan's count (L-Connect's updateFanGroupStatus ignores an invalid
+        // handshake the same way).
+        if (Handshake() is not byte[] reply) {
+            return;
+        }
+
+        IReadOnlyList<TlFanReading> readings = TlFanProtocol.DecodeHandshake(reply);
 
         List<string>? transitions = null;
         var unknown = new List<TlFanReading>();
@@ -258,16 +285,71 @@ internal sealed class TlFanController : IFanDevice {
         _transport.Dispose();
     }
 
-    // Write a handshake and read to its reply, past the answers to earlier commands queued ahead of
-    // it. With none among the reports read, the last one read is returned, and decodes to no fans.
-    private byte[] Handshake() {
-        _transport.Write(TlFanProtocol.EncodeHandshakeRequest());
-        byte[] reply = _transport.Read(HandshakeReplyLength);
-        for (int read = 1; read < MaxReportsPerHandshake && !TlFanProtocol.IsHandshakeReply(reply); read++) {
-            reply = _transport.Read(HandshakeReplyLength);
+    // Write a handshake and read to the reply that answers it, past whatever else arrives after the
+    // write; ask once more, as L-Connect does, when none comes. Gives up once HandshakeTimeLimit has
+    // passed as well as after MaxReportsPerHandshake reports an ask, so a stream of other reports
+    // cannot hold the tick. Null when the hub answered neither ask.
+    private byte[]? Handshake() {
+        DateTime started = _clock.UtcNow;
+        int asks = 0;
+        int reads = 0;
+        byte lastCommand = 0;
+        for (int attempt = 0; attempt < HandshakeAttempts && !HandshakeTimedOut(attempt, started); attempt++) {
+            _transport.Write(TlFanProtocol.EncodeHandshakeRequest());
+            asks++;
+            for (int read = 0; read < MaxReportsPerHandshake && !HandshakeTimedOut(read, started); read++) {
+                byte[] reply = _transport.Read(HandshakeReplyLength);
+                reads++;
+                if (TlFanProtocol.IsHandshakeReply(reply)) {
+                    RecordHandshake(answered: true, asks, reads, lastCommand);
+                    return reply;
+                }
+
+                lastCommand = CommandPacket.CommandOf(reply);
+            }
         }
 
-        return reply;
+        RecordHandshake(answered: false, asks, reads, lastCommand);
+        return null;
+    }
+
+    // The first ask and the first read of each ask always go ahead, so a slow write never costs the
+    // poll its answer; every later step waits on the limit. A clock that stepped back counts as within
+    // it, and the report count still bounds the poll.
+    private bool HandshakeTimedOut(int step, DateTime started)
+        => step > 0 && ClockSpan.IsOlderThan(_clock.UtcNow, started, HandshakeTimeLimit);
+
+    // A hub that stops answering the handshake tends to stay that way for a while, so the log says so
+    // on the change only: once when it stops, with how far the poll got and the command the last
+    // report read echoed, and once when it answers - again, or for the first time when it never
+    // answered at construction.
+    private void RecordHandshake(bool answered, int asks, int reads, byte lastCommand) {
+        if (answered) {
+            bool answeredBefore = _handshakeAnswered;
+            _handshakeAnswered = true;
+            if (_handshakeMissing) {
+                _handshakeMissing = false;
+                _log.Write(string.Format(
+                    CultureInfo.InvariantCulture,
+                    answeredBefore ? "T{0}: the hub answers the handshake again" : "T{0}: the hub answers the handshake for the first time",
+                    _index));
+            }
+
+            return;
+        }
+
+        if (_handshakeMissing) {
+            return;
+        }
+
+        _handshakeMissing = true;
+        _log.Write(string.Format(
+            CultureInfo.InvariantCulture,
+            "T{0}: the hub did not answer the handshake ({1} ask(s), {2} report(s) read, the last echoing command 0x{3:X2}); fans and RPM left as they were (logged once until it does)",
+            _index,
+            asks,
+            reads,
+            lastCommand));
     }
 
     private void TakeSoftwareControl() {
