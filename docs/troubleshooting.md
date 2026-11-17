@@ -9,12 +9,12 @@ Check these in order:
 1. **The plugin DLL was blocked by Windows.** Windows marks files downloaded from the internet as blocked, and FanControl silently ignores a blocked plugin. Right-click the `.dll`, choose Properties, tick Unblock, click OK, then install it again through FanControl's Install plugin button.
 2. **L-Connect is still running.** Lian Li's L-Connect drives the same devices, and its background service keeps running after you close its window. Switch the service off as described in the README section [Using it with L-Connect](../README.md#using-it-with-l-connect), then restart FanControl. The log shows `open failed for <device>` while something else has the device open. This is the most common cause.
 3. **Another tool has the controller open.** OpenRGB and other tools that talk to the controller directly over USB can clash in the same way. Close them and restart FanControl.
-4. **FanControl is older than V243.** See the next section.
+4. **FanControl is older than V245.** See the next section.
 5. **The log says `Initialize: ... scan located 0 HID interface(s), 0 controller(s)`.** Windows did not list any Lian Li controller. Check the controller's USB cable and that it appears in Device Manager.
 
 ## FanControl lost every sensor after installing the plugin
 
-The plugin needs FanControl V243 (October 2025) or newer. On an older FanControl the plugin can't be loaded, and the error stops FanControl loading all of its other sensors too, so FanControl looks empty. Your fans fall back to their default speeds (the BIOS for motherboard headers, the controller's own default for Lian Li hubs) until it is fixed, so nothing is at risk.
+The plugin needs FanControl V245 (October 2025) or newer. On an older FanControl the plugin can't be loaded, and the error stops FanControl loading all of its other sensors too, so FanControl looks empty. Your fans fall back to their default speeds (the BIOS for motherboard headers, the controller's own default for Lian Li hubs) until it is fixed, so nothing is at risk.
 
 To fix it, delete `FanControl.LianLi*.dll` from FanControl's `Plugins` folder, update FanControl from [getfancontrol.com](https://getfancontrol.com/) or its [releases page](https://github.com/Rem0o/FanControl.Releases/releases), then install the plugin again.
 
@@ -97,6 +97,16 @@ This doesn't apply to the Standard build copied by hand into `Plugins\FanControl
 ## My fan curves came unbound after updating
 
 Each build shows up in FanControl under its own name (Lian Li Uni, Lian Li Uni (ARGB), Lian Li Uni (Lighting)), and FanControl folds that name into each control's identity. Switching between builds therefore re-keys the controls, and you need to point your curves at the new ones once. Updating within the same build keeps your bindings. One exception: on a system with two or more identical controllers, an old build ordered them in whatever order Windows listed them, and the plugin now keeps each controller's index with its physical port, so the first load of a current version can re-key those controls once. Re-point the affected curves and they stay put.
+
+## A fan shows `-` instead of its RPM
+
+The plugin hasn't measured that fan yet, or can't at the moment: a hub or cooler that hasn't answered since FanControl started, a controller still reconnecting after sleep, or a wireless fan that isn't being heard. It shows `-` rather than 0 so FanControl doesn't take it for a fan that failed to start and speed it up. The reading comes back on its own as soon as the fan is measured again. While it shows `-`, the tray icon may keep showing the last RPM (when FanControl runs as a service), and a control on a Sync curve in RPM mode that follows that fan stops until it reads again. If it stays at `-`, check the log for that controller's lines (`did not answer the handshake`, `not heard for 30 list reads`, `timed out ... handle faulted`).
+
+## Unpair doesn't stick, or a control has no paired RPM
+
+The plugin tells FanControl which RPM belongs to each control, and FanControl uses that whenever you haven't picked one yourself, so clicking Unpair puts the plugin's pairing straight back (on V245 it comes back at the next restart). Unpair also clears the control's calibration. To use a different reading, pair the control with that sensor instead: your choice is saved and kept.
+
+A control with no pairing at all is one whose RPM sensor the plugin couldn't register, usually a V150 with no front fan fitted. The log says so with a line like `LianLi/w<address>/ctl has no fan speed registered, so FanControl is given no pairing for it`.
 
 ## Where the plugin log is
 

@@ -262,6 +262,8 @@ public class Galahad2ControllerTests {
         var controller = new Galahad2Controller(0, transport, new FakeClock(), logger);
 
         controller.PollRpm();
+        Assert.Null(controller.GetRpm(FanChannel)); // a cooler that never answered has no reading, not 0
+        Assert.Null(controller.GetRpm(PumpChannel));
         transport.ReadReplies.Enqueue(HandshakeReply(1500, 2800));
         controller.PollRpm();
 
@@ -293,6 +295,21 @@ public class Galahad2ControllerTests {
         Assert.Equal(
             "G0: the cooler did not answer the handshake (6 report(s) read, the last echoing command 0x8A); RPM left as it was (logged once until it does)",
             Assert.Single(logger.Messages));
+    }
+
+    // A garbage first read leaves the reading as it was: none.
+    [Fact]
+    public void PollRpm_AnImplausibleFirstReading_LeavesNoReading() {
+        var transport = new FakeDeviceTransport();
+        var logger = new FakeLogger();
+        var controller = new Galahad2Controller(0, transport, new FakeClock(), logger);
+        transport.ReadReplies.Enqueue(HandshakeReply(50000, 2800));
+
+        controller.PollRpm();
+
+        Assert.Null(controller.GetRpm(FanChannel));
+        Assert.Equal(2800f, controller.GetRpm(PumpChannel));
+        Assert.Contains("G0:0 implausible rpm 50000 ignored, keeping no reading", logger.Messages);
     }
 
     [Fact]

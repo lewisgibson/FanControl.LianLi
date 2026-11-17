@@ -38,7 +38,7 @@ internal sealed class FanController : IFanDevice {
     {
         DateTime.MinValue, DateTime.MinValue, DateTime.MinValue, DateTime.MinValue,
     };
-    private readonly float[] _rpm = { 0f, 0f, 0f, 0f };          // last measured RPM
+    private readonly float?[] _rpm = new float?[4];              // last measured RPM, null until one is read
     private readonly bool[] _rpmImplausible = { false, false, false, false }; // last read rejected as garbage
 
     // Which channels have a fan attached. Defaults to all-shown; DetectPopulation() narrows it once
@@ -180,8 +180,8 @@ internal sealed class FanController : IFanDevice {
         }
     }
 
-    /// <summary>Read the last measured RPM for a channel.</summary>
-    public float GetRpm(int channel) {
+    /// <summary>Read the last measured RPM for a channel, or null until one is read.</summary>
+    public float? GetRpm(int channel) {
         lock (_lock) {
             return _rpm[channel];
         }
@@ -249,7 +249,7 @@ internal sealed class FanController : IFanDevice {
                     // log the onset once, so a persistent garbage read is visible without spamming.
                     _rpmImplausible[ch] = true;
                     (transitions ??= new List<string>()).Add(string.Format(
-                        CultureInfo.InvariantCulture, "C{0}:{1} implausible rpm {2} ignored, keeping {3}", _index, ch, rpm, _rpm[ch]));
+                        CultureInfo.InvariantCulture, "C{0}:{1} implausible rpm {2} ignored, keeping {3}", _index, ch, rpm, ChannelReadDecision.Describe(_rpm[ch])));
                 }
             }
         }

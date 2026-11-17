@@ -677,13 +677,13 @@ public sealed class LianLiPluginFlexChainTests {
 
         public FanSpeedDescriptor DescribeFanSpeed(int index) => _inner.DescribeFanSpeed(index);
 
-        public float GetFanSpeed(int index) => _inner.GetFanSpeed(index);
+        public float? GetFanSpeed(int index) => _inner.GetFanSpeed(index);
 
         public void SetTarget(int channel, int duty) => _inner.SetTarget(channel, duty);
 
         public void ReleaseChannel(int channel) => _inner.ReleaseChannel(channel);
 
-        public float GetRpm(int channel) => _inner.GetRpm(channel);
+        public float? GetRpm(int channel) => _inner.GetRpm(channel);
 
         public void ApplyPending() => _inner.ApplyPending();
 

@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace FanControl.LianLi.Devices;
 
 /// <summary>
@@ -23,4 +25,7 @@ internal static class ChannelReadDecision {
     /// and should overwrite the cached value, not idle/partial-buffer garbage to be ignored.
     /// </summary>
     public static bool IsPlausible(float rpm) => rpm >= 0f && rpm <= MaxPlausibleRpm;
+
+    /// <summary>The cached reading as a log names it: its value, or "no reading" before one was read.</summary>
+    public static string Describe(float? rpm) => rpm.HasValue ? rpm.Value.ToString(CultureInfo.InvariantCulture) : "no reading";
 }

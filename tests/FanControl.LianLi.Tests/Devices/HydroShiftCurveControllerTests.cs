@@ -42,7 +42,7 @@ public class HydroShiftCurveControllerTests {
         Assert.Empty(transport.Writes);
         Assert.Equal(0, transport.InterruptReadCount);
         Assert.Null(controller.GetTemperature(0));
-        Assert.Equal(0f, controller.GetRpm(PumpChannel));
+        Assert.Null(controller.GetRpm(PumpChannel));
     }
 
     [Fact]
@@ -265,6 +265,16 @@ public class HydroShiftCurveControllerTests {
         Poll(controller, transport, 30, false, 50000); // a garbage count, still 49970 after correction
 
         Assert.Equal(1800f, controller.GetRpm(PumpChannel));
+    }
+
+    [Fact]
+    public void PollRpm_AnImplausibleFirstReading_LeavesNoReading() {
+        var (controller, transport, _, logger) = NewController();
+
+        Poll(controller, transport, 30, false, 50000);
+
+        Assert.Null(controller.GetRpm(PumpChannel));
+        Assert.Contains(logger.Messages, m => m.Contains("H0:pump implausible rpm 49970 ignored, keeping no reading"));
     }
 
     [Fact]

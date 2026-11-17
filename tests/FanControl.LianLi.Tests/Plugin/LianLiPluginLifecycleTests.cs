@@ -52,6 +52,28 @@ public sealed class LianLiPluginLifecycleTests {
         second.Close();
     }
 
+    // A stand-in has measured nothing, so its fans read nothing rather than a stopped fan, which
+    // with a Start % set FanControl would try to start by raising the command.
+    [Fact]
+    public void AStoodInHub_ReadsNoFanSpeed() {
+        var runtime = new PluginRuntime(new FakeClock(), new FakeRememberedControllerStore());
+        var enumerator = new FakeEnumerator(Sli("a"));
+        using LianLiPlugin first = NewPlugin(enumerator, runtime);
+        Load(first);
+        first.Close();
+
+        enumerator.FailLocate = true;
+        using LianLiPlugin second = NewPlugin(enumerator, runtime);
+        FakeSensorsContainer container = Load(second);
+        foreach (IPluginSensor fan in container.FanSensors) {
+            fan.Update(); // as FanControl reads every sensor each tick
+        }
+
+        Assert.Equal(4, container.FanSensors.Count);
+        Assert.All(container.FanSensors, fan => Assert.Null(fan.Value));
+        second.Close();
+    }
+
     [Fact]
     public void AnInstanceFanControlNeverClosed_IsStoppedByTheNextOne() {
         // FanControl only closes an instance that registered sensors, so one that found nothing
@@ -708,7 +730,7 @@ public sealed class LianLiPluginLifecycleTests {
                 return;
             }
 
-            Assert.Single(sensors.ControlSensors);
+            Assert.Equal(2, sensors.FanSensors.Count); // the pair's two readings: it registered first
             Volatile.Write(ref heard, 1);
             clock.Advance(TimeSpan.FromSeconds(2));
             Assert.True(SpinWait.SpinUntil(() => runtime.OwnerOf(addedId) == tx.DevicePath, TimeSpan.FromSeconds(5)));

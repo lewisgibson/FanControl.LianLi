@@ -92,8 +92,20 @@ internal sealed class TlFanController : IFanDevice {
                 .ThenBy(r => r.FanIndex)
                 .ToArray();
 
+        // Each fan takes the reading it was discovered with, so a hub whose later handshakes go
+        // unanswered still reports what it measured rather than nothing.
+        List<string>? transitions = null;
         foreach (TlFanReading fan in detected) {
-            AddChannel(fan.Port, fan.FanIndex);
+            int channel = AddChannel(fan.Port, fan.FanIndex);
+            lock (_lock) {
+                UpdateRpm(channel, fan.Rpm, ref transitions);
+            }
+        }
+
+        if (transitions != null) {
+            foreach (string line in transitions) {
+                _log.Write(line);
+            }
         }
 
         // Take software control of each fan once. L-Connect sets motherboard-RPM-sync separately
@@ -162,8 +174,8 @@ internal sealed class TlFanController : IFanDevice {
         }
     }
 
-    /// <summary>Read the last measured RPM for a channel.</summary>
-    public float GetRpm(int channel) {
+    /// <summary>Read the last measured RPM for a channel, or null until a plausible one is read (a fan whose discovery reading was garbage).</summary>
+    public float? GetRpm(int channel) {
         lock (_lock) {
             return _channels[channel].Rpm;
         }
@@ -422,7 +434,7 @@ internal sealed class TlFanController : IFanDevice {
         } else if (!channel.RpmImplausible) {
             channel.RpmImplausible = true;
             (transitions ??= new List<string>()).Add(string.Format(
-                CultureInfo.InvariantCulture, "T{0}:{1}/{2} implausible rpm {3} ignored, keeping {4}", _index, channel.Port, channel.Fan, rpm, channel.Rpm));
+                CultureInfo.InvariantCulture, "T{0}:{1}/{2} implausible rpm {3} ignored, keeping {4}", _index, channel.Port, channel.Fan, rpm, ChannelReadDecision.Describe(channel.Rpm)));
         }
     }
 
@@ -443,7 +455,7 @@ internal sealed class TlFanController : IFanDevice {
 
         public DateTime LastWriteUtc { get; set; } = DateTime.MinValue;
 
-        public float Rpm { get; set; }                 // last measured RPM
+        public float? Rpm { get; set; }                // last measured RPM, null until one is read
 
         public bool RpmImplausible { get; set; }       // last read rejected as garbage
     }

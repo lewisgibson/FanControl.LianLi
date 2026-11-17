@@ -48,14 +48,14 @@ internal sealed class FakeFanGroupDevice : IFanDevice, IFanSpeedSource, IDrivenS
 
     public FanSpeedDescriptor DescribeFanSpeed(int index) => new FanSpeedDescriptor(_fanIds[index], _fanIds[index] + " RPM");
 
-    public float GetFanSpeed(int index) => _speeds[index];
+    public float? GetFanSpeed(int index) => _speeds[index];
 
     public void SetTarget(int channel, int duty) => Targets.Add(new KeyValuePair<int, int>(channel, duty));
 
     public void ReleaseChannel(int channel) {
     }
 
-    public float GetRpm(int channel) => 0f;
+    public float? GetRpm(int channel) => 0f;
 
     public void ApplyPending() {
     }

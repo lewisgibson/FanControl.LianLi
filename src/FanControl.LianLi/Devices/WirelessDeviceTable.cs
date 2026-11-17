@@ -28,12 +28,12 @@ namespace FanControl.LianLi.Devices;
 /// a device that already had a place on the table unbound and later names this master is taken as
 /// bound, where L-Connect unbinds it; a device beyond this master's twelfth is refused rather than
 /// unbound; and a receiver slot conflict is logged and left. A bound device that is dropped keeps
-/// its FanControl sensors, which the controller holds by address: they read 0 rpm and no temperature
+/// its FanControl sensors, which the controller holds by address: they read no speed and no temperature
 /// while the device is off the table, and its duty is sent again once it is heard, so the table
 /// follows L-Connect's numbering and the user's bindings survive. On top of L-Connect's table the
 /// plugin counts, for every device, the reads in a row that did not carry it, and marks one unheard
 /// for <see cref="WirelessDevice.MaximumMissedReads"/> reads while still on the table (the list
-/// locked, or no list read for want of a master) as lost, so its fans read 0 rather than a frozen
+/// locked, or no list read for want of a master) as lost, so its fans read nothing rather than a frozen
 /// last value there too. The masters in radio range are kept beside the devices, and while the user
 /// has L-Connect's device list locked the table is that list (<see cref="Lock"/>). Worker-thread only.
 /// </summary>
@@ -355,7 +355,7 @@ internal sealed class WirelessDeviceTable {
             if (++device.MissedReads == WirelessDevice.MaximumMissedReads) {
                 device.IsLost = true;
                 Report(device, string.Format(
-                    CultureInfo.InvariantCulture, "not heard for {0} list reads; reading 0 rpm until it is", WirelessDevice.MaximumMissedReads));
+                    CultureInfo.InvariantCulture, "not heard for {0} list reads; reading no speed until it is", WirelessDevice.MaximumMissedReads));
             }
         }
     }
@@ -376,7 +376,7 @@ internal sealed class WirelessDeviceTable {
 
             Report(device, string.Format(
                 CultureInfo.InvariantCulture,
-                "not heard for {0} list reads; dropped from the device list as L-Connect drops it, reading 0 rpm until it returns",
+                "not heard for {0} list reads; dropped from the device list as L-Connect drops it, reading no speed until it returns",
                 WirelessDevice.MaximumMissedReads));
         }
 

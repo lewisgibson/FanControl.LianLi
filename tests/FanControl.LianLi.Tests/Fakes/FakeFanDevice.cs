@@ -82,7 +82,7 @@ internal sealed class FakeFanDevice : IFanDevice, ITemperatureSource {
 
     public void ReleaseChannel(int channel) => Released.Add(channel);
 
-    public float GetRpm(int channel) => _rpm[channel];
+    public float? GetRpm(int channel) => _rpm[channel];
 
     public void ApplyPending() => ApplyCount++;
 

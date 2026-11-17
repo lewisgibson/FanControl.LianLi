@@ -37,8 +37,11 @@ internal interface IFanDevice : IDisposable {
     /// <summary>Release a channel so the keepalive stops asserting it (used by Reset).</summary>
     void ReleaseChannel(int channel);
 
-    /// <summary>Read the last measured RPM for a channel.</summary>
-    float GetRpm(int channel);
+    /// <summary>
+    /// Read the last measured RPM for a channel, or null while none has been measured: FanControl
+    /// takes 0 from a paired fan as a fan that failed to start, so an unmeasured fan must not read 0.
+    /// </summary>
+    float? GetRpm(int channel);
 
     /// <summary>Push any changed-or-stale channel targets to the hardware.</summary>
     void ApplyPending();

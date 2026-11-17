@@ -14,9 +14,10 @@ namespace FanControl.LianLi.Plugin;
 /// (<see cref="WirelessProcessState.ChainTarget"/>): the group may be a FLEX chain
 /// with two possible drivers, and this control, the one FanControl has for it, may
 /// be on a stand-in for a receiver that cannot be reached, which is when the other
-/// driver has to be told this way.
+/// driver has to be told this way. It names the fan sensor whose reading stands for it,
+/// which FanControl reads once, when the control is registered.
 /// </summary>
-internal sealed class ControlSensor : IPluginControlSensor {
+internal sealed class ControlSensor : IPluginControlSensor2 {
     private readonly IFanDevice _controller;
     private readonly int _channel;
     private readonly Action _changed;
@@ -24,7 +25,7 @@ internal sealed class ControlSensor : IPluginControlSensor {
     private readonly string? _chain;
     private float? _commanded;
 
-    public ControlSensor(IFanDevice controller, int channel, Action changed, WirelessProcessState chains) {
+    public ControlSensor(IFanDevice controller, int channel, Action changed, WirelessProcessState chains, string? pairedFanSensorId) {
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _channel = channel;
         _changed = changed ?? throw new ArgumentNullException(nameof(changed));
@@ -33,6 +34,7 @@ internal sealed class ControlSensor : IPluginControlSensor {
         Id = descriptor.ControlId;
         Name = descriptor.ControlName;
         _chain = WirelessSensorIds.TryChainAddress(Id);
+        PairedFanSensorId = pairedFanSensorId;
     }
 
     public string Id { get; }
@@ -40,6 +42,13 @@ internal sealed class ControlSensor : IPluginControlSensor {
     public string Name { get; }
 
     public float? Value { get; private set; }
+
+    // FanControl's own identifier of the fan sensor whose reading stands for this control: the
+    // plugin's name, a slash and that sensor's id, which is how FanControl identifies a plugin's
+    // sensor. FanControl reads it once, when the control is registered, and pairs the two unless the
+    // user has paired the control themselves. Null when no such reading is registered, which
+    // FanControl takes as no pairing.
+    public string? PairedFanSensorId { get; }
 
     public void Update() => Value = _commanded;
 

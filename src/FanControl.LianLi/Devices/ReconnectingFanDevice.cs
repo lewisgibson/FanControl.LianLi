@@ -167,10 +167,10 @@ internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IF
     /// <inheritdoc />
     public FanSpeedDescriptor DescribeFanSpeed(int index) => _fanSpeeds[index];
 
-    /// <summary>The controller's reading for the fan, or 0 until it exists (or if it lacks the fan).</summary>
-    public float GetFanSpeed(int index) {
+    /// <summary>The controller's reading for the fan, or nothing until it exists (or if it lacks the fan).</summary>
+    public float? GetFanSpeed(int index) {
         lock (_lock) {
-            return _connection?.FanSpeed(index) ?? 0f;
+            return _connection?.FanSpeed(index);
         }
     }
 
@@ -217,10 +217,10 @@ internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IF
         }
     }
 
-    /// <summary>The controller's reading for the channel, or 0 until it exists (or if it lacks the channel).</summary>
-    public float GetRpm(int channel) {
+    /// <summary>The controller's reading for the channel, or nothing until it exists (or if it lacks the channel).</summary>
+    public float? GetRpm(int channel) {
         lock (_lock) {
-            return _connection?.GetRpm(channel) ?? 0f;
+            return _connection?.GetRpm(channel);
         }
     }
 
@@ -382,11 +382,11 @@ internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IF
     }
 
     // The rebuilt controller and how the remembered sensors map onto it, fixed when it is adopted.
-    // A remembered channel or temperature the controller no longer has maps to nothing, and reads
-    // as no reading.
+    // A remembered channel, fan speed or temperature the controller no longer has maps to nothing,
+    // and reads as no reading.
     private sealed class Connection {
         private readonly int[] _channelMap; // remembered channel -> the controller's, -1 when it has none
-        private readonly Func<float>[] _fanSpeeds;
+        private readonly Func<float?>[] _fanSpeeds;
         private readonly Func<float?>[] _temperatures;
         private readonly int _sensorCount;
 
@@ -401,7 +401,7 @@ internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IF
                 }
             }
 
-            _fanSpeeds = new Func<float>[fanSpeeds.Length];
+            _fanSpeeds = new Func<float?>[fanSpeeds.Length];
             for (int f = 0; f < fanSpeeds.Length; f++) {
                 _fanSpeeds[f] = FanSpeedReader(inner, fanSpeeds[f].Id);
             }
@@ -433,9 +433,9 @@ internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IF
             }
         }
 
-        public float GetRpm(int channel) => _channelMap[channel] >= 0 ? Inner.GetRpm(_channelMap[channel]) : 0f;
+        public float? GetRpm(int channel) => _channelMap[channel] >= 0 ? Inner.GetRpm(_channelMap[channel]) : null;
 
-        public float FanSpeed(int index) => _fanSpeeds[index]();
+        public float? FanSpeed(int index) => _fanSpeeds[index]();
 
         public float? Temperature(int index) => _temperatures[index]();
 
@@ -456,7 +456,7 @@ internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IF
 
         // A fan speed is found by its id among the controller's own speed readings, or, for a
         // controller that reports one per channel, among its channels' RPM identities.
-        private static Func<float> FanSpeedReader(IFanDevice inner, string id) {
+        private static Func<float?> FanSpeedReader(IFanDevice inner, string id) {
             if (inner is IFanSpeedSource speeds) {
                 for (int f = 0; f < speeds.FanSpeedCount; f++) {
                     if (speeds.DescribeFanSpeed(f).Id == id) {
@@ -473,7 +473,7 @@ internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IF
                 }
             }
 
-            return () => 0f;
+            return () => null;
         }
 
         private static Func<float?> TemperatureReader(ITemperatureSource? source, string id) {

@@ -15,6 +15,9 @@ internal interface IFanSpeedSource {
     /// <summary>The stable sensor identity for reading <paramref name="index"/>.</summary>
     FanSpeedDescriptor DescribeFanSpeed(int index);
 
-    /// <summary>The last measured speed in RPM; 0 while the fan is not being heard.</summary>
-    float GetFanSpeed(int index);
+    /// <summary>
+    /// The last measured speed in RPM, or null while there is none: the fan's device is not being
+    /// heard, or its controller is not connected.
+    /// </summary>
+    float? GetFanSpeed(int index);
 }

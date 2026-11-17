@@ -188,7 +188,7 @@ public sealed class WirelessDeviceTableTests {
 
         Assert.Equal(new[] { "a00000000002", "a00000000003", "a00000000009" }, table.Devices.Select(d => d.MacText));
         Assert.Contains(
-            "W3:a00000000001 not heard for 30 list reads; dropped from the device list as L-Connect drops it, reading 0 rpm until it returns",
+            "W3:a00000000001 not heard for 30 list reads; dropped from the device list as L-Connect drops it, reading no speed until it returns",
             log.Messages);
     }
 
@@ -284,7 +284,7 @@ public sealed class WirelessDeviceTableTests {
         Assert.True(table.Devices[0].IsLost);
         Assert.True(table.Devices[1].IsLost);
         Assert.Equal(30, table.Devices[0].Live);
-        Assert.Contains("W3:a00000000001 not heard for 30 list reads; reading 0 rpm until it is", log.Messages);
+        Assert.Contains("W3:a00000000001 not heard for 30 list reads; reading no speed until it is", log.Messages);
         Assert.DoesNotContain(log.Messages, m => m.StartsWith("W3:a00000000002", StringComparison.Ordinal));
 
         table.Devices[0].ScreenMode.Done = true;
@@ -312,7 +312,7 @@ public sealed class WirelessDeviceTableTests {
         WirelessDevice device = Assert.Single(table.Devices);
         Assert.True(device.IsLost);
         Assert.True(device.Live <= 0);
-        Assert.Contains("W3:a00000000001 not heard for 30 list reads; reading 0 rpm until it is", log.Messages);
+        Assert.Contains("W3:a00000000001 not heard for 30 list reads; reading no speed until it is", log.Messages);
     }
 
     // RefreshList: ConflictCnt++ for each other device of this master on the same rx_type, acting

@@ -220,13 +220,17 @@ internal sealed class FlexReceiverController : IFanDevice, IFanSpeedSource, IDri
     /// <summary>Release the chain so the keepalive stops asserting it (used by Reset); the receiver keeps what it last had.</summary>
     public void ReleaseChannel(int channel) => _processState.ReleaseChainTarget(MacText);
 
-    /// <summary>The first fan's last reported speed, which stands for the control.</summary>
-    public float GetRpm(int channel) => GetFanSpeed(0);
+    /// <summary>The first fan's last reported speed, which stands for the control; null while there is none.</summary>
+    public float? GetRpm(int channel) => GetFanSpeed(0);
 
     /// <inheritdoc />
-    public float GetFanSpeed(int index) {
+    public float? GetFanSpeed(int index) {
+        if (_anotherReceiver) {
+            return null;
+        }
+
         lock (_lock) {
-            return index < _speeds.Count ? _speeds[index] : 0f;
+            return index < _speeds.Count ? _speeds[index] : (float?)null;
         }
     }
 
@@ -402,7 +406,7 @@ internal sealed class FlexReceiverController : IFanDevice, IFanSpeedSource, IDri
 
     // The status of the receiver on the path, which must name this address: false, with the
     // receiver given up on permanently, when it names another (two receivers swapped between ports while
-    // the host slept, say), so nothing is sent to it again, its readings read 0 and the plugin is
+    // the host slept, say), so nothing is sent to it again, its readings read nothing and the plugin is
     // told once. When the transport has reopened the device since it was last identified, the same
     // read identifies it again, and the registered replay and the duty follow. A read that throws
     // leaves everything as it was, to be tried again next tick.
@@ -411,12 +415,6 @@ internal sealed class FlexReceiverController : IFanDevice, IFanSpeedSource, IDri
         status = ReadStatus();
         if (!SameBytes(status.Mac, _mac)) {
             _anotherReceiver = true;
-            lock (_lock) {
-                for (int slot = 0; slot < _speeds.Count; slot++) {
-                    _speeds[slot] = 0f;
-                }
-            }
-
             _log.Write(string.Format(
                 CultureInfo.InvariantCulture,
                 "F{0}:{1}: the receiver on its path now answers as {2}; nothing more is sent on it, and a refresh is asked for to plan it again",

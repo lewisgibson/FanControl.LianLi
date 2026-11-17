@@ -8,7 +8,11 @@ This is an unofficial, community plugin. It is not affiliated with, authorised b
 
 ## Requirements
 
-Windows and FanControl V243 or newer.
+Windows and FanControl V245 or newer (released October 2025).
+
+> [!IMPORTANT]
+>
+> Update FanControl before you install or update the plugin. On V244 or older the plugin can't load, and FanControl then shows none of its sensors, not even your motherboard and GPU ones. If you're not sure which version you have, update FanControl from [getfancontrol.com](https://getfancontrol.com/) first. If it has already happened, see [FanControl lost every sensor](docs/troubleshooting.md#fancontrol-lost-every-sensor-after-installing-the-plugin).
 
 ## Supported devices
 

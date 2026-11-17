@@ -24,4 +24,11 @@ public class ChannelReadDecisionTests {
     [InlineData(-1f)]
     public void IsPlausible_FalseForGarbage(float rpm)
         => Assert.False(ChannelReadDecision.IsPlausible(rpm));
+
+    [Fact]
+    public void Describe_NamesTheReading_OrNoReading() {
+        Assert.Equal("1500", ChannelReadDecision.Describe(1500f));
+        Assert.Equal("0", ChannelReadDecision.Describe(0f));
+        Assert.Equal("no reading", ChannelReadDecision.Describe(null));
+    }
 }

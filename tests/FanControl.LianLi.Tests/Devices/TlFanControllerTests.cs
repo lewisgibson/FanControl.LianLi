@@ -43,6 +43,37 @@ public class TlFanControllerTests {
         Assert.Equal(3, transport.Writes.Count); // handshake + two fans
     }
 
+    // The discovery handshake measured every fan it found, so a hub whose later handshakes go
+    // unanswered still reports those readings, and no fan reads 0 while it spins.
+    [Fact]
+    public void Constructor_TakesEachFansDiscoveryReading_AndKeepsItWhenLaterHandshakesMiss() {
+        var (controller, transport, _) = NewController((0, 0, 1000), (0, 1, 1100));
+        Assert.Equal(1000f, controller.GetRpm(0));
+        Assert.Equal(1100f, controller.GetRpm(1));
+        for (int i = 0; i < 70; i++) {
+            transport.ReadReplies.Enqueue(CommandPacket.Build(TlSpeedCommand, 0xB3, 0x05, 0xDC));
+        }
+
+        controller.PollRpm();
+
+        Assert.Equal(1000f, controller.GetRpm(0));
+        Assert.Equal(1100f, controller.GetRpm(1));
+    }
+
+    [Fact]
+    public void Constructor_AGarbageDiscoveryReading_LeavesTheFanWithNoReading() {
+        var transport = new FakeDeviceTransport();
+        transport.ReadReplies.Enqueue(HandshakeReply((0, 0, 50000), (0, 1, 1100)));
+        var logger = new FakeLogger();
+
+        var controller = new TlFanController(0, transport, new FakeClock(), logger);
+
+        Assert.Equal(2, controller.ChannelCount);
+        Assert.Null(controller.GetRpm(0));
+        Assert.Equal(1100f, controller.GetRpm(1));
+        Assert.Contains("T0:0/0 implausible rpm 50000 ignored, keeping no reading", logger.Messages);
+    }
+
     [Fact]
     public void Constructor_OrdersChannelsByPortThenFan() {
         var (controller, _, _) = NewController((1, 0, 900), (0, 1, 1100), (0, 0, 1000));

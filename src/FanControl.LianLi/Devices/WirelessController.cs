@@ -21,7 +21,7 @@ namespace FanControl.LianLi.Devices;
 /// block's pump, the Lancool 217's and the V150's front pair and rear fan, one RPM reading per fan
 /// and a water block's coolant temperature - and <see cref="TopologyChanged"/> tells the plugin to
 /// ask the host for a refresh. Sensors are only added, so an index always names the same
-/// thing; a device that goes unheard keeps them and reads 0 rpm and no temperature until it is
+/// thing; a device that goes unheard keeps them and reads no speed and no temperature until it is
 /// heard again, whether the table has dropped it meanwhile, as L-Connect's does, or not.</para>
 ///
 /// <para>Once a second (<see cref="ApplyPending"/>, the one-second block of <c>MasterDevice.Run</c>)
@@ -370,16 +370,16 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
         }
     }
 
-    /// <summary>The control's first fan's last speed; 0 while the device is not heard.</summary>
-    public float GetRpm(int channel) {
+    /// <summary>The control's first fan's last speed; null while the device is not heard.</summary>
+    public float? GetRpm(int channel) {
         lock (_lock) {
             Control control = _controls[channel];
-            return control.Owner.Readings[control.RpmSlot]?.Value ?? 0f;
+            return control.Owner.Readings[control.RpmSlot]?.Value;
         }
     }
 
     /// <inheritdoc />
-    public float GetFanSpeed(int index) {
+    public float? GetFanSpeed(int index) {
         lock (_lock) {
             return _readings[index].Value;
         }
@@ -1809,13 +1809,16 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
     }
 
     // Caller holds _lock. A fan of a device that is not heard - dropped from the table, or lost on
-    // it - reads 0, and a coolant sensor nothing, so FanControl sees a stopped fan rather than a
-    // frozen one. A decoded RPM is twelve bits (the record's flag nibbles are masked off), so no
+    // it - reads nothing, as its coolant sensor does, so FanControl sees neither a frozen speed nor
+    // a stopped fan, which with a Start % set it would try to start by raising the command of a fan
+    // that may well be running. A heard fan that is stopped reads 0. A decoded RPM is twelve bits (the record's flag nibbles are masked off), so no
     // reading a record can carry is beyond what a fan could produce.
     private void PublishReadings() {
         foreach (Reading reading in _readings) {
             WirelessDevice? device = _table.Find(reading.Device);
-            reading.Value = device is null || device.IsLost ? 0 : device.Record.Rpm[reading.Slot];
+            reading.Value = device is null || device.IsLost
+                ? (float?)null
+                : device.Record.Rpm[reading.Slot];
         }
 
         foreach (Temperature temperature in _temperatures) {
@@ -2055,7 +2058,7 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
 
         public string Name { get; }
 
-        public float Value { get; set; }
+        public float? Value { get; set; }
 
         public static string IdOf(DeviceSensors owner, int slot) => "LianLi/w" + owner.MacText + "/" + PartOf(owner, slot) + "/fan";
 

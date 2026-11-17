@@ -45,7 +45,7 @@ internal sealed class Galahad2Controller : IFanDevice {
     private readonly int[] _target = { -1, -1 };          // commanded duty %, -1 = unassigned
     private readonly int[] _lastWritten = { -2, -2 };     // last duty written
     private readonly DateTime[] _lastWriteUtc = { DateTime.MinValue, DateTime.MinValue };
-    private readonly float[] _rpm = { 0f, 0f };           // last measured RPM
+    private readonly float?[] _rpm = new float?[2];       // last measured RPM, null until one is read
     private readonly bool[] _rpmImplausible = { false, false }; // last read rejected as garbage
 
     // The transport generation this cooler was last set up under. A newer one means the transport
@@ -111,8 +111,8 @@ internal sealed class Galahad2Controller : IFanDevice {
         }
     }
 
-    /// <summary>Read the last measured RPM for a channel.</summary>
-    public float GetRpm(int channel) {
+    /// <summary>Read the last measured RPM for a channel, or null until one is read.</summary>
+    public float? GetRpm(int channel) {
         lock (_lock) {
             return _rpm[channel];
         }
@@ -299,7 +299,7 @@ internal sealed class Galahad2Controller : IFanDevice {
         } else if (!_rpmImplausible[channel]) {
             _rpmImplausible[channel] = true;
             (transitions ??= new List<string>()).Add(string.Format(
-                CultureInfo.InvariantCulture, "G{0}:{1} implausible rpm {2} ignored, keeping {3}", _index, channel, rpm, _rpm[channel]));
+                CultureInfo.InvariantCulture, "G{0}:{1} implausible rpm {2} ignored, keeping {3}", _index, channel, rpm, ChannelReadDecision.Describe(_rpm[channel])));
         }
     }
 }

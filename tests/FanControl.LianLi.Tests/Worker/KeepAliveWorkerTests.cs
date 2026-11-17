@@ -210,7 +210,7 @@ public class KeepAliveWorkerTests {
         public void ReleaseChannel(int channel) {
         }
 
-        public float GetRpm(int channel) => 0f;
+        public float? GetRpm(int channel) => 0f;
 
         public void ApplyPending() {
         }

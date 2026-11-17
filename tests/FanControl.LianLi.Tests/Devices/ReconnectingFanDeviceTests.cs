@@ -49,7 +49,7 @@ public class ReconnectingFanDeviceTests {
         Assert.True(device.IsChannelPopulated(0));
         Assert.Equal("ctl/0", device.Describe(0).ControlId);
         Assert.Equal("Channel 2 RPM", device.Describe(1).RpmName);
-        Assert.Equal(0f, device.GetRpm(1));
+        Assert.Null(device.GetRpm(1));
     }
 
     [Fact]
@@ -161,7 +161,7 @@ public class ReconnectingFanDeviceTests {
         device.ApplyPending();
         device.SetTarget(1, 50);
 
-        Assert.Equal(0f, device.GetRpm(1));
+        Assert.Null(device.GetRpm(1));
         Assert.DoesNotContain(built.Targets, t => t.Value == 50);
         Assert.Contains(logger.Messages, m => m.Contains("1 of 2 remembered channel(s) matched"));
     }
@@ -325,7 +325,7 @@ public class ReconnectingFanDeviceTests {
         ReconnectingFanDevice device = ReconnectingFanDevice.Around(
             tl, 0, remembered, Array.Empty<FanSpeedDescriptor>(), Array.Empty<TemperatureDescriptor>(), () => throw new IOException("unused"), new FakeLogger());
         device.SetTarget(1, 70);
-        Assert.Equal(0f, device.GetRpm(1));
+        Assert.Null(device.GetRpm(1));
 
         // Three polls in a row add the fan; the one after puts the remembered channel on it.
         for (int poll = 0; poll < 4; poll++) {
@@ -422,12 +422,12 @@ public class ReconnectingFanDeviceTests {
 
         Assert.Equal(2, device.FanSpeedCount);
         Assert.Equal("fan/a", device.DescribeFanSpeed(0).Id);
-        Assert.Equal(0f, device.GetFanSpeed(0)); // nothing until it is rebuilt
+        Assert.Null(device.GetFanSpeed(0)); // nothing until it is rebuilt
 
         device.ApplyPending();
 
         Assert.Equal(900f, device.GetFanSpeed(0));
-        Assert.Equal(0f, device.GetFanSpeed(1)); // the rebuilt group no longer has that fan
+        Assert.Null(device.GetFanSpeed(1)); // the rebuilt group no longer has that fan
     }
 
     [Fact]
@@ -440,7 +440,7 @@ public class ReconnectingFanDeviceTests {
         device.ApplyPending();
 
         Assert.Equal(1234f, device.GetFanSpeed(0));
-        Assert.Equal(0f, device.GetFanSpeed(1));
+        Assert.Null(device.GetFanSpeed(1));
     }
 
     [Fact]
@@ -461,7 +461,7 @@ public class ReconnectingFanDeviceTests {
         Assert.True(device.IsConnected);
         Assert.Equal(2, device.ChannelCount);
         Assert.Equal(800f, device.GetRpm(0));
-        Assert.Equal(0f, device.GetRpm(1));
+        Assert.Null(device.GetRpm(1));
         Assert.Contains("C0 kept all 2 remembered channel(s); 1 of them are there now", logger.Messages);
         Assert.Throws<ArgumentNullException>(() => ReconnectingFanDevice.Around(
             null!, 0, TwoChannels, Array.Empty<FanSpeedDescriptor>(), Array.Empty<TemperatureDescriptor>(), () => built, logger));
@@ -483,14 +483,14 @@ public class ReconnectingFanDeviceTests {
 
         public FanSpeedDescriptor DescribeFanSpeed(int index) => new FanSpeedDescriptor(_controls[index] + "/fan", "r");
 
-        public float GetFanSpeed(int index) => 700f + index;
+        public float? GetFanSpeed(int index) => 700f + index;
 
         public void SetTarget(int channel, int duty) => Targets.Add(new KeyValuePair<int, int>(channel, duty));
 
         public void ReleaseChannel(int channel) {
         }
 
-        public float GetRpm(int channel) => 0f;
+        public float? GetRpm(int channel) => 0f;
 
         public void ApplyPending() {
         }
@@ -518,7 +518,7 @@ public class ReconnectingFanDeviceTests {
             fanSpeeds: new[] { new FanSpeedDescriptor("ctl/0/fan", "a"), new FanSpeedDescriptor("ctl/1/fan", "b") });
         device.SetTarget(1, 45); // set while the second group was not yet heard
         device.ApplyPending();   // builds; only ctl/0 is there
-        Assert.Equal(0f, device.GetFanSpeed(1));
+        Assert.Null(device.GetFanSpeed(1));
 
         device.PollRpm(); // the controller hears the second group
 

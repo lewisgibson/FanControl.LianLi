@@ -424,7 +424,7 @@ public class FanControllerTests {
         garbage[2] = 0x50; // ch0 -> 50000
         transport.InputReport = garbage;
         controller.PollRpm();
-        Assert.Equal(0f, controller.GetRpm(0)); // no good value yet: the initial 0 is kept
+        Assert.Null(controller.GetRpm(0)); // no good value yet: still no reading, not 0
 
         var good = new byte[65];
         good[1] = 0x05;
@@ -449,6 +449,8 @@ public class FanControllerTests {
         controller.PollRpm(); // a second garbage poll must NOT log again: the onset is logged once
 
         Assert.Single(logger.Messages, m => m.Contains("implausible rpm") && m.Contains("C0:0"));
+        Assert.Contains("C0:0 implausible rpm 50000 ignored, keeping no reading", logger.Messages);
+        Assert.Null(controller.GetRpm(0)); // nothing measured yet: no reading, never 0
 
         var good = new byte[65];
         good[1] = 0x05;

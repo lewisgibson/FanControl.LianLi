@@ -113,7 +113,7 @@ public sealed class FlexReceiverControllerTests {
         Assert.Equal("Lian Li UNI FAN TL FLEX USB d4e5f6 Fan 2 RPM", controller.DescribeFanSpeed(1).Name);
         Assert.Equal(1200f, controller.GetRpm(0));
         Assert.Equal(1150f, controller.GetFanSpeed(1));
-        Assert.Equal(0f, controller.GetFanSpeed(2)); // not a registered reading
+        Assert.Null(controller.GetFanSpeed(2)); // not a registered reading
         Assert.Equal(
             new[] { "LianLi/wa1b2c3d4e5f6/ctl", "LianLi/wa1b2c3d4e5f6/f0/fan", "LianLi/wa1b2c3d4e5f6/f1/fan" },
             controller.DrivenSensorIds);
@@ -171,7 +171,7 @@ public sealed class FlexReceiverControllerTests {
         FlexReceiverController controller = rig.Build();
         Assert.Equal(0, controller.ChannelCount);
         Assert.Equal(0, controller.FanSpeedCount);
-        Assert.Equal(0f, controller.GetRpm(0));
+        Assert.Null(controller.GetRpm(0));
 
         controller.SetTarget(0, 50);
         controller.ApplyPending(); // a chain without fans is never written
@@ -224,7 +224,7 @@ public sealed class FlexReceiverControllerTests {
         Assert.DoesNotContain(rig.Transport.Writes, w => w[0] == 0x13);
         Assert.Equal(2, rig.Transport.Writes.Count(w => w[0] == 0x12)); // the build's read and the poll
         Assert.Empty(rig.Changes);
-        Assert.Equal(0f, controller.GetRpm(0)); // no registered reading to publish to
+        Assert.Null(controller.GetRpm(0)); // no registered reading to publish to
     }
 
     [Fact]
@@ -535,7 +535,7 @@ public sealed class FlexReceiverControllerTests {
         Assert.Equal(3, controller.FanSpeedCount); // append-only
         Assert.Equal(1010f, controller.GetFanSpeed(0));
         Assert.Equal(1110f, controller.GetFanSpeed(1));
-        Assert.Equal(0f, controller.GetFanSpeed(2));
+        Assert.Equal(0f, controller.GetFanSpeed(2)); // reported stopped, not unheard
         Assert.Empty(rig.Changes);
     }
 
@@ -561,7 +561,9 @@ public sealed class FlexReceiverControllerTests {
             rig.Logger.Messages);
         Assert.False(controller.IsDrivingChain);
         Assert.Empty(controller.DrivenSensorIds);
-        Assert.Equal(0f, controller.GetRpm(0));
+        Assert.Null(controller.GetRpm(0));
+        Assert.Null(controller.GetFanSpeed(0));
+        Assert.Null(controller.GetFanSpeed(1));
         Assert.Equal(1, controller.ChannelCount); // the sensors stay registered, reading nothing
 
         controller.SetTarget(0, 80);
@@ -586,7 +588,7 @@ public sealed class FlexReceiverControllerTests {
         controller.PollRpm();
 
         Assert.False(controller.IsDrivingChain);
-        Assert.Equal(0f, controller.GetRpm(0));
+        Assert.Null(controller.GetRpm(0));
     }
 
     [Fact]

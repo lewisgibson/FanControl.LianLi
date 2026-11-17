@@ -4,6 +4,7 @@ using FanControl.LianLi.Devices;
 using FanControl.LianLi.Plugin;
 using FanControl.LianLi.Protocol;
 using FanControl.LianLi.Tests.Fakes;
+using FanControl.Plugins;
 using Xunit;
 
 namespace FanControl.LianLi.Tests.Plugin;
@@ -18,7 +19,7 @@ public class SensorTests {
     [Fact]
     public void ControlSensor_Set_DrivesTargetAndPublishesValue() {
         var (controller, transport) = NewController();
-        var control = new ControlSensor(controller, 0, () => { }, new WirelessProcessState());
+        var control = new ControlSensor(controller, 0, () => { }, new WirelessProcessState(), null);
 
         control.Set(50);
         transport.Clear();
@@ -34,7 +35,7 @@ public class SensorTests {
     [Fact]
     public void ControlSensor_Reset_ReleasesChannelAndClearsValue() {
         var (controller, transport) = NewController();
-        var control = new ControlSensor(controller, 0, () => { }, new WirelessProcessState());
+        var control = new ControlSensor(controller, 0, () => { }, new WirelessProcessState(), null);
         control.Set(50);
         controller.ApplyPending();
 
@@ -65,7 +66,7 @@ public class SensorTests {
     [Fact]
     public void ControlAndFanSensor_HaveDistinctIds() {
         var (controller, _) = NewController();
-        var control = new ControlSensor(controller, 0, () => { }, new WirelessProcessState());
+        var control = new ControlSensor(controller, 0, () => { }, new WirelessProcessState(), null);
         var fan = new FanSensor(controller, 0);
 
         Assert.NotEqual(control.Id, fan.Id);
@@ -95,7 +96,7 @@ public class SensorTests {
         var (controller, _) = NewController();
         ChannelDescriptor descriptor = controller.Describe(0);
 
-        Assert.Equal(descriptor.ControlName, new ControlSensor(controller, 0, () => { }, new WirelessProcessState()).Name);
+        Assert.Equal(descriptor.ControlName, new ControlSensor(controller, 0, () => { }, new WirelessProcessState(), null).Name);
         Assert.Equal(descriptor.RpmName, new FanSensor(controller, 0).Name);
     }
 
@@ -103,7 +104,7 @@ public class SensorTests {
     public void ControlSensor_WakesTheWorkerOnlyWhenTheTargetChanges() {
         var (controller, _) = NewController();
         int wakes = 0;
-        var control = new ControlSensor(controller, 0, () => wakes++, new WirelessProcessState());
+        var control = new ControlSensor(controller, 0, () => wakes++, new WirelessProcessState(), null);
 
         control.Set(40);
         control.Set(40); // FanControl re-sends the same value every update
@@ -116,7 +117,7 @@ public class SensorTests {
     public void ControlSensor_NullWake_Throws() {
         var (controller, _) = NewController();
 
-        Assert.Throws<ArgumentNullException>(() => new ControlSensor(controller, 0, null!, new WirelessProcessState()));
+        Assert.Throws<ArgumentNullException>(() => new ControlSensor(controller, 0, null!, new WirelessProcessState(), null));
     }
 
     // The control of a fan group keyed on an RF address keeps its target in the shared state as
@@ -125,7 +126,7 @@ public class SensorTests {
     public void ControlSensor_OfAFanGroup_KeepsItsTargetInTheSharedState_AndReleasesIt() {
         var state = new WirelessProcessState();
         var group = new FakeFanGroupDevice("LianLi/wa00000000001/ctl", "LianLi/wa00000000001/f0/fan");
-        var control = new ControlSensor(group, 0, () => { }, state);
+        var control = new ControlSensor(group, 0, () => { }, state, null);
 
         control.Set(45);
         Assert.Equal(45, state.ChainTarget("a00000000001"));
@@ -135,15 +136,33 @@ public class SensorTests {
         Assert.Equal(-1, state.ChainTarget("a00000000001"));
 
         var (controller, _) = NewController();
-        new ControlSensor(controller, 0, () => { }, state).Set(30);
+        new ControlSensor(controller, 0, () => { }, state, null).Set(30);
         Assert.Equal(-1, state.ChainTarget("a00000000001"));
+    }
+
+    [Fact]
+    public void ControlSensor_IsFanControlsPairingControl_AndPublishesThePairingItWasGiven() {
+        var (controller, _) = NewController();
+
+        var control = new ControlSensor(controller, 0, () => { }, new WirelessProcessState(), "Lian Li Uni/LianLi/0/ch0/fan");
+
+        Assert.Equal("Lian Li Uni/LianLi/0/ch0/fan", Assert.IsAssignableFrom<IPluginControlSensor2>(control).PairedFanSensorId);
+    }
+
+    [Fact]
+    public void ControlSensor_WithNoReadingRegistered_HasNoPairing() {
+        var (controller, _) = NewController();
+
+        var control = new ControlSensor(controller, 0, () => { }, new WirelessProcessState(), null);
+
+        Assert.Null(Assert.IsAssignableFrom<IPluginControlSensor2>(control).PairedFanSensorId);
     }
 
     [Fact]
     public void ControlSensor_NullSharedState_Throws() {
         var (controller, _) = NewController();
 
-        Assert.Throws<ArgumentNullException>(() => new ControlSensor(controller, 0, () => { }, null!));
+        Assert.Throws<ArgumentNullException>(() => new ControlSensor(controller, 0, () => { }, null!, null));
     }
 
     [Fact]
@@ -152,5 +171,5 @@ public class SensorTests {
 
     [Fact]
     public void ControlSensor_NullController_Throws()
-        => Assert.Throws<ArgumentNullException>(() => new ControlSensor(null!, 0, () => { }, new WirelessProcessState()));
+        => Assert.Throws<ArgumentNullException>(() => new ControlSensor(null!, 0, () => { }, new WirelessProcessState(), null));
 }

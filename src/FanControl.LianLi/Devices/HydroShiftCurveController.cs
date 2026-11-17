@@ -40,7 +40,7 @@ internal sealed class HydroShiftCurveController : IFanDevice, ITemperatureSource
     private int _target = -1;                  // commanded duty %, -1 = unassigned
     private int _lastWritten = -2;             // last duty written
     private DateTime _lastWriteUtc = DateTime.MinValue;
-    private float _rpm;                        // last measured RPM
+    private float? _rpm;                       // last measured RPM, null until one is read
     private bool _rpmImplausible;              // last read rejected as garbage
     private float? _temperature;               // last measured liquid temperature, null until read
 
@@ -122,8 +122,8 @@ internal sealed class HydroShiftCurveController : IFanDevice, ITemperatureSource
         }
     }
 
-    /// <summary>Read the last measured pump RPM.</summary>
-    public float GetRpm(int channel) {
+    /// <summary>Read the last measured pump RPM, or null until one is read.</summary>
+    public float? GetRpm(int channel) {
         lock (_lock) {
             return _rpm;
         }
@@ -357,6 +357,6 @@ internal sealed class HydroShiftCurveController : IFanDevice, ITemperatureSource
 
         _rpmImplausible = true;
         return string.Format(
-            CultureInfo.InvariantCulture, "H{0}:pump implausible rpm {1} ignored, keeping {2}", _index, rpm, _rpm);
+            CultureInfo.InvariantCulture, "H{0}:pump implausible rpm {1} ignored, keeping {2}", _index, rpm, ChannelReadDecision.Describe(_rpm));
     }
 }

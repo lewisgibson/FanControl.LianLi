@@ -1,6 +1,10 @@
 FanControl.LianLi v{{VERSION}} ({{VARIANT}} build)
 
-Requires FanControl V243 or newer.
+Requires FanControl V245 or newer. Update FanControl first: on V244 or
+older the plugin can't load and FanControl shows none of its sensors,
+not even your motherboard and GPU ones. If you're not sure which
+version you have, update FanControl from https://getfancontrol.com/
+before installing.
 
 Install:
   1. Unblock the DLL: right-click {{DLL}} -> Properties -> tick 'Unblock' -> OK.

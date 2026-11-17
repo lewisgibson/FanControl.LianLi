@@ -84,11 +84,11 @@ internal sealed class WirelessDevice {
 
     /// <summary>
     /// Whether the device has gone <see cref="MaximumMissedReads"/> reads unheard while staying on
-    /// the table - the list is locked, or the master is unknown so no list is read: it reads as 0 rpm
+    /// the table - the list is locked, or the master is unknown so no list is read: it reads no speed
     /// and no temperature until it is heard again. It is still driven, as L-Connect drives it: a
     /// receiver that stops answering says nothing about whether the device still hears the transmitter.
     /// Off the locked list a device unheard that long is dropped from the table instead, as L-Connect
-    /// drops it, and its sensors read 0 the same way (<see cref="WirelessDeviceTable"/>).
+    /// drops it, and its sensors read nothing the same way (<see cref="WirelessDeviceTable"/>).
     /// </summary>
     public bool IsLost { get; set; }
 

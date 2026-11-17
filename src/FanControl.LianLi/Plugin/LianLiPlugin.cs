@@ -1156,7 +1156,10 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
     /// </summary>
     internal event Action<string>? Registering;
 
-    /// <summary>Register a control sensor and a fan sensor for every populated channel of every controller.</summary>
+    /// <summary>
+    /// Register a control sensor and a fan sensor for every populated channel of every controller,
+    /// each control paired with the fan sensor that reads its speed.
+    /// </summary>
     public void Load(IPluginSensorsContainer container) {
         if (container is null) {
             throw new ArgumentNullException(nameof(container));
@@ -1179,6 +1182,12 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
         // to the first controller that reports it.
         Dictionary<string, string> owners = _runtime.Owners();
         var registered = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        // The controls of the pass, made once it has registered every fan reading: FanControl reads
+        // which reading a control is paired with as soon as Load returns, a control may name only a
+        // reading this pass registered, and its reading can be registered after it (a fan group's by
+        // the loop below its channels, a FLEX chain's by the other controller that has its ids).
+        var controls = new List<KeyValuePair<IFanDevice, int>>();
         foreach (KeyValuePair<string, IFanDevice> entry in _controllers) {
             Registering?.Invoke(entry.Key);
             IFanDevice controller = entry.Value;
@@ -1192,7 +1201,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
                     continue;
                 }
 
-                container.ControlSensors.Add(new ControlSensor(controller, ch, _runtime.Wake, _runtime.WirelessState));
+                controls.Add(new KeyValuePair<IFanDevice, int>(controller, ch));
                 if (!(controller is IFanSpeedSource) && Registers(entry.Key, controller.Describe(ch).RpmId, owners, registered)) {
                     container.FanSensors.Add(new FanSensor(controller, ch));
                 }
@@ -1217,6 +1226,19 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
                     }
                 }
             }
+        }
+
+        // FanControl identifies a plugin's sensor by the plugin's name, a slash and the sensor's own
+        // id, and takes a control's paired fan sensor as that whole identifier, compared as it stands.
+        foreach (KeyValuePair<IFanDevice, int> control in controls) {
+            ChannelDescriptor descriptor = control.Key.Describe(control.Value);
+            bool hasReading = registered.ContainsKey(descriptor.RpmId);
+            if (!hasReading) {
+                _log.Write("  " + descriptor.ControlId + " has no fan speed registered, so FanControl is given no pairing for it");
+            }
+
+            container.ControlSensors.Add(new ControlSensor(
+                control.Key, control.Value, _runtime.Wake, _runtime.WirelessState, hasReading ? Name + "/" + descriptor.RpmId : null));
         }
 
         // Published before the memory is compared against the pass, and under the memory's own

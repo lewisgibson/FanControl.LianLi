@@ -215,7 +215,7 @@ public sealed class WirelessControllerTests : IDisposable {
     }
 
     // With no master known nothing refreshes the readings, so after the usual 30 reads they stop
-    // looking live: a fan reads 0, not its last speed for ever.
+    // looking live: a fan reads nothing, not its last speed for ever.
     [Fact]
     public void AMasterWithNoAddress_LetsTheReadingsGoStale() {
         FakeWirelessRecord group = Group(1);
@@ -230,7 +230,7 @@ public sealed class WirelessControllerTests : IDisposable {
             Tick();
         }
 
-        Assert.Equal(0f, Controller.GetFanSpeed(0));
+        Assert.Null(Controller.GetFanSpeed(0));
     }
 
     // QuerryMasterMac copies an all-zero address over the one it had: the master is unknown until
@@ -429,7 +429,8 @@ public sealed class WirelessControllerTests : IDisposable {
         Assert.Equal(3, Controller.FanSpeedCount);
         Assert.Equal(1, topologyChanges);
 
-        // Fewer fans later takes nothing away: the index keeps naming the same fan.
+        // Fewer fans later takes nothing away: the index keeps naming the same fan, which the
+        // device, still heard, reports stopped.
         _rig.Records[0] = Group(1, fans: 1);
         Tick();
         Assert.Equal(3, Controller.FanSpeedCount);
@@ -562,7 +563,7 @@ public sealed class WirelessControllerTests : IDisposable {
         Assert.Equal("Lian Li V150 Wireless 000001 Front Fans", Controller.Describe(0).ControlName);
         Assert.Equal("LianLi/wa00000000001/f0/fan", Controller.Describe(0).RpmId);
         Assert.Equal(0, Controller.FanSpeedCount);
-        Assert.Equal(0f, Controller.GetRpm(0));
+        Assert.Null(Controller.GetRpm(0));
     }
 
     [Fact]
@@ -621,7 +622,7 @@ public sealed class WirelessControllerTests : IDisposable {
         group.RpmHighNibbles = B(0xF, 0x8, 0x1, 0x8); // every flag, and TL FLEX firmware version 0x18
         _rig.Records.Add(group);
 
-        Assert.Equal(new[] { 1000f, 1001f, 1002f, 1003f }, Enumerable.Range(0, 4).Select(Controller.GetFanSpeed));
+        Assert.Equal(new float?[] { 1000f, 1001f, 1002f, 1003f }, Enumerable.Range(0, 4).Select(Controller.GetFanSpeed));
     }
 
     // ---------- the speed resend (MasterDevice.SyncPwm, NeedSyncPwm) ----------
@@ -992,11 +993,11 @@ public sealed class WirelessControllerTests : IDisposable {
         Assert.Equal(1500f, Controller.GetFanSpeed(0));
     }
 
-    // RfDevice.max_live_time: thirty list reads unheard. The plugin reads its fans as 0 and its
-    // coolant as nothing until it is heard, and still drives it, as L-Connect does: a receiver that
+    // RfDevice.max_live_time: thirty list reads unheard. The plugin reads its fans and its coolant
+    // as nothing until it is heard, and still drives it, as L-Connect does: a receiver that
     // stops answering says nothing about whether the device hears the transmitter.
     [Fact]
-    public void ADeviceUnheardForThirtyReads_IsDroppedAsLConnectDropsIt_ReadsZero_AndIsDrivenAgainWhenHeard() {
+    public void ADeviceUnheardForThirtyReads_IsDroppedAsLConnectDropsIt_ReadsNothing_AndIsDrivenAgainWhenHeard() {
         FakeWirelessRecord block = Device(1, 10, fans: 1);
         block.FanTypes = B(41, 0, 0, 30);
         block.Rpm = new[] { 900, 0, 0, 2400 };
@@ -1014,8 +1015,8 @@ public sealed class WirelessControllerTests : IDisposable {
         Assert.Equal(900f, Controller.GetFanSpeed(0));
         Assert.Equal(2, Controller.DeviceCount);
         Tick();
-        Assert.Equal(0f, Controller.GetFanSpeed(0));
-        Assert.Equal(0f, Controller.GetRpm(1));
+        Assert.Null(Controller.GetFanSpeed(0));
+        Assert.Null(Controller.GetRpm(1));
         Assert.Null(Controller.GetTemperature(0));
         Assert.Equal(1, Controller.DeviceCount);
         Assert.Contains(_log.Messages, m => m.StartsWith("W4:a00000000001 not heard for 30 list reads; dropped from the device list", StringComparison.Ordinal));
@@ -2360,7 +2361,7 @@ public sealed class WirelessControllerTests : IDisposable {
     // Any device but a Lancool 217 is dropped from L-Connect's list after thirty unheard reads and
     // added again as new; its sensors, held by address, keep their ids and read again.
     [Fact]
-    public void AV150DroppedFromTheList_ReadsZeroAndComesBackWhenHeard() {
+    public void AV150DroppedFromTheList_ReadsNothingAndComesBackWhenHeard() {
         FakeWirelessRecord v150 = Device(1, 66, fans: 1);
         v150.Rpm = new[] { 800, 0, 0, 0 };
         _rig.Records.Add(v150);
@@ -2371,7 +2372,7 @@ public sealed class WirelessControllerTests : IDisposable {
             Tick();
         }
 
-        Assert.Equal(0f, Controller.GetFanSpeed(0));
+        Assert.Null(Controller.GetFanSpeed(0));
 
         _rig.Records.Add(v150);
         Tick();
@@ -2457,7 +2458,7 @@ public sealed class WirelessControllerTests : IDisposable {
         }
 
         Assert.Equal(reads, _rig.Receiver.Writes.Count); // this second's read was the tick's
-        Assert.DoesNotContain(_log.Messages, m => m.Contains("reading 0 rpm until it is"));
+        Assert.DoesNotContain(_log.Messages, m => m.Contains("reading no speed until it is"));
     }
 
     // ---------- L-Connect's locked device list (RFController.CheckLockAndInitData) ----------

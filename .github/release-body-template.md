@@ -1,6 +1,10 @@
 **FanControl.LianLi v{{VERSION}}**, released {{DATE}}
 
-A [FanControl](https://getfancontrol.com/) plugin for Lian Li fans, AIO coolers and STRIMER cables. It needs FanControl V243 or newer, and the [README](https://github.com/lewisgibson/FanControl.LianLi#readme) lists the supported devices.
+A [FanControl](https://getfancontrol.com/) plugin for Lian Li fans, AIO coolers and STRIMER cables. The [README](https://github.com/lewisgibson/FanControl.LianLi#readme) lists the supported devices.
+
+> [!IMPORTANT]
+>
+> This plugin needs FanControl V245 or newer. Update FanControl from [getfancontrol.com](https://getfancontrol.com/) before you install or update it: on V244 or older the plugin can't load and FanControl shows none of its sensors, not even your motherboard and GPU ones.
 
 ## Download and install
 
