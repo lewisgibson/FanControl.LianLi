@@ -25,7 +25,7 @@ The binding engineering standards are in `.claude/rules/` (the layering, the dev
 
 ## Deployment
 
-Ship only `FanControl.LianLi.dll` (or `FanControl.LianLi-Argb.dll` for the ARGB variant, `FanControl.LianLi-Lighting.dll` for the Lighting variant); it has no dependencies to ship beside it. Users install it with FanControl's in-app **Install plugin** button, which loads the plugin immediately - no restart of FanControl is needed. FanControl runs plugins in its background service (`FanControl.Service`, as LocalSystem), so the plugin runs as SYSTEM and its file log lands under the SYSTEM profile. See `docs/deployment.md`.
+Ship only `FanControl.LianLi.dll` (or `FanControl.LianLi-Argb.dll` for the ARGB variant, `FanControl.LianLi-Lighting.dll` for the Lighting variant); it has no dependencies to ship beside it. Users install it with FanControl's in-app **Install plugin** button, which loads the plugin immediately - no restart of FanControl is needed. FanControl runs plugins either in its app under the user's account or in its background service (`FanControl.Service`, as LocalSystem), and switches between the two, so the plugin's files (`plugin.log`, `remembered-controllers.json`) land in `%LOCALAPPDATA%\FanControl.LianLi` of whichever account runs it: the user's own, or the SYSTEM profile (`C:\Windows\System32\config\systemprofile\AppData\Local\FanControl.LianLi`). When asking a user for the log, give `%LOCALAPPDATA%\FanControl.LianLi` first and the SYSTEM path as the fallback. See `docs/deployment.md`.
 
 ## Rules
 

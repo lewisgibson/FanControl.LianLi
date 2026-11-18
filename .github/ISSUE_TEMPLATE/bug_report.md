@@ -28,9 +28,10 @@ Details -> Hardware Ids): the Name, Vendor ID (VID), and Product ID (PID). -->
 ## Plugin log
 
 <!--
-Attach the plugin log. Because FanControl loads plugins in its background
-service (running as SYSTEM), the log is usually at:
-  C:\Windows\System32\config\systemprofile\AppData\Local\FanControl.LianLi\plugin.log
-If you run the plugin outside the service it is at:
-  %LOCALAPPDATA%\FanControl.LianLi\plugin.log
+Attach plugin.log (and remembered-controllers.json beside it). Paste this into
+the File Explorer address bar and press Enter:
+  %LOCALAPPDATA%\FanControl.LianLi
+If the log isn't there, FanControl is running the plugin in its background
+service as SYSTEM: open File Explorer as administrator and paste this instead:
+  C:\Windows\System32\config\systemprofile\AppData\Local\FanControl.LianLi
 -->

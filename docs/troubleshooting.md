@@ -110,13 +110,19 @@ A control with no pairing at all is one whose RPM sensor the plugin couldn't reg
 
 ## Where the plugin log is
 
-FanControl loads plugins in its background service (`FanControl.Service`), which runs as SYSTEM, so the plugin's log is under the SYSTEM profile , not your own:
+The plugin keeps its log in `%LOCALAPPDATA%\FanControl.LianLi`, under the Windows account that runs it. FanControl runs it either in the app under your own account or in its background service (`FanControl.Service`) as SYSTEM, and it can switch between the two, so look in both places. Open File Explorer, paste this into the address bar and press Enter:
 
 ```
-C:\Windows\System32\config\systemprofile\AppData\Local\FanControl.LianLi\plugin.log
+%LOCALAPPDATA%\FanControl.LianLi
 ```
 
-If you run the plugin outside the service it is at `%LOCALAPPDATA%\FanControl.LianLi\plugin.log` instead. The log is kept to a bounded size; the previous one is `plugin.log.1` beside it. FanControl's own `service_log.txt`, in its Program Files folder, records a plugin that failed to load at all.
+If `plugin.log` isn't there, or hasn't changed recently, FanControl is running it in the service. Open File Explorer as administrator and paste this instead:
+
+```
+C:\Windows\System32\config\systemprofile\AppData\Local\FanControl.LianLi
+```
+
+The folder also holds `remembered-controllers.json`, the controllers the plugin has seen before; attach it with the log when you report a bug. The log is kept to a bounded size; the previous one is `plugin.log.1` beside it. FanControl's own `service_log.txt`, in its Program Files folder, records a plugin that failed to load at all.
 
 A healthy log starts with `Initialize: standard build, scan located N HID interface(s), M controller(s)` (or `ARGB build` or `Lighting build`), then `Set C{i}:{ch} = N%` lines as FanControl drives the curves, and the same lines tagged `(refresh)` every 15 seconds. `M` can be smaller than `N` when a controller exposes more than one USB interface; that is normal.
 
