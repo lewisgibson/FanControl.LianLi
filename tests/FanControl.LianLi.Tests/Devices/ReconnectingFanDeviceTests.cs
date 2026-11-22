@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using FanControl.LianLi.Devices;
 using FanControl.LianLi.Tests.Fakes;
+using FanControl.LianLi.Transport;
 using Xunit;
 
 namespace FanControl.LianLi.Tests.Devices;
@@ -30,7 +31,8 @@ public class ReconnectingFanDeviceTests {
         FakeLogger? logger = null,
         IReadOnlyList<ChannelDescriptor>? channels = null,
         IReadOnlyList<TemperatureDescriptor>? temperatures = null,
-        IReadOnlyList<FanSpeedDescriptor>? fanSpeeds = null)
+        IReadOnlyList<FanSpeedDescriptor>? fanSpeeds = null,
+        FakeDeviceCallClock? clock = null)
         => new ReconnectingFanDevice(
             0,
             channels ?? TwoChannels,
@@ -38,7 +40,8 @@ public class ReconnectingFanDeviceTests {
             temperatures ?? Array.Empty<TemperatureDescriptor>(),
             build,
             logger ?? new FakeLogger(),
-            work => work());
+            work => work(),
+            clock ?? new FakeDeviceCallClock());
 
     [Fact]
     public void BeforeItRebuilds_ItStillPresentsTheRememberedSensors() {
@@ -87,6 +90,7 @@ public class ReconnectingFanDeviceTests {
         int attempts = 0;
         var built = new FakeFanDevice("ctl/0", "ctl/1");
         var logger = new FakeLogger();
+        var clock = new FakeDeviceCallClock();
         var device = NewDevice(
             () => {
                 attempts++;
@@ -96,21 +100,25 @@ public class ReconnectingFanDeviceTests {
 
                 return built;
             },
-            logger);
+            logger,
+            clock: clock);
 
         // The first offer attempts and fails, and the failure is logged with the attempt count.
         device.ApplyPending();
         Assert.Contains(logger.Messages, m => m.Contains("C0 reconnect attempt 1 failed: not yet"));
         Assert.False(device.IsConnected);
 
-        // The next offers are skipped instead of hammering a device that is not there...
+        // The offers before the first gap has passed are skipped instead of hammering a device that
+        // is not there...
         for (int offer = 0; offer < 10; offer++) {
+            clock.NowMilliseconds += 400;
             device.ApplyPending();
         }
 
         Assert.Equal(1, attempts);
 
         // ...until the schedule comes round again.
+        clock.NowMilliseconds = DoublingBackoff.DeviceFirstGapMilliseconds;
         device.ApplyPending();
         Assert.Equal(2, attempts);
         Assert.True(device.IsConnected);
@@ -120,6 +128,7 @@ public class ReconnectingFanDeviceTests {
     public void ARepeatedRebuildFailureIsLoggedOnce_AndAChangedOneAgain() {
         string[] failures = { "not yet", "not yet", "gone" };
         int attempts = 0;
+        var clock = new FakeDeviceCallClock();
         var logger = new FakeLogger();
         var device = NewDevice(
             () => {
@@ -130,9 +139,11 @@ public class ReconnectingFanDeviceTests {
 
                 return new FakeFanDevice("ctl/0", "ctl/1");
             },
-            logger);
+            logger,
+            clock: clock);
 
         for (int offer = 0; offer < 1000 && !device.IsConnected; offer++) {
+            clock.NowMilliseconds += 500;
             device.ApplyPending();
         }
 
@@ -402,7 +413,9 @@ public class ReconnectingFanDeviceTests {
             () => new ReconnectingFanDevice(0, TwoChannels, Array.Empty<FanSpeedDescriptor>(), OneTemperature, () => new FakeFanDevice(), null!));
         Assert.Throws<ArgumentNullException>(() => NewDevice(() => new FakeFanDevice()).ReplayOnReconnect(null!));
         Assert.Throws<ArgumentNullException>(
-            () => new ReconnectingFanDevice(0, TwoChannels, Array.Empty<FanSpeedDescriptor>(), OneTemperature, () => new FakeFanDevice(), new FakeLogger(), null!));
+            () => new ReconnectingFanDevice(0, TwoChannels, Array.Empty<FanSpeedDescriptor>(), OneTemperature, () => new FakeFanDevice(), new FakeLogger(), null!, new FakeDeviceCallClock()));
+        Assert.Throws<ArgumentNullException>(
+            () => new ReconnectingFanDevice(0, TwoChannels, Array.Empty<FanSpeedDescriptor>(), OneTemperature, () => new FakeFanDevice(), new FakeLogger(), work => work(), null!));
     }
 
     [Fact]

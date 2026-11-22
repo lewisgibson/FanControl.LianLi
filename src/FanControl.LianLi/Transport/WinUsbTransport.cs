@@ -81,7 +81,7 @@ internal sealed class WinUsbTransport : IDeviceTransport {
     private bool _draining;
 
     private volatile bool _faulted;
-    private readonly DoublingBackoff _reopenBackoff = new DoublingBackoff(10, 640);
+    private readonly DoublingBackoff _reopenBackoff;
 
     // Each operation's name on this device, built once (see Describe).
     private readonly Dictionary<string, string> _described = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -104,6 +104,7 @@ internal sealed class WinUsbTransport : IDeviceTransport {
         _api = api;
         _calls = calls;
         _delay = delay;
+        _reopenBackoff = new DoublingBackoff(DoublingBackoff.DeviceFirstGapMilliseconds, DoublingBackoff.DeviceMaximumGapMilliseconds, calls.Clock);
     }
 
     /// <summary>

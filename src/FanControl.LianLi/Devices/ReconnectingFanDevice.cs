@@ -26,9 +26,9 @@ internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IF
     private readonly FanSpeedDescriptor[] _fanSpeeds;
     private readonly Func<IFanDevice> _build;
     private readonly ILog _log;
-    // The rebuild schedule: immediate, then a gap doubling from 10 offers to 640. The worker
-    // offers two a tick, so a device that is gone is retried every few minutes.
-    private readonly DoublingBackoff _backoff = new DoublingBackoff(10, 640);
+    // The rebuild schedule: immediate, then a gap doubling from five seconds to half a minute, so a
+    // controller plugged in later is driven within about thirty seconds.
+    private readonly DoublingBackoff _backoff;
 
     private readonly object _lock = new object();
     private readonly int[] _target;          // commanded duty %, -1 = unassigned, forwarded on build
@@ -47,12 +47,13 @@ internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IF
         IReadOnlyList<TemperatureDescriptor> temperatures,
         Func<IFanDevice> build,
         ILog log)
-        : this(index, channels, fanSpeeds, temperatures, build, log, StartThread) {
+        : this(index, channels, fanSpeeds, temperatures, build, log, StartThread, StopwatchDeviceCallClock.Instance) {
     }
 
     /// <summary>
-    /// As the public constructor, with the way a rebuild is run in the background supplied; a test
-    /// runs it inline to see each attempt deterministically.
+    /// As the public constructor, with the way a rebuild is run in the background and the clock the
+    /// rebuilds are timed on supplied; a test runs it inline and moves the clock to see each attempt
+    /// deterministically.
     /// </summary>
     internal ReconnectingFanDevice(
         int index,
@@ -61,9 +62,11 @@ internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IF
         IReadOnlyList<TemperatureDescriptor> temperatures,
         Func<IFanDevice> build,
         ILog log,
-        Action<ThreadStart> runInBackground) {
+        Action<ThreadStart> runInBackground,
+        IDeviceCallClock clock) {
         _index = index;
         _runInBackground = runInBackground ?? throw new ArgumentNullException(nameof(runInBackground));
+        _backoff = new DoublingBackoff(DoublingBackoff.DeviceFirstGapMilliseconds, DoublingBackoff.DeviceMaximumGapMilliseconds, clock);
         if (channels is null) {
             throw new ArgumentNullException(nameof(channels));
         }

@@ -247,6 +247,7 @@ public class HidTransportTests {
             Assert.Throws<IOException>(() => transport.GetInputReport(0xE0, 65));
         }
 
+        _clock.NowMilliseconds += DoublingBackoff.DeviceFirstGapMilliseconds; // the backoff's next try
         Assert.Throws<IOException>(() => transport.GetInputReport(0xE0, 65));
         Assert.Single(_hid.HandlesOf("stream"));
         Assert.DoesNotContain(_calls.Operations, operation => operation.StartsWith("reopen", StringComparison.Ordinal));
@@ -257,11 +258,12 @@ public class HidTransportTests {
             Assert.Throws<IOException>(() => transport.GetInputReport(0xE0, 65));
         }
 
+        _clock.NowMilliseconds += 2 * DoublingBackoff.DeviceFirstGapMilliseconds;
         transport.SetFeature(new byte[] { 0xE0 });
         Assert.Equal(1, transport.Generation);
         Assert.Equal(2, _hid.HandlesOf("stream").Count);
         Assert.Equal(
-            "  HidD_SetFeature on " + Path + " returned 1200 ms after it was given up on; calls to " + Path + " resume (2 refused meanwhile)",
+            "  HidD_SetFeature on " + Path + " returned 6200 ms after it was given up on; calls to " + Path + " resume (2 refused meanwhile)",
             _log.Messages[1]);
     }
 
@@ -654,11 +656,13 @@ public class HidTransportTests {
             failure.Message);
 
         for (int i = 0; i < 10; i++) {
+            _clock.NowMilliseconds += 400; // still inside the first gap however often it is offered
             IOException skipped = Assert.Throws<IOException>(() => transport.Write(new byte[] { 0x01 }));
             Assert.Equal("WriteFile skipped: HID handle faulted, reopen pending.", skipped.Message);
         }
 
         Assert.Single(_hid.HandlesOf("stream"));
+        _clock.NowMilliseconds = DoublingBackoff.DeviceFirstGapMilliseconds;
         _hid.Transfers.Enqueue(new FakeHidTransfer { Reply = new byte[] { 0x01 } });
         Assert.Equal(0x01, transport.Read(64)[0]);
         Assert.Equal(2, _hid.HandlesOf("stream").Count);

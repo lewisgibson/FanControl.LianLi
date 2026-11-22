@@ -37,7 +37,7 @@ public sealed class ControllerReconnectTests {
     private readonly FakeLogger _log = new FakeLogger();
     private readonly FakeClock _clock = new FakeClock();
 
-    private DeviceCallGate NewGate() => new DeviceCallGate(new FakeDeviceCallRunner(), new FakeDeviceCallClock(), _log);
+    private DeviceCallGate NewGate() => new DeviceCallGate(new FakeDeviceCallRunner(), new FakeDeviceCallClock(stepMilliseconds: 1000), _log);
 
     // The plugin's replay shape (LianLiPlugin.ApplyLighting): the transfers written in order inside
     // a catch-all that logs the failure, reports it and lets fan control continue.

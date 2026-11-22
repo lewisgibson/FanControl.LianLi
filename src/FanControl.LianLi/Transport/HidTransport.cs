@@ -106,9 +106,9 @@ internal sealed class HidTransport : IDeviceTransport {
     // recovery and works whether or not the host follows up.
     private volatile bool _faulted;
 
-    // The reopen schedule: an immediate first attempt, then a gap doubling from 10 faulted
-    // transfers to 640 - about five seconds to five minutes at the worker's two transfers a tick.
-    private readonly DoublingBackoff _reopenBackoff = new DoublingBackoff(10, 640);
+    // The reopen schedule: an immediate first attempt, then a gap doubling from five seconds to half
+    // a minute, so a hub plugged back in is driven again within about thirty seconds.
+    private readonly DoublingBackoff _reopenBackoff;
 
     // Each operation's name on this device, built once (see Describe).
     private readonly Dictionary<string, string> _described = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -150,6 +150,7 @@ internal sealed class HidTransport : IDeviceTransport {
         _delay = delay;
         _setFeature = hid.SetFeature;
         _getInputReport = hid.GetInputReport;
+        _reopenBackoff = new DoublingBackoff(DoublingBackoff.DeviceFirstGapMilliseconds, DoublingBackoff.DeviceMaximumGapMilliseconds, calls.Clock);
 
         int featureReportLength = device.Capabilities.FeatureReportLength;
         _featureReportLength = featureReportLength > 0 ? featureReportLength : DefaultFeatureReportLength;

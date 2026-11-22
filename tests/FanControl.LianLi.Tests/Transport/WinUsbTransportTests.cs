@@ -346,6 +346,7 @@ public class WinUsbTransportTests {
             Assert.Throws<IOException>(() => transport.Write(Packet(3)));
         }
 
+        _clock.NowMilliseconds = 4500 + DoublingBackoff.DeviceFirstGapMilliseconds; // the backoff's next try
         transport.Write(Packet(4));
         Assert.Equal(1, transport.Generation);
         Assert.Equal(
@@ -655,13 +656,16 @@ public class WinUsbTransportTests {
             "WinUsb_WritePipe skipped: reopen of " + Path + " failed: Failed to open WinUSB device at " + Path + " (error 2).",
             failure.Message);
 
-        // The first retry waits out ten faulted transfers, refused fast without touching the device.
+        // The first retry waits out the first gap, however many transfers are refused fast meanwhile
+        // without touching the device.
         for (int i = 0; i < 10; i++) {
+            _clock.NowMilliseconds += 400;
             IOException skipped = Assert.Throws<IOException>(() => transport.Read(64));
             Assert.Equal("WinUsb_ReadPipe skipped: WinUSB handle faulted, reopen pending.", skipped.Message);
         }
 
         Assert.Equal(2, OpenCount);
+        _clock.NowMilliseconds = DoublingBackoff.DeviceFirstGapMilliseconds;
         transport.Write(Packet(3));
         Assert.Equal(3, OpenCount);
         Assert.Equal("  reopened " + Path + " after 12 faulted transfer(s)", Assert.Single(_log.Messages));

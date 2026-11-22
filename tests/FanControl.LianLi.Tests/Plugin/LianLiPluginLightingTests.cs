@@ -108,7 +108,8 @@ public sealed class LianLiPluginLightingTests : IDisposable
         WriteSavedLook();
         var hid = new FakeHidApi();
         var logger = new FakeLogger();
-        var gate = new DeviceCallGate(new FakeDeviceCallRunner(), new FakeDeviceCallClock(), logger);
+        // A stepping clock, so the reopen schedule comes round within the test's fast worker ticks.
+        var gate = new DeviceCallGate(new FakeDeviceCallRunner(), new FakeDeviceCallClock(stepMilliseconds: 1000), logger);
         HidTransport transport = HidTransport.Open(
             new HidInterface(0x0CF2, 0xA102, DevicePath, new HidCapabilities(0xFF72, 65, 353, 65)),
             hid, logger, gate, new FakeTransferDelay(), CancellationToken.None);

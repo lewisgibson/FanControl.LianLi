@@ -102,6 +102,9 @@ internal sealed class DeviceCallGate {
         public HashSet<string> Claimed { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     }
 
+    /// <summary>The clock the gate times stuck calls on, which the transports' reopen schedules share.</summary>
+    public IDeviceCallClock Clock => _clock;
+
     /// <summary>
     /// Run a call that starts new work on <paramref name="device"/> - a transfer, an open, a reopen, a
     /// scan - under the bound, as <see cref="IDeviceCallRunner.TryRun"/> does. Throws

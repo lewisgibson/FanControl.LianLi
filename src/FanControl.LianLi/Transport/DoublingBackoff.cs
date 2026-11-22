@@ -7,55 +7,66 @@ namespace FanControl.LianLi.Transport;
 /// attempt is immediate, so a transient fault costs no dead time, and each attempt that does not
 /// resolve it pushes the next one further out, doubling up to a ceiling.
 ///
-/// It counts <em>attempts offered</em> , not seconds, because the transports sit below the
-/// injected clock, and because the thing being waited on is a device, whose readiness is not a
-/// function of wall time. The callers: each transport reopening a faulted handle, offered a turn per
-/// transfer, and a stand-in rebuilding a controller a scan could not reach, offered a turn per worker
-/// call. Pure, so the schedule is unit-tested in isolation.
+/// It is timed in milliseconds on a monotonic clock. It used to count the attempts offered, but the
+/// callers offer at very different rates - a wired hub about one a second, a wireless pair several -
+/// and a ceiling of 640 offers meant a hub that had been gone a few minutes was tried again only
+/// every five to eleven minutes, so one plugged back in could go that long uncontrolled. The
+/// callers: each transport reopening a faulted handle, offered a turn per transfer, and a stand-in
+/// rebuilding a controller a scan could not reach, offered a turn per worker call. Pure apart from
+/// the injected clock, so the schedule is unit-tested in isolation.
 /// </summary>
 internal sealed class DoublingBackoff {
-    private readonly int _initialGap;
-    private readonly int _maximumGap;
+    /// <summary>The wait before the second try at a device that is gone: about what it used to be.</summary>
+    public const int DeviceFirstGapMilliseconds = 5000;
 
-    private int _gap;
-    private int _skipsBeforeNextAttempt;
+    /// <summary>The longest wait between tries at a device that is gone, so one plugged back in is driven again within it.</summary>
+    public const int DeviceMaximumGapMilliseconds = 30000;
+
+    private readonly int _initialGapMilliseconds;
+    private readonly int _maximumGapMilliseconds;
+    private readonly IDeviceCallClock _clock;
+
+    private int _gapMilliseconds;
+    private long? _nextAttemptAt;
 
     /// <summary>
-    /// Create a schedule that skips <paramref name="initialGap"/> offers before its second attempt
-    /// and doubles that gap after each attempt, up to <paramref name="maximumGap"/>.
+    /// Create a schedule that waits <paramref name="initialGapMilliseconds"/> before its second
+    /// attempt and doubles that wait after each attempt, up to <paramref name="maximumGapMilliseconds"/>.
     /// </summary>
-    public DoublingBackoff(int initialGap, int maximumGap) {
-        if (initialGap <= 0) {
-            throw new ArgumentOutOfRangeException(nameof(initialGap), "The first gap is at least one offer.");
+    public DoublingBackoff(int initialGapMilliseconds, int maximumGapMilliseconds, IDeviceCallClock clock) {
+        if (initialGapMilliseconds <= 0) {
+            throw new ArgumentOutOfRangeException(nameof(initialGapMilliseconds), "The first gap is at least one millisecond.");
         }
 
-        if (maximumGap < initialGap) {
-            throw new ArgumentOutOfRangeException(nameof(maximumGap), "The ceiling cannot be below the first gap.");
+        if (maximumGapMilliseconds < initialGapMilliseconds) {
+            throw new ArgumentOutOfRangeException(nameof(maximumGapMilliseconds), "The ceiling cannot be below the first gap.");
         }
 
-        _initialGap = initialGap;
-        _maximumGap = maximumGap;
-        _gap = initialGap;
+        _initialGapMilliseconds = initialGapMilliseconds;
+        _maximumGapMilliseconds = maximumGapMilliseconds;
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+        _gapMilliseconds = initialGapMilliseconds;
     }
 
     /// <summary>
     /// Take one offer and report whether this is the one that attempts. The first offer after
-    /// construction or <see cref="Reset"/> always attempts.
+    /// construction or <see cref="Reset"/> always attempts; after that, the first offer once the
+    /// current gap has passed.
     /// </summary>
     public bool ShouldAttempt() {
-        if (_skipsBeforeNextAttempt > 0) {
-            _skipsBeforeNextAttempt--;
+        long now = _clock.NowMilliseconds;
+        if (_nextAttemptAt is long due && now < due) {
             return false;
         }
 
-        _skipsBeforeNextAttempt = _gap;
-        _gap = Math.Min(_gap * 2, _maximumGap);
+        _nextAttemptAt = now + _gapMilliseconds;
+        _gapMilliseconds = (int)Math.Min((long)_gapMilliseconds * 2, _maximumGapMilliseconds);
         return true;
     }
 
     /// <summary>Resolved: the next offer attempts immediately again.</summary>
     public void Reset() {
-        _gap = _initialGap;
-        _skipsBeforeNextAttempt = 0;
+        _gapMilliseconds = _initialGapMilliseconds;
+        _nextAttemptAt = null;
     }
 }
