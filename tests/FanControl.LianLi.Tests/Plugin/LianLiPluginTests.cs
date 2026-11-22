@@ -212,8 +212,15 @@ public class LianLiPluginTests {
     public void PublicConstructor_ComposesWithHostLogger() {
         // Exercises the production composition root (real enumerator/clock/loggers)
         // without enumerating hardware, since Initialize is not called.
-        using var plugin = new LianLiPlugin(new FakePluginLogger());
+        var host = new FakePluginLogger();
+        using var plugin = new LianLiPlugin(host);
         Assert.Equal(ExpectedName, plugin.Name);
+
+        // FanControl's log is told only where the plugin's own log is.
+        Assert.True(SpinWait.SpinUntil(() => host.Messages.Count > 0, TimeSpan.FromSeconds(5)));
+        string line = Assert.Single(host.Messages);
+        Assert.StartsWith("Lian Li plugin log: ", line, StringComparison.Ordinal);
+        Assert.EndsWith("plugin.log", line, StringComparison.Ordinal);
     }
 
     [Fact]

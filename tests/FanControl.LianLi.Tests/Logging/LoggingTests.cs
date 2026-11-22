@@ -9,24 +9,6 @@ namespace FanControl.LianLi.Tests.Logging;
 
 public class LoggingTests {
     [Fact]
-    public void CompositeLog_FansOutToEverySink() {
-        var a = new FakeLogger();
-        var b = new FakeLogger();
-        var composite = new CompositeLog(a, b);
-
-        composite.Write("hello");
-
-        Assert.Equal(new[] { "hello" }, a.Messages);
-        Assert.Equal(new[] { "hello" }, b.Messages);
-    }
-
-    [Fact]
-    public void CompositeLog_ToleratesNullSink() {
-        var composite = new CompositeLog(new ILog[] { null! });
-        composite.Write("no throw"); // the null sink is skipped via null-conditional
-    }
-
-    [Fact]
     public void FileLogger_DefaultsToThePluginsLocalAppDataFolder() {
         string expected = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FanControl.LianLi", "plugin.log");
@@ -132,9 +114,5 @@ public class LoggingTests {
     [Fact]
     public void FileLogger_RejectsANonPositiveLimit()
         => Assert.Throws<ArgumentOutOfRangeException>(() => new FileLogger(Path.GetTempPath(), 0));
-
-    [Fact]
-    public void CompositeLog_WithNoSinkArray_WritesNowhere()
-        => new CompositeLog(null!).Write("dropped");
 }
 

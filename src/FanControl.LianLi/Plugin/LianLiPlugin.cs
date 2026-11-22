@@ -77,16 +77,20 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
 #endif
 
     /// <summary>
-    /// Host-injected constructor. FanControl supplies the logger; the plugin
-    /// logs through both it and a local file as a fallback.
+    /// Host-injected constructor. The plugin logs to its own file, <c>plugin.log</c>, which keeps
+    /// to a bounded size; FanControl's logger is told only where that file is.
     /// </summary>
     public LianLiPlugin(IPluginLogger logger)
         : this(logger, new FileLogger()) {
     }
 
-    // The file log is also where a failure of the host's logger is told.
+    // Every line used to go to FanControl's log as well, so each was written to disk twice. FanControl
+    // now gets one line per plugin object, which it creates at start and on each refresh: enough for
+    // anyone reading its log to find this one. The file log is also where a failure of the host's
+    // logger is told.
     private LianLiPlugin(IPluginLogger logger, FileLogger file)
-        : this(new CompositeLog(new PluginLoggerLog(logger, file), file)) {
+        : this((ILog)file) {
+        new PluginLoggerLog(logger, file).Write("Lian Li plugin log: " + file.FilePath);
     }
 
     // Wire the real HID enumerator with the same log the rest of the plugin uses, so an

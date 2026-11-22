@@ -122,7 +122,7 @@ If `plugin.log` isn't there, or hasn't changed recently, FanControl is running i
 C:\Windows\System32\config\systemprofile\AppData\Local\FanControl.LianLi
 ```
 
-The folder also holds `remembered-controllers.json`, the controllers the plugin has seen before; attach it with the log when you report a bug. The log is kept to a bounded size; the previous one is `plugin.log.1` beside it. FanControl's own `service_log.txt`, in its Program Files folder, records a plugin that failed to load at all.
+The folder also holds `remembered-controllers.json`, the controllers the plugin has seen before; attach it with the log when you report a bug. The log is kept to a bounded size; the previous one is `plugin.log.1` beside it. FanControl's own `service_log.txt`, in its Program Files folder, records a plugin that failed to load at all, and a `Lian Li plugin log:` line each time the plugin starts, giving the full path of the `plugin.log` in use. The plugin logs nothing else there.
 
 A healthy log starts with `Initialize: standard build, scan located N HID interface(s), M controller(s)` (or `ARGB build` or `Lighting build`), then one `Set C{i}:{ch} = N%` line for each fan, the first speed FanControl gives it. Later changes of speed are not logged, and neither is the re-send of every speed every 15 seconds that stops the controller falling back to full speed. `M` can be smaller than `N` when a controller exposes more than one USB interface; that is normal.
 
