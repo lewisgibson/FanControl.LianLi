@@ -26,11 +26,10 @@ namespace FanControl.LianLi.Transport;
 /// <see cref="OperationCanceledException"/> that check throws is the call unwinding as asked, not a
 /// failure, so it is never reported.
 ///
-/// A new thread per call, not a pooled or long-lived one, is the choice here. Creating one costs
-/// in the order of a tenth of a millisecond, so even the few hundred transfers of a lighting stream
-/// add up to milliseconds; and a thread used only once can be abandoned at the deadline with nothing
-/// queued behind it, and cancelled by handle without any risk of reaching a later call that a reused
-/// thread would already have moved on to.
+/// The call runs on a <see cref="DeviceCallThread"/>, reused while its calls return in time. One
+/// given up on is never used again, so it can be abandoned at the deadline with nothing queued behind
+/// it, and cancelled by handle without any risk of reaching a later call. A new thread per call did
+/// the same, but each one left handles behind until FanControl next collected garbage.
 ///
 /// The cheapness has one limit. A thread whose native call ignores every cancel - a CreateFile or a
 /// configuration manager call blocked inside the kernel on a device that stays wedged - never returns,
@@ -80,7 +79,7 @@ internal static class BoundedDeviceCall {
 
     /// <summary>
     /// <see cref="TryRun(Action{CancellationToken}, int, Action, Action{Exception}, Action)"/> with the
-    /// thread operations supplied.
+    /// thread operations supplied, on the process's threads.
     /// </summary>
     internal static bool TryRun(
         Action<CancellationToken> call,
@@ -88,7 +87,21 @@ internal static class BoundedDeviceCall {
         Action onTimeout,
         Action<Exception> onLateFailure,
         Action onReturned,
-        IThreadCanceller threads) {
+        IThreadCanceller threads)
+        => TryRun(call, timeoutMilliseconds, onTimeout, onLateFailure, onReturned, threads, DeviceCallThreadPool.Process);
+
+    /// <summary>
+    /// <see cref="TryRun(Action{CancellationToken}, int, Action, Action{Exception}, Action)"/> with the
+    /// thread operations and the threads it runs on supplied.
+    /// </summary>
+    internal static bool TryRun(
+        Action<CancellationToken> call,
+        int timeoutMilliseconds,
+        Action onTimeout,
+        Action<Exception> onLateFailure,
+        Action onReturned,
+        IThreadCanceller threads,
+        DeviceCallThreadPool pool) {
         if (call is null) {
             throw new ArgumentNullException(nameof(call));
         }
@@ -109,6 +122,10 @@ internal static class BoundedDeviceCall {
             throw new ArgumentNullException(nameof(threads));
         }
 
+        if (pool is null) {
+            throw new ArgumentNullException(nameof(pool));
+        }
+
         ExceptionDispatchInfo? failure = null;
         int state = Running;
 
@@ -124,7 +141,8 @@ internal static class BoundedDeviceCall {
         // claimed it; whichever side finds the other's mark closes the handle.
         IntPtr threadHandle = IntPtr.Zero;
 
-        var thread = new Thread(() => {
+        DeviceCallThread thread = pool.Take();
+        thread.Run(() => {
             // Publishing the handle also tells the thread whether the caller has already given up:
             // a slot it finds claimed means the deadline passed before the thread even got going.
             // Then it must not start the call at all - the cancels have already been sent, so a call
@@ -151,19 +169,19 @@ internal static class BoundedDeviceCall {
                 ReportLate(failure, onLateFailure, token);
                 onReturned();
             }
-        }) {
-            IsBackground = true,
-            Name = "LianLiDeviceCall",
-        };
-        thread.Start();
+        });
 
-        // Thread.Join is the bounded wait and the memory barrier: when it returns true the thread has
-        // terminated, so 'failure' is published to this thread.
-        bool completed = thread.Join(timeoutMilliseconds);
+        // The thread's Wait is the bounded wait and the memory barrier: when it returns true the call
+        // has returned, so 'failure' is published to this thread.
+        bool completed = thread.Wait(timeoutMilliseconds);
 
         IntPtr claimed = Interlocked.Exchange(ref threadHandle, Taken);
         try {
             if (!completed) {
+                // Given up on: never used again, so the cancels below reach this call and nothing
+                // later. The thread ends once the call returns.
+                thread.Retire();
+
                 // Abandonment is signalled before any I/O is cancelled, so the call already sees it
                 // when its cancelled native call returns and makes no further one. Then the stuck call
                 // is cancelled so the abandoned thread returns and releases the handle: first by handle
@@ -190,7 +208,9 @@ internal static class BoundedDeviceCall {
             }
         }
 
-        // The thread has terminated without the call being marked abandoned, so nothing else reports it.
+        // The call returned without being marked abandoned, so nothing else reports it, and its thread
+        // takes the next call.
+        thread.Release();
         onReturned();
         failure?.Throw();
         return true;
