@@ -248,6 +248,20 @@ public class TlFanControllerTests {
     // after that and ahead of the handshake's (to a write made a moment earlier, or to another
     // program's command): the poll reads past them to the reply that echoes the handshake.
     [Fact]
+    public void ForgetReadings_ReadsNothing_UntilTheNextPoll() {
+        var (controller, transport, _) = NewController((0, 0, 1000), (0, 1, 1100));
+
+        controller.ForgetReadings();
+        Assert.Null(controller.GetRpm(0));
+        Assert.Null(controller.GetRpm(1));
+
+        transport.ReadReplies.Enqueue(HandshakeReply((0, 0, 1500), (0, 1, 1600)));
+        controller.PollRpm();
+        Assert.Equal(1500f, controller.GetRpm(0));
+        Assert.Equal(1600f, controller.GetRpm(1));
+    }
+
+    [Fact]
     public void PollRpm_ReadsPastTheAnswersQueuedAheadOfTheHandshakeReply() {
         var (controller, transport, _) = NewController((0, 0, 1000));
         transport.ReadReplies.Enqueue(CommandPacket.Build(TlSpeedCommand, 0x80, 0xC3, 0x50));

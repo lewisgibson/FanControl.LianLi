@@ -71,6 +71,18 @@ public class ReconnectingFanDeviceTests {
     }
 
     [Fact]
+    public void ForgetReadings_PassesToTheRebuiltController_AndDoesNothingBeforeIt() {
+        var built = new FakeFanDevice("ctl/0", "ctl/1");
+        var device = NewDevice(() => built);
+
+        device.ForgetReadings(); // nothing rebuilt yet, so nothing to forget
+        device.ApplyPending();
+        device.ForgetReadings();
+
+        Assert.Equal(1, built.ForgetCount);
+    }
+
+    [Fact]
     public void ARebuildFailureIsLogged_AndRetriedOnTheBackoff() {
         int attempts = 0;
         var built = new FakeFanDevice("ctl/0", "ctl/1");
@@ -520,6 +532,9 @@ public class ReconnectingFanDeviceTests {
         public float? GetRpm(int channel) => 0f;
 
         public void ApplyPending() {
+        }
+
+        public void ForgetReadings() {
         }
 
         public void PollRpm() {

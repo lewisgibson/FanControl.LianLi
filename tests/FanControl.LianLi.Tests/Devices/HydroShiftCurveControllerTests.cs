@@ -258,6 +258,20 @@ public class HydroShiftCurveControllerTests {
     }
 
     [Fact]
+    public void ForgetReadings_ReadsNoTemperatureOrSpeed_UntilTheNextPoll() {
+        var (controller, transport, _, _) = NewController();
+        Poll(controller, transport, 34, followsMotherboard: false, raw: 2050);
+
+        controller.ForgetReadings();
+        Assert.Null(controller.GetTemperature(0));
+        Assert.Null(controller.GetRpm(PumpChannel));
+
+        Poll(controller, transport, 35, followsMotherboard: false, raw: 2050);
+        Assert.Equal(35f, controller.GetTemperature(0));
+        Assert.Equal(2000f, controller.GetRpm(PumpChannel));
+    }
+
+    [Fact]
     public void PollRpm_IgnoresAnImplausibleReading_AndKeepsTheLastGood() {
         var (controller, transport, _, _) = NewController();
         Poll(controller, transport, 30, false, 1850);

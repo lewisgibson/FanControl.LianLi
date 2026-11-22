@@ -50,6 +50,14 @@ internal interface IFanDevice : IDisposable {
     void PollRpm();
 
     /// <summary>
+    /// Forget every reading - fan speeds and any temperature - so each reads null until the device
+    /// is measured again. The worker calls this once polls have failed for long enough that the
+    /// device is taken as gone, so FanControl shows nothing rather than the last values it gave,
+    /// which a curve could otherwise keep following. Only touches in-memory state.
+    /// </summary>
+    void ForgetReadings();
+
+    /// <summary>
     /// Register work to replay whenever the transport has reopened the device after losing its
     /// handle (its <c>Generation</c> moved on at the fault, and its <c>IsFaulted</c> is false
     /// again). A re-enumerated device may have been power-cycled and lost its volatile state, so

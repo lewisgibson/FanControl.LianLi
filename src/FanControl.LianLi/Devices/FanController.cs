@@ -230,6 +230,15 @@ internal sealed class FanController : IFanDevice {
         }
     }
 
+    /// <inheritdoc />
+    public void ForgetReadings() {
+        lock (_lock) {
+            for (int ch = 0; ch < Channels; ch++) {
+                _rpm[ch] = null;
+            }
+        }
+    }
+
     /// <summary>Read every channel's RPM into the cache, ignoring implausible (garbage) readings.</summary>
     public void PollRpm() {
         byte[] buffer = ReadRpmReport();

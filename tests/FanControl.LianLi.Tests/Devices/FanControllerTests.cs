@@ -401,6 +401,22 @@ public class FanControllerTests {
     }
 
     [Fact]
+    public void ForgetReadings_ReadsNothing_UntilTheNextPoll() {
+        var (controller, transport, _) = NewSlController();
+        var buffer = new byte[65];
+        buffer[1] = 0x0A;
+        buffer[2] = 0x28; // ch0 -> 2600
+        transport.InputReport = buffer;
+        controller.PollRpm();
+
+        controller.ForgetReadings();
+        Assert.Null(controller.GetRpm(0));
+
+        controller.PollRpm();
+        Assert.Equal(2600f, controller.GetRpm(0));
+    }
+
+    [Fact]
     public void PollRpm_SendsRpmPrimerFeatureReportBeforeEachRead() {
         var (controller, transport, _) = NewSlController();
         transport.Clear();

@@ -689,6 +689,8 @@ public sealed class LianLiPluginFlexChainTests {
 
         public void PollRpm() => _inner.PollRpm();
 
+        public void ForgetReadings() => _inner.ForgetReadings();
+
         public void ReplayOnReconnect(Func<bool> replay) => _inner.ReplayOnReconnect(replay);
 
         public void Dispose() => _inner.Dispose();

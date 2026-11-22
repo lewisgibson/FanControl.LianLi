@@ -227,6 +227,15 @@ internal sealed class TlFanController : IFanDevice {
         }
     }
 
+    /// <inheritdoc />
+    public void ForgetReadings() {
+        lock (_lock) {
+            foreach (Channel channel in _channels) {
+                channel.Rpm = null;
+            }
+        }
+    }
+
     /// <summary>Write a handshake and match the reply's RPM records back to the fan channels.</summary>
     public void PollRpm() {
         // A poll the hub did not answer says nothing about which fans exist, so it neither updates a

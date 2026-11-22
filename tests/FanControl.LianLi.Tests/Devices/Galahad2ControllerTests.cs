@@ -214,6 +214,22 @@ public class Galahad2ControllerTests {
     // A packet that arrives after the handshake is written and before the cooler's answer (another
     // program's reply, or one the Vision sends unasked) is read past, not decoded.
     [Fact]
+    public void ForgetReadings_ReadsNothing_UntilTheNextPoll() {
+        var (controller, transport, _) = NewController();
+        transport.ReadReplies.Enqueue(HandshakeReply(1200, 2800));
+        controller.PollRpm();
+
+        controller.ForgetReadings();
+        Assert.Null(controller.GetRpm(FanChannel));
+        Assert.Null(controller.GetRpm(PumpChannel));
+
+        transport.ReadReplies.Enqueue(HandshakeReply(1300, 2900));
+        controller.PollRpm();
+        Assert.Equal(1300f, controller.GetRpm(FanChannel));
+        Assert.Equal(2900f, controller.GetRpm(PumpChannel));
+    }
+
+    [Fact]
     public void PollRpm_ReadsPastOtherReportsToTheHandshakeReply() {
         var (controller, transport, _) = NewController();
         transport.ReadReplies.Enqueue(CommandPacket.Build(0x8A, 0x00, 0x50));

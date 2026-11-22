@@ -97,6 +97,11 @@ internal sealed class FakeFanDevice : IFanDevice, ITemperatureSource {
         }
     }
 
+    /// <summary>How many times the readings were forgotten.</summary>
+    public int ForgetCount { get; private set; }
+
+    public void ForgetReadings() => ForgetCount++;
+
     public void PollRpm() {
         PollCount++;
         if (PollFault != null) {

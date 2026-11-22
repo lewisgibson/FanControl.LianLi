@@ -188,6 +188,14 @@ internal sealed class HydroShiftCurveController : IFanDevice, ITemperatureSource
         }
     }
 
+    /// <inheritdoc />
+    public void ForgetReadings() {
+        lock (_lock) {
+            _rpm = null;
+            _temperature = null;
+        }
+    }
+
     /// <summary>
     /// Read the status (the liquid temperature and the sync state) and the tachometer, as
     /// L-Connect's pump info timer does every second, into the caches. A reply that echoes another

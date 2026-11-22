@@ -25,6 +25,8 @@ Each device family encodes set-speed, manual-mode, and ARGB-sync reports differe
 
 The keepalive worker takes its clock as a dependency instead of calling the system clock directly. Injecting the clock makes the loop deterministic in tests: a fake clock can advance time instantly and the test asserts which reports were emitted on each tick, with no real waiting. In production the clock is the real monotonic clock and the loop runs on its own background thread.
 
+A controller whose polls keep failing (unplugged, or not answering) has its readings forgotten after 30 failed polls in a row, about half a minute, the same count after which a wireless device that is not heard reads nothing. FanControl then shows no speed or temperature for it instead of the last ones, so a curve that follows a pump's coolant temperature is not left following a frozen value: FanControl stops driving a fan whose curve has no temperature, and the hub falls back to its own control. A shorter run of failures, such as the reopen after a wake, keeps the last readings. The next poll that succeeds publishes fresh ones.
+
 ## How FanControl drives the plugin
 
 These are FanControl's own rules, read from its code (the service and library of V278, checked against V243 and V242, and the control pairing read from V245, V269 and V285), and the plugin is shaped around them:

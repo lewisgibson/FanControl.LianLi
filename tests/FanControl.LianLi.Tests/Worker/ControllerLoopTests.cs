@@ -65,6 +65,32 @@ public sealed class ControllerLoopTests {
     }
 
     [Fact]
+    public void Tick_ForgetsTheReadingsOnce_WhenPollsHaveFailedLongEnough_AndAgainAfterARecovery() {
+        var device = new FakeFanDevice("c0");
+        using var loop = new ControllerLoop(0, device, new FakeLogger(), 1000);
+        device.PollFault = new InvalidOperationException("gone");
+
+        for (int i = 1; i < ControllerLoop.ForgetReadingsAfterFailedPolls; i++) {
+            loop.Tick();
+        }
+
+        Assert.Equal(0, device.ForgetCount); // a shorter run of failures keeps the readings
+        loop.Tick();
+        Assert.Equal(1, device.ForgetCount);
+        loop.Tick();
+        Assert.Equal(1, device.ForgetCount); // once per run, not on every failed poll after it
+
+        device.PollFault = null;
+        loop.Tick();
+        device.PollFault = new InvalidOperationException("gone");
+        for (int i = 0; i < ControllerLoop.ForgetReadingsAfterFailedPolls; i++) {
+            loop.Tick();
+        }
+
+        Assert.Equal(2, device.ForgetCount);
+    }
+
+    [Fact]
     public void Tick_AppliesThenPolls() {
         var device = new FakeFanDevice("c0");
         using var loop = new ControllerLoop(0, device, new FakeLogger(), 1000);
@@ -165,6 +191,9 @@ public sealed class ControllerLoopTests {
         }
 
         public void PollRpm() {
+        }
+
+        public void ForgetReadings() {
         }
 
         public void ReplayOnReconnect(Func<bool> replay) {

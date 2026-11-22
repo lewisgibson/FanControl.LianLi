@@ -141,6 +141,17 @@ public sealed class WirelessControllerTests : IDisposable {
     }
 
     [Fact]
+    public void ForgetReadings_LeavesTheReadings_ToTheDevicesOwnMissedReadCount() {
+        _rig.Records.Add(Group(1));
+        WirelessController controller = Build();
+        float? before = controller.GetFanSpeed(0);
+
+        controller.ForgetReadings();
+
+        Assert.Equal(before, controller.GetFanSpeed(0));
+    }
+
+    [Fact]
     public void Constructor_WithoutASavedChannelStaysOnTheDefault() {
         WirelessController controller = Build();
 

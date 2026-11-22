@@ -53,6 +53,7 @@ internal sealed class FlexReceiverController : IFanDevice, IFanSpeedSource, IDri
     // _lock. The readings are append-only.
     private readonly object _lock = new object();
     private readonly List<float> _speeds = new List<float>();
+    private bool _readingsForgotten;           // set by ForgetReadings, cleared by the next status read
     private bool _hasControl;
     private int _fanCount;
     private int _lastWritten = -2;             // last duty written; -2 forces the next write
@@ -230,7 +231,7 @@ internal sealed class FlexReceiverController : IFanDevice, IFanSpeedSource, IDri
         }
 
         lock (_lock) {
-            return index < _speeds.Count ? _speeds[index] : (float?)null;
+            return index < _speeds.Count && !_readingsForgotten ? _speeds[index] : (float?)null;
         }
     }
 
@@ -320,6 +321,13 @@ internal sealed class FlexReceiverController : IFanDevice, IFanSpeedSource, IDri
                 Math.Max(1, fanCount)));
         } else if (afterReconnect) {
             _log.Write(string.Format(CultureInfo.InvariantCulture, "F{0}:{1} duty re-sent after the reconnect", _index, MacText));
+        }
+    }
+
+    /// <inheritdoc />
+    public void ForgetReadings() {
+        lock (_lock) {
+            _readingsForgotten = true;
         }
     }
 
@@ -453,6 +461,8 @@ internal sealed class FlexReceiverController : IFanDevice, IFanSpeedSource, IDri
             for (int slot = 0; slot < _speeds.Count; slot++) {
                 _speeds[slot] = status.Rpm[slot];
             }
+
+            _readingsForgotten = false;
         }
     }
 

@@ -420,6 +420,14 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
     }
 
     /// <summary>
+    /// Nothing to do: a failed list read is counted as a read in which nothing was heard, never
+    /// thrown, and a device not heard for <see cref="WirelessDevice.MaximumMissedReads"/> reads
+    /// already reads nothing (see <c>PublishReadings</c>).
+    /// </summary>
+    public void ForgetReadings() {
+    }
+
+    /// <summary>
     /// Read the receiver's list, at most once a second, and apply it: adopt newly bound devices, publish every fan's
     /// speed and every water block's coolant temperature, and mark devices lost or heard again.
     /// Nothing is read while the master is unknown, as <c>RefreshList</c> reads nothing without one.

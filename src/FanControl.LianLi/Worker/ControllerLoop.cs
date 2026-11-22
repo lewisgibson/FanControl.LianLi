@@ -22,6 +22,12 @@ internal sealed class ControllerLoop : IDisposable {
     // How long Dispose waits for the loop on its own.
     private const int DisposeTimeoutMs = 2000;
 
+    // How many polls in a row must fail before the controller's readings are forgotten, so FanControl
+    // shows nothing rather than the last speeds and temperature it was given: about half a minute at
+    // one poll a second, the same count after which a wireless device that is not heard reads nothing
+    // (WirelessDevice.MaximumMissedReads). A blip, or the reopen after a wake, stays well inside it.
+    internal const int ForgetReadingsAfterFailedPolls = 30;
+
     private readonly int _index;
     private readonly IFanDevice _controller;
     private readonly ILog _log;
@@ -96,7 +102,9 @@ internal sealed class ControllerLoop : IDisposable {
             }
 #pragma warning disable CA1031 // resilience: see above
             catch (Exception ex) {
-                _pollFaults.Failed(ex.Message);
+                if (_pollFaults.Failed(ex.Message) == ForgetReadingsAfterFailedPolls) {
+                    _controller.ForgetReadings();
+                }
             }
 #pragma warning restore CA1031
         }
@@ -213,11 +221,14 @@ internal sealed class ControllerLoop : IDisposable {
             _log = log;
         }
 
-        public void Failed(string message) {
+        // The number of ticks that have failed in this run of failures, this one included.
+        public int Failed(string message) {
             _failures++;
             if (_seen.Add(message)) {
                 _log.Write(string.Format(CultureInfo.InvariantCulture, "{0} err C{1}: {2}", _what, _index, message));
             }
+
+            return _failures;
         }
 
         public void Recovered() {

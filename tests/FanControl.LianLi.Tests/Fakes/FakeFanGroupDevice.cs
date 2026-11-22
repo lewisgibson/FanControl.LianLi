@@ -63,6 +63,9 @@ internal sealed class FakeFanGroupDevice : IFanDevice, IFanSpeedSource, IDrivenS
     public void PollRpm() {
     }
 
+    public void ForgetReadings() {
+    }
+
     public void ReplayOnReconnect(Func<bool> replay) {
     }
 

@@ -190,6 +190,22 @@ public sealed class FlexReceiverControllerTests {
     }
 
     [Fact]
+    public void ForgetReadings_ReadsNothing_UntilTheNextStatusRead() {
+        Rig rig = NewRig(Status(0));
+        FlexReceiverController controller = rig.Build();
+        rig.Answer(Status(2, 800, 810));
+        controller.PollRpm();
+
+        controller.ForgetReadings();
+        Assert.Null(controller.GetFanSpeed(0));
+        Assert.Null(controller.GetRpm(0));
+
+        rig.Answer(Status(2, 820, 830));
+        controller.PollRpm();
+        Assert.Equal(830f, controller.GetFanSpeed(1));
+    }
+
+    [Fact]
     public void PollRpm_WithNobodyListening_StillAddsTheSensors() {
         Rig rig = NewRig(Status(0));
         var controller = new FlexReceiverController(0, rig.Transport, FlexReceiverFamily.TlFlex, rig.Clock, rig.Logger, rig.State);

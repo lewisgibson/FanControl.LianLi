@@ -161,6 +161,15 @@ internal sealed class Galahad2Controller : IFanDevice {
         }
     }
 
+    /// <inheritdoc />
+    public void ForgetReadings() {
+        lock (_lock) {
+            for (int ch = 0; ch < Channels; ch++) {
+                _rpm[ch] = null;
+            }
+        }
+    }
+
     /// <summary>Write a handshake and decode the reply into the fan and pump RPM cache.</summary>
     public void PollRpm() {
         // Without an answer both readings stay as they were, as L-Connect leaves them.

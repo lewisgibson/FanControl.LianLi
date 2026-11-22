@@ -230,6 +230,13 @@ internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IF
     /// <summary>Build the controller if it is due, then let it push its targets.</summary>
     public void ApplyPending() => Reconnect()?.Inner.ApplyPending();
 
+    /// <summary>Forget the rebuilt controller's readings; one not rebuilt yet has none.</summary>
+    public void ForgetReadings() {
+        lock (_lock) {
+            _connection?.Inner.ForgetReadings();
+        }
+    }
+
     /// <summary>Build the controller if it is due, then let it poll.</summary>
     public void PollRpm() {
         Connection? connection = Reconnect();
