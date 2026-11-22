@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -108,6 +109,13 @@ internal sealed class HidTransport : IDeviceTransport {
     // The reopen schedule: an immediate first attempt, then a gap doubling from 10 faulted
     // transfers to 640 - about five seconds to five minutes at the worker's two transfers a tick.
     private readonly DoublingBackoff _reopenBackoff = new DoublingBackoff(10, 640);
+
+    // Each operation's name on this device, built once (see Describe).
+    private readonly Dictionary<string, string> _described = new Dictionary<string, string>(StringComparer.Ordinal);
+
+    // The last input report read's name and the id it is for, under _described (see InputReportOperation).
+    private string? _inputReportOperation;
+    private byte _inputReportId;
     private int _faultedTransfers;
 
     // Whether the last write's flush failed, so a run of them is logged once, not per write.
@@ -123,6 +131,10 @@ internal sealed class HidTransport : IDeviceTransport {
     // int (not bool) so the idempotency guard is a lock-free Interlocked.Exchange, as in the worker.
     private int _disposed;
 
+    // The two control transfers, made into delegates once rather than on every call.
+    private readonly ControlTransfer _setFeature;
+    private readonly ControlTransfer _getInputReport;
+
     private HidTransport(
         HidInterface device,
         IHidApi hid,
@@ -136,6 +148,8 @@ internal sealed class HidTransport : IDeviceTransport {
         _log = log;
         _calls = calls;
         _delay = delay;
+        _setFeature = hid.SetFeature;
+        _getInputReport = hid.GetInputReport;
 
         int featureReportLength = device.Capabilities.FeatureReportLength;
         _featureReportLength = featureReportLength > 0 ? featureReportLength : DefaultFeatureReportLength;
@@ -275,7 +289,7 @@ internal sealed class HidTransport : IDeviceTransport {
         // the RPM primer, and the lighting effect commands are all feature reports; byte 0 is the
         // report id (0xE0). Pad a short command prefix up to the device's feature report length, which
         // HidD_SetFeature requires (it rejects a buffer shorter than the report).
-        RunControlTransfer("HidD_SetFeature", _hid.SetFeature, PadToFeatureLength(report));
+        RunControlTransfer("HidD_SetFeature", _setFeature, PadToFeatureLength(report));
 
         // Match L-Connect's 20ms post-write settle so the next transfer is not dropped.
         _delay.Wait(WriteDelayMilliseconds);
@@ -286,7 +300,7 @@ internal sealed class HidTransport : IDeviceTransport {
             throw new ArgumentOutOfRangeException(nameof(length), "An input report holds at least its report id.");
         }
 
-        string operation = string.Format(CultureInfo.InvariantCulture, "HidD_GetInputReport(0x{0:X2})", reportId);
+        string operation = InputReportOperation(reportId);
         EnsureOpen(operation);
 
         // GET_REPORT(Input): byte 0 selects the report id, the device fills the rest.
@@ -294,7 +308,7 @@ internal sealed class HidTransport : IDeviceTransport {
         // answers this pull on demand even though it never streams input reports.
         byte[] buffer = new byte[length];
         buffer[0] = reportId;
-        RunControlTransfer(operation, _hid.GetInputReport, buffer);
+        RunControlTransfer(operation, _getInputReport, buffer);
         return buffer;
     }
 
@@ -571,7 +585,32 @@ internal sealed class HidTransport : IDeviceTransport {
         }
     }
 
-    private string Describe(string operation) => operation + " on " + _device.DevicePath;
+    // The name of an input report read, built once per report id: a hub's speed is read with the same
+    // one every second.
+    private string InputReportOperation(byte reportId) {
+        lock (_described) {
+            if (_inputReportOperation is null || _inputReportId != reportId) {
+                _inputReportOperation = string.Format(CultureInfo.InvariantCulture, "HidD_GetInputReport(0x{0:X2})", reportId);
+                _inputReportId = reportId;
+            }
+
+            return _inputReportOperation;
+        }
+    }
+
+    // The name of a call on this device, for the bound's log lines. Built once per operation, not on
+    // every transfer: a few transfers a second each built the same string for a log line that is
+    // almost never written.
+    private string Describe(string operation) {
+        lock (_described) {
+            if (!_described.TryGetValue(operation, out string? described)) {
+                described = operation + " on " + _device.DevicePath;
+                _described.Add(operation, described);
+            }
+
+            return described;
+        }
+    }
 
     // Dispose runs on the host's refresh thread (through the worker, once its loop has stopped), on the
     // plugin's own loop, reconnect and lighting threads, or on the composition root when an open fails

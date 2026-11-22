@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -81,6 +82,9 @@ internal sealed class WinUsbTransport : IDeviceTransport {
 
     private volatile bool _faulted;
     private readonly DoublingBackoff _reopenBackoff = new DoublingBackoff(10, 640);
+
+    // Each operation's name on this device, built once (see Describe).
+    private readonly Dictionary<string, string> _described = new Dictionary<string, string>(StringComparer.Ordinal);
     private int _faultedTransfers;
     private int _generation;
     private int _disposed;
@@ -510,7 +514,19 @@ internal sealed class WinUsbTransport : IDeviceTransport {
             error));
     }
 
-    private string Describe(string operation) => operation + " on " + _devicePath;
+    // The name of a call on this device, for the bound's log lines. Built once per operation, not on
+    // every transfer: a few transfers a second each built the same string for a log line that is
+    // almost never written.
+    private string Describe(string operation) {
+        lock (_described) {
+            if (!_described.TryGetValue(operation, out string? described)) {
+                described = operation + " on " + _devicePath;
+                _described.Add(operation, described);
+            }
+
+            return described;
+        }
+    }
 
     // Bounded, and never throwing, like HidTransport.Dispose and for the same reasons: it runs on the
     // host's refresh thread and on the plugin's own threads, a close can block on a wedged device, and
