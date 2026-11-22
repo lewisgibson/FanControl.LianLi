@@ -148,13 +148,16 @@ internal sealed class Galahad2Controller : IFanDevice {
                 _lastWriteUtc[ch] = writtenAt;
             }
 
-            _log.Write(string.Format(
-                CultureInfo.InvariantCulture,
-                "Set G{0}:{1} = {2}% ({3})",
-                _index,
-                ch == PumpChannel ? "pump" : "fan",
-                target,
-                changed ? "change" : "refresh"));
+            // The keepalive re-send every 15 seconds is not logged: only a change is. Logging every
+            // re-send filled FanControl's service log with thousands of identical lines a day.
+            if (changed) {
+                _log.Write(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Set G{0}:{1} = {2}%",
+                    _index,
+                    ch == PumpChannel ? "pump" : "fan",
+                    target));
+            }
         }
     }
 

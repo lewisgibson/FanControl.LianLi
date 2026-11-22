@@ -167,6 +167,24 @@ public class Galahad2ControllerTests {
     }
 
     [Fact]
+    public void ApplyPending_LogsAChange_ButNotTheKeepaliveResend() {
+        var clock = new FakeClock();
+        var logger = new FakeLogger();
+        var controller = new Galahad2Controller(0, new FakeDeviceTransport(), clock, logger);
+        controller.SetTarget(FanChannel, 50);
+        controller.ApplyPending();
+        int before = logger.Messages.Count;
+
+        clock.Advance(ChannelWriteDecision.RefreshInterval);
+        controller.ApplyPending();
+        Assert.Equal(before, logger.Messages.Count);
+
+        controller.SetTarget(FanChannel, 60);
+        controller.ApplyPending();
+        Assert.Equal("Set G0:fan = 60%", logger.Messages[logger.Messages.Count - 1]);
+    }
+
+    [Fact]
     public void ReleaseChannel_StopsKeepaliveForThatChannel() {
         var (controller, transport, clock) = NewController();
         controller.SetTarget(PumpChannel, 80);

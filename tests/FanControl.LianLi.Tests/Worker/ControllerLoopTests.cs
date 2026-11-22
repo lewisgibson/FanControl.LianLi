@@ -31,6 +31,40 @@ public sealed class ControllerLoopTests {
     }
 
     [Fact]
+    public void Tick_LogsEachDifferentFailureOnce_ThenTheRecoveryWithItsCount() {
+        var device = new FakeFanDevice("c0");
+        var logger = new FakeLogger();
+        using var loop = new ControllerLoop(0, device, logger, 1000);
+        device.ApplyFault = new InvalidOperationException("write refused");
+        device.PollFault = new InvalidOperationException("reopen pending");
+
+        loop.Tick();
+        loop.Tick();
+        device.PollFault = new InvalidOperationException("reopen failed");
+        loop.Tick();
+        device.PollFault = new InvalidOperationException("reopen pending");
+        loop.Tick();
+        device.ApplyFault = null;
+        device.PollFault = null;
+        loop.Tick();
+        loop.Tick();
+
+        Assert.Equal(
+            new[] {
+                "apply err C0: write refused",
+                "poll err C0: reopen pending",
+                "poll err C0: reopen failed",
+                "apply C0 recovered after 4 failed tick(s)",
+                "poll C0 recovered after 4 failed tick(s)",
+            },
+            logger.Messages);
+
+        device.PollFault = new InvalidOperationException("reopen pending");
+        loop.Tick();
+        Assert.Equal("poll err C0: reopen pending", logger.Messages[logger.Messages.Count - 1]);
+    }
+
+    [Fact]
     public void Tick_AppliesThenPolls() {
         var device = new FakeFanDevice("c0");
         using var loop = new ControllerLoop(0, device, new FakeLogger(), 1000);

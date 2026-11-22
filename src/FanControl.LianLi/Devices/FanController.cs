@@ -217,13 +217,16 @@ internal sealed class FanController : IFanDevice {
                 _lastWriteUtc[ch] = writtenAt;
             }
 
-            _log.Write(string.Format(
-                CultureInfo.InvariantCulture,
-                "Set C{0}:{1} = {2}% ({3})",
-                _index,
-                ch,
-                target,
-                changed ? "change" : "refresh"));
+            // The keepalive re-send every 15 seconds is not logged: only a change is. Logging every
+            // re-send filled FanControl's service log with thousands of identical lines a day.
+            if (changed) {
+                _log.Write(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Set C{0}:{1} = {2}%",
+                    _index,
+                    ch,
+                    target));
+            }
         }
     }
 

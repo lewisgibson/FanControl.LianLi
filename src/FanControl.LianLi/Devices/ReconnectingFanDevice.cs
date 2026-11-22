@@ -36,6 +36,7 @@ internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IF
     private readonly Action<ThreadStart> _runInBackground;
     private Func<bool>? _reconnectReplay;
     private int _attempts;
+    private string? _lastFailure;            // the last rebuild failure logged, so a repeat of it is not
     private bool _building;
     private bool _disposed;
 
@@ -273,8 +274,13 @@ internal sealed class ReconnectingFanDevice : IFanDevice, ITemperatureSource, IF
         }
 #pragma warning disable CA1031 // resilience: a failed rebuild is logged and retried on the backoff; an exception escaping this thread would end FanControl's process
         catch (Exception ex) {
-            _log.Write(string.Format(
-                CultureInfo.InvariantCulture, "C{0} reconnect attempt {1} failed: {2}", _index, _attempts, ex.Message));
+            // Logged when it first fails and when the reason changes, not on every retry: the line
+            // that says the controller was rebuilt gives the number of attempts it took.
+            if (ex.Message != _lastFailure) {
+                _lastFailure = ex.Message;
+                _log.Write(string.Format(
+                    CultureInfo.InvariantCulture, "C{0} reconnect attempt {1} failed: {2}", _index, _attempts, ex.Message));
+            }
         }
 #pragma warning restore CA1031
 

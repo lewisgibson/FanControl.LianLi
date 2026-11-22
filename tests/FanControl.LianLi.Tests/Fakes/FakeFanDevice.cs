@@ -84,9 +84,25 @@ internal sealed class FakeFanDevice : IFanDevice, ITemperatureSource {
 
     public float? GetRpm(int channel) => _rpm[channel];
 
-    public void ApplyPending() => ApplyCount++;
+    /// <summary>Thrown by every <see cref="ApplyPending"/> while set.</summary>
+    public Exception? ApplyFault { get; set; }
 
-    public void PollRpm() => PollCount++;
+    /// <summary>Thrown by every <see cref="PollRpm"/> while set.</summary>
+    public Exception? PollFault { get; set; }
+
+    public void ApplyPending() {
+        ApplyCount++;
+        if (ApplyFault != null) {
+            throw ApplyFault;
+        }
+    }
+
+    public void PollRpm() {
+        PollCount++;
+        if (PollFault != null) {
+            throw PollFault;
+        }
+    }
 
     public void ReplayOnReconnect(Func<bool> replay) => Replay = replay;
 

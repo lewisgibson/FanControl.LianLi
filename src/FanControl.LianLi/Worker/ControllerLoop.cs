@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Threading;
 using FanControl.LianLi.Devices;
@@ -36,6 +37,10 @@ internal sealed class ControllerLoop : IDisposable {
     private readonly object _signalGate = new object();
     private readonly object _tickGate = new object();
 
+    // Under _tickGate.
+    private readonly FaultLog _applyFaults;
+    private readonly FaultLog _pollFaults;
+
     private volatile bool _stop;
     private bool _started;
     private int _stopSignalled;
@@ -51,6 +56,8 @@ internal sealed class ControllerLoop : IDisposable {
         }
 
         _tickIntervalMs = tickIntervalMs;
+        _applyFaults = new FaultLog("apply", index, log);
+        _pollFaults = new FaultLog("poll", index, log);
         _thread = new Thread(Loop) { IsBackground = true, Name = "LianLiController" + index.ToString(CultureInfo.InvariantCulture) };
     }
 
@@ -75,19 +82,21 @@ internal sealed class ControllerLoop : IDisposable {
         lock (_tickGate) {
             try {
                 _controller.ApplyPending();
+                _applyFaults.Recovered();
             }
 #pragma warning disable CA1031 // resilience: a failed transfer on one device must not stall the others
             catch (Exception ex) {
-                _log.Write(string.Format(CultureInfo.InvariantCulture, "apply err C{0}: {1}", _index, ex.Message));
+                _applyFaults.Failed(ex.Message);
             }
 #pragma warning restore CA1031
 
             try {
                 _controller.PollRpm();
+                _pollFaults.Recovered();
             }
 #pragma warning disable CA1031 // resilience: see above
             catch (Exception ex) {
-                _log.Write(string.Format(CultureInfo.InvariantCulture, "poll err C{0}: {1}", _index, ex.Message));
+                _pollFaults.Failed(ex.Message);
             }
 #pragma warning restore CA1031
         }
@@ -184,6 +193,42 @@ internal sealed class ControllerLoop : IDisposable {
             }
         } finally {
             Release();
+        }
+    }
+
+    // A controller that stops answering fails every tick, once a second, until it comes back. Each
+    // different failure is logged the first time it happens in a run of failures, and the end of the
+    // run once with how many ticks failed, so a controller that is gone for an hour writes a few
+    // lines, not one a second.
+    private sealed class FaultLog {
+        private readonly HashSet<string> _seen = new HashSet<string>(StringComparer.Ordinal);
+        private readonly string _what;
+        private readonly int _index;
+        private readonly ILog _log;
+        private int _failures;
+
+        public FaultLog(string what, int index, ILog log) {
+            _what = what;
+            _index = index;
+            _log = log;
+        }
+
+        public void Failed(string message) {
+            _failures++;
+            if (_seen.Add(message)) {
+                _log.Write(string.Format(CultureInfo.InvariantCulture, "{0} err C{1}: {2}", _what, _index, message));
+            }
+        }
+
+        public void Recovered() {
+            if (_failures == 0) {
+                return;
+            }
+
+            _log.Write(string.Format(
+                CultureInfo.InvariantCulture, "{0} C{1} recovered after {2} failed tick(s)", _what, _index, _failures));
+            _failures = 0;
+            _seen.Clear();
         }
     }
 }

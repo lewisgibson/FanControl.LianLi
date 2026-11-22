@@ -105,6 +105,33 @@ public class ReconnectingFanDeviceTests {
     }
 
     [Fact]
+    public void ARepeatedRebuildFailureIsLoggedOnce_AndAChangedOneAgain() {
+        string[] failures = { "not yet", "not yet", "gone" };
+        int attempts = 0;
+        var logger = new FakeLogger();
+        var device = NewDevice(
+            () => {
+                attempts++;
+                if (attempts <= failures.Length) {
+                    throw new IOException(failures[attempts - 1]);
+                }
+
+                return new FakeFanDevice("ctl/0", "ctl/1");
+            },
+            logger);
+
+        for (int offer = 0; offer < 1000 && !device.IsConnected; offer++) {
+            device.ApplyPending();
+        }
+
+        Assert.True(device.IsConnected);
+        Assert.Equal(
+            new[] { "C0 reconnect attempt 1 failed: not yet", "C0 reconnect attempt 3 failed: gone" },
+            logger.Messages.Where(m => m.Contains("reconnect attempt", StringComparison.Ordinal)));
+        Assert.Contains(logger.Messages, m => m.Contains("rebuilt after 4 attempt(s)", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void TargetsSetWhileDisconnectedAreHandedOverOnTheRebuild() {
         var built = new FakeFanDevice("ctl/0", "ctl/1");
         var device = NewDevice(() => built);

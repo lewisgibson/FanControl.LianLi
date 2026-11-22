@@ -214,6 +214,26 @@ public class TlFanControllerTests {
     }
 
     [Fact]
+    public void ApplyPending_LogsAChange_ButNotTheKeepaliveResend() {
+        var transport = new FakeDeviceTransport();
+        transport.ReadReplies.Enqueue(HandshakeReply((0, 0, 1000)));
+        var clock = new FakeClock();
+        var logger = new FakeLogger();
+        var controller = new TlFanController(0, transport, clock, logger);
+        controller.SetTarget(0, 50);
+        controller.ApplyPending();
+        int before = logger.Messages.Count;
+
+        clock.Advance(ChannelWriteDecision.RefreshInterval);
+        controller.ApplyPending();
+        Assert.Equal(before, logger.Messages.Count);
+
+        controller.SetTarget(0, 60);
+        controller.ApplyPending();
+        Assert.Equal("Set T0:0/0 = 60%", logger.Messages[logger.Messages.Count - 1]);
+    }
+
+    [Fact]
     public void PollRpm_MatchesReplyRecordsBackToChannels() {
         var (controller, transport, _) = NewController((0, 0, 1000), (0, 1, 1100));
         transport.ReadReplies.Enqueue(HandshakeReply((0, 0, 1500), (0, 1, 1600)));
