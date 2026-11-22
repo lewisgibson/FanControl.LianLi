@@ -114,6 +114,26 @@ public class SensorTests {
     }
 
     [Fact]
+    public void ControlSensor_DoesNotWakeTheWorker_ForAFractionThatLeavesTheDutyTheSame() {
+        var (controller, _) = NewController();
+        int wakes = 0;
+        var control = new ControlSensor(controller, 0, () => wakes++, new WirelessProcessState(), null);
+
+        control.Set(43.2f);
+        control.Set(43.6f); // still 43% to the device
+        Assert.Equal(1, wakes);
+        control.Update();
+        Assert.Equal(43.6f, control.Value);
+
+        control.Set(44.1f);
+        Assert.Equal(2, wakes);
+
+        control.Reset();
+        control.Set(44.1f); // driven again after a release
+        Assert.Equal(3, wakes);
+    }
+
+    [Fact]
     public void ControlSensor_NullWake_Throws() {
         var (controller, _) = NewController();
 

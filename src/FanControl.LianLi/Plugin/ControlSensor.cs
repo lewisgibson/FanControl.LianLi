@@ -53,14 +53,17 @@ internal sealed class ControlSensor : IPluginControlSensor2 {
     public void Update() => Value = _commanded;
 
     // FanControl calls Set every update with whatever its curve says, usually the same value, so
-    // the worker is only woken for a value that differs from the last one.
+    // the worker is only woken for a duty that differs from the last one. The duty is the whole
+    // percent sent to the device: a curve moving from 43.2 to 43.6 changes nothing to send, and
+    // waking for it would only poll every controller early.
     public void Set(float val) {
-        _controller.SetTarget(_channel, (int)val);
+        int duty = (int)val;
+        _controller.SetTarget(_channel, duty);
         if (_chain != null) {
-            _chains.SetChainTarget(_chain, (int)val);
+            _chains.SetChainTarget(_chain, duty);
         }
 
-        bool changed = _commanded != val;
+        bool changed = _commanded is not float previous || (int)previous != duty;
         _commanded = val;
         if (changed) {
             _changed();
