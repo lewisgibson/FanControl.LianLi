@@ -165,7 +165,6 @@ internal sealed class HydroShiftCurveController : IFanDevice, ITemperatureSource
             return;
         }
 
-        bool changed = target != lastWritten;
         int rpm = HydroShiftCurveProtocol.PumpRpmFromDuty(target);
         int outputValue = HydroShiftCurveProtocol.OutputValueForRpm(rpm);
         Send(HydroShiftCurveProtocol.EncodeSetPump(outputValue), "set-pump", ref _setPumpReplyMissing);
@@ -176,8 +175,9 @@ internal sealed class HydroShiftCurveController : IFanDevice, ITemperatureSource
             _lastWriteUtc = writtenAt;
         }
 
-        // The re-send every two seconds is not logged: only a change is, with what was sent for it.
-        if (changed) {
+        // Only the first speed after the pump is set up (at start or after a reconnect) is logged, with
+        // what was sent for it. Each later change and the re-send every two seconds are not.
+        if (lastWritten < 0) {
             _log.Write(string.Format(
                 CultureInfo.InvariantCulture,
                 "Set H{0}:pump = {1}% ({2} rpm, output {3})",

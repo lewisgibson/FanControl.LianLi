@@ -214,7 +214,7 @@ public class TlFanControllerTests {
     }
 
     [Fact]
-    public void ApplyPending_LogsAChange_ButNotTheKeepaliveResend() {
+    public void ApplyPending_LogsTheFirstSpeed_ButNotALaterChangeOrTheKeepaliveResend() {
         var transport = new FakeDeviceTransport();
         transport.ReadReplies.Enqueue(HandshakeReply((0, 0, 1000)));
         var clock = new FakeClock();
@@ -222,15 +222,15 @@ public class TlFanControllerTests {
         var controller = new TlFanController(0, transport, clock, logger);
         controller.SetTarget(0, 50);
         controller.ApplyPending();
+        Assert.Contains("Set T0:0/0 = 50%", logger.Messages);
         int before = logger.Messages.Count;
 
         clock.Advance(ChannelWriteDecision.RefreshInterval);
         controller.ApplyPending();
-        Assert.Equal(before, logger.Messages.Count);
-
         controller.SetTarget(0, 60);
         controller.ApplyPending();
-        Assert.Equal("Set T0:0/0 = 60%", logger.Messages[logger.Messages.Count - 1]);
+
+        Assert.Equal(before, logger.Messages.Count);
     }
 
     [Fact]

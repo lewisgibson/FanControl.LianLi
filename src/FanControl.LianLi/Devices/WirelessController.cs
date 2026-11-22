@@ -1829,14 +1829,16 @@ internal sealed class WirelessController : IFanDevice, ITemperatureSource, IFanS
         }
     }
 
-    // Caller holds _lock, and writes messages once it is released. Logged when a control's duty
-    // changes, not every second it is resent.
+    // Caller holds _lock, and writes messages once it is released. Logged when a control is first
+    // driven and when it is released, not on each change of its duty (a curve moves it hundreds of
+    // times a day) or every second it is resent.
     private void LogDutyChange(WirelessDevice device, Control control, int duty, List<string> messages) {
-        if (duty == control.LoggedDuty) {
+        bool wasDriven = control.LoggedDuty >= 0;
+        control.LoggedDuty = duty;
+        if (wasDriven == duty >= 0) {
             return;
         }
 
-        control.LoggedDuty = duty;
         messages.Add(duty < 0
             ? string.Format(CultureInfo.InvariantCulture, "W{0}:{1} {2} released", _index, device.MacText, control.Part)
             : string.Format(CultureInfo.InvariantCulture, "Set W{0}:{1} {2} = {3}%", _index, device.MacText, control.Part, duty));

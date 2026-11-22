@@ -208,7 +208,6 @@ internal sealed class FanController : IFanDevice {
                 continue;
             }
 
-            bool changed = target != lastWritten;
             WriteSpeed(ch, target);
 
             DateTime writtenAt = _clock.UtcNow;
@@ -217,9 +216,10 @@ internal sealed class FanController : IFanDevice {
                 _lastWriteUtc[ch] = writtenAt;
             }
 
-            // The keepalive re-send every 15 seconds is not logged: only a change is. Logging every
-            // re-send filled FanControl's service log with thousands of identical lines a day.
-            if (changed) {
+            // Only the first speed after the controller is set up (at start or after a reconnect) is
+            // logged, to show it is being driven. Each later change and the 15-second keepalive
+            // re-send are not: a curve moves the speed hundreds of times a day.
+            if (lastWritten < 0) {
                 _log.Write(string.Format(
                     CultureInfo.InvariantCulture,
                     "Set C{0}:{1} = {2}%",

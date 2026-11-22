@@ -295,20 +295,21 @@ internal sealed class FlexReceiverController : IFanDevice, IFanSpeedSource, IDri
         }
 
         DateTime writtenAt = _clock.UtcNow;
-        bool changed;
+        bool first;
         bool afterReconnect;
         lock (_lock) {
             _lastWritten = target;
             _lastWriteUtc = writtenAt;
-            changed = target != _loggedDuty;
+            first = _loggedDuty < 0;
             _loggedDuty = target;
             afterReconnect = _resendAfterReconnect;
             _resendAfterReconnect = false;
         }
 
-        // The keepalive re-send is not logged: only a change is, with what was sent for it, and the
-        // one re-send that follows a reconnect, since that is the receiver being driven again.
-        if (changed) {
+        // Only the first speed is logged, with what was sent for it, and the one re-send that follows a
+        // reconnect, since that is the receiver being driven again. Each later change and the keepalive
+        // re-send are not: a curve moves the speed hundreds of times a day.
+        if (first) {
             _log.Write(string.Format(
                 CultureInfo.InvariantCulture,
                 "Set F{0}:{1} = {2}% (PWM {3} to {4} fan(s))",

@@ -124,7 +124,7 @@ C:\Windows\System32\config\systemprofile\AppData\Local\FanControl.LianLi
 
 The folder also holds `remembered-controllers.json`, the controllers the plugin has seen before; attach it with the log when you report a bug. The log is kept to a bounded size; the previous one is `plugin.log.1` beside it. FanControl's own `service_log.txt`, in its Program Files folder, records a plugin that failed to load at all.
 
-A healthy log starts with `Initialize: standard build, scan located N HID interface(s), M controller(s)` (or `ARGB build` or `Lighting build`), then a `Set C{i}:{ch} = N%` line each time FanControl changes a fan's speed. The plugin re-sends every speed every 15 seconds so the controller does not fall back to full speed, but it does not log those re-sends. `M` can be smaller than `N` when a controller exposes more than one USB interface; that is normal.
+A healthy log starts with `Initialize: standard build, scan located N HID interface(s), M controller(s)` (or `ARGB build` or `Lighting build`), then one `Set C{i}:{ch} = N%` line for each fan, the first speed FanControl gives it. Later changes of speed are not logged, and neither is the re-send of every speed every 15 seconds that stops the controller falling back to full speed. `M` can be smaller than `N` when a controller exposes more than one USB interface; that is normal.
 
 ## Reporting a bug
 

@@ -191,21 +191,21 @@ public class FanControllerTests {
 #endif
 
     [Fact]
-    public void ApplyPending_LogsAChange_ButNotTheKeepaliveResend() {
+    public void ApplyPending_LogsTheFirstSpeed_ButNotALaterChangeOrTheKeepaliveResend() {
         var clock = new FakeClock();
         var logger = new FakeLogger();
         var controller = new FanController(0, new FakeDeviceTransport(), new SlProtocol(), NoStartStop, clock, logger);
         controller.SetTarget(0, 50);
         controller.ApplyPending();
+        Assert.Contains("Set C0:0 = 50%", logger.Messages);
         int before = logger.Messages.Count;
 
         clock.Advance(ChannelWriteDecision.RefreshInterval);
         controller.ApplyPending();
-        Assert.Equal(before, logger.Messages.Count);
-
         controller.SetTarget(0, 60);
         controller.ApplyPending();
-        Assert.Equal("Set C0:0 = 60%", logger.Messages[logger.Messages.Count - 1]);
+
+        Assert.Equal(before, logger.Messages.Count);
     }
 
     [Fact]
