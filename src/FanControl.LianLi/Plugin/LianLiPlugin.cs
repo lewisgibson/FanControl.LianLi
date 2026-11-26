@@ -1119,7 +1119,7 @@ public sealed class LianLiPlugin : IPlugin3, IDisposable {
             transport = _enumerator.Open(info);
             IFanDevice controller;
             if (kind == DeviceKind.Galahad2) {
-                controller = new Galahad2Controller(index, transport, _clock, _log);
+                controller = new Galahad2Controller(index, transport, info.ProductId, _clock, _log);
             } else {
                 var hub = new TlFanController(index, transport, _clock, _log);
                 hub.TopologyChanged += (_, _) => OnSensorsReported(plan, index, hub, "a TL fan answered after the scan");

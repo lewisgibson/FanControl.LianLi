@@ -41,6 +41,9 @@ public class LianLiPluginTests {
     private static LocatedDevice Galahad(int index)
         => new LocatedDevice(0x0416, 0x7371, "fake/galahad/" + index, null);
 
+    private static LocatedDevice GalahadVision()
+        => new LocatedDevice(0x0416, 0x7391, "fake/galahad-vision", null);
+
     private static LocatedDevice HydroShiftCurve()
         => new LocatedDevice(0x0416, 0x8051, "fake/hydroshift-curve", null);
 
@@ -283,6 +286,29 @@ public class LianLiPluginTests {
         Assert.Equal(2, container.FanSensors.Count);
         Assert.Contains(container.ControlSensors, s => s.Name.Contains("Fan"));
         Assert.Contains(container.ControlSensors, s => s.Name.Contains("Pump"));
+        Assert.Empty(container.TempSensors); // the Trinity's reply carries no coolant temperature
+
+        plugin.Close();
+    }
+
+    [Fact]
+    public void InitializeThenLoad_RegistersTheCoolantTemperatureForAGalahadVision() {
+        // A 0x7391 Galahad II Vision LCD is built as a Galahad, and its handshake reply also carries
+        // the coolant temperature, registered as a curve source beside the fan and pump.
+        var enumerator = new FakeEnumerator(GalahadVision()) {
+            ConfigureTransport = (_, transport) => transport.ReplyFor = _ => CommandPacket.Build(0x81, 0x05, 0xA0, 0x0A, 0x6E, 0x01, 0x25, 0x08),
+        };
+        using LianLiPlugin plugin = NewPlugin(enumerator);
+
+        plugin.Initialize();
+        var container = new FakeSensorsContainer();
+        plugin.Load(container);
+
+        Assert.Equal(2, container.ControlSensors.Count);
+        Assert.Equal(2, container.FanSensors.Count);
+        IPluginSensor coolant = Assert.Single(container.TempSensors);
+        Assert.Equal("LianLi/0/coolant/temp", coolant.Id);
+        Assert.Equal("Lian Li Galahad #1 Coolant", coolant.Name);
 
         plugin.Close();
     }

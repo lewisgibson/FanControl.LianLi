@@ -5,8 +5,8 @@ namespace FanControl.LianLi.Tests.Protocol;
 
 /// <summary>
 /// Byte-level tests for the Galahad II AIO protocol: the set-fan and set-pump packets, the pump
-/// safety floor that prevents a stopped pump, the motherboard-sync flag, and the big-endian
-/// fan/pump RPM handshake decode.
+/// safety floor that prevents a stopped pump, the motherboard-sync flag, the big-endian
+/// fan/pump RPM handshake decode, and the Vision LCD's coolant temperature in the same reply.
 /// </summary>
 public sealed class Galahad2ProtocolTests {
     [Theory]
@@ -54,7 +54,69 @@ public sealed class Galahad2ProtocolTests {
 
         Assert.Equal(1200, reading.FanRpm);
         Assert.Equal(2800, reading.PumpRpm);
+        Assert.Null(reading.CoolantTemperature); // a 4-byte payload carries no coolant fields
     }
+
+    // A Galahad II Vision LCD (0x7395) answer captured by liquidctl (tests/test_ga2_lcd.py): fan 1440
+    // rpm, pump 2670 rpm, coolant valid, 37 and 8 tenths degrees.
+    [Fact]
+    public void DecodeHandshake_AVisionReply_ReadsTheCoolantTemperature() {
+        byte[] reply = new byte[64];
+        new byte[] { 0x01, 0x81, 0x00, 0x00, 0x00, 0x07, 0x05, 0xA0, 0x0A, 0x6E, 0x01, 0x25, 0x08 }.CopyTo(reply, 0);
+
+        Galahad2Reading reading = Galahad2Protocol.DecodeHandshake(reply);
+
+        Assert.Equal(1440, reading.FanRpm);
+        Assert.Equal(2670, reading.PumpRpm);
+        Assert.Equal(37.8f, reading.CoolantTemperature);
+    }
+
+    [Fact]
+    public void DecodeHandshake_TheValidFlagClear_HasNoCoolantTemperature() {
+        byte[] reply = CommandPacket.Build(0x81, 0x05, 0xA0, 0x0A, 0x6E, 0x00, 0x25, 0x08);
+
+        Galahad2Reading reading = Galahad2Protocol.DecodeHandshake(reply);
+
+        Assert.Null(reading.CoolantTemperature);
+        Assert.Equal(1440, reading.FanRpm);
+        Assert.Equal(2670, reading.PumpRpm);
+    }
+
+    // A payload declared shorter than seven bytes has no coolant fields, whatever the bytes after it hold.
+    [Fact]
+    public void DecodeHandshake_APayloadShorterThanSevenBytes_HasNoCoolantTemperature() {
+        byte[] reply = CommandPacket.Build(0x81, 0x05, 0xA0, 0x0A, 0x6E, 0x01, 0x25);
+        reply[12] = 0x08;
+
+        Galahad2Reading reading = Galahad2Protocol.DecodeHandshake(reply);
+
+        Assert.Null(reading.CoolantTemperature);
+        Assert.Equal(1440, reading.FanRpm);
+        Assert.Equal(2670, reading.PumpRpm);
+    }
+
+    // Tenths 0-9 are added; one above 9 is read differently by liquidctl (byte / 10) and
+    // lian-li-linux (byte % 10), so it adds nothing and the whole degrees stand alone.
+    [Theory]
+    [InlineData(0x25, 0x00, 37.0f)]
+    [InlineData(0x25, 0x09, 37.9f)]
+    [InlineData(0x25, 0x0A, 37.0f)]
+    [InlineData(0x25, 0xFF, 37.0f)]
+    [InlineData(0x00, 0x05, 0.5f)]
+    public void DecodeHandshake_TheTenthsByte_AddsOnlyZeroToNine(byte whole, byte tenths, float expected) {
+        byte[] reply = CommandPacket.Build(0x81, 0x05, 0xA0, 0x0A, 0x6E, 0x01, whole, tenths);
+
+        Assert.Equal(expected, Galahad2Protocol.DecodeHandshake(reply).CoolantTemperature);
+    }
+
+    [Theory]
+    [InlineData(0x7391, true)]  // Galahad II Vision LCD
+    [InlineData(0x7395, true)]  // Galahad II Vision LCD (alternate pid)
+    [InlineData(0x7371, false)] // Galahad II Trinity (performance)
+    [InlineData(0x7373, false)] // Galahad II Trinity (regular)
+    [InlineData(0x7398, false)] // HydroShift LCD
+    public void ReportsCoolant_OnlyTheVisionLcd(int productId, bool expected)
+        => Assert.Equal(expected, Galahad2Protocol.ReportsCoolant(productId));
 
     // Galahad2TrinityDevice.GetHandshakeInfo and Galahad2VisionDevice.ReadACommandPacket take a packet
     // as RPM only when it is a frame echoing 0x81.

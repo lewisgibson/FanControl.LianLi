@@ -223,7 +223,7 @@ public sealed class ControllerReconnectTests {
         var device = new HidInterface(0x0416, 0x7371, GalahadPath, new HidCapabilities(0xFF1B, 64, 64, 0));
         using HidTransport transport = HidTransport.Open(device, hid, _log, NewGate(), new FakeTransferDelay(), CancellationToken.None);
         var look = new List<KeyValuePair<bool, byte[]>> { new KeyValuePair<bool, byte[]>(false, new byte[] { 0x01, 0x77, 1, 2, 3 }) };
-        var controller = new Galahad2Controller(0, transport, _clock, _log);
+        var controller = new Galahad2Controller(0, transport, device.ProductId, _clock, _log);
         controller.ReplayOnReconnect(() => Replay(transport, look));
         controller.SetTarget(0, 50);
         using var loop = new ControllerLoop(0, controller, _log, 1000);
