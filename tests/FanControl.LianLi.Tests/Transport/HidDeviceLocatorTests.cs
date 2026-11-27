@@ -20,10 +20,11 @@ public class HidDeviceLocatorTests {
     private const string UniInstance = @"HID\VID_0CF2&PID_A102&MI_01\7&1&0&0000";
     private const string CommandPath = @"\\?\hid#vid_0416&pid_7372&mi_01#command";
     private const string KeyboardPath = @"\\?\hid#vid_0416&pid_7372&mi_00#keyboard";
+    private const string VisionPath = @"\\?\hid#vid_0416&pid_7395#vision";
     private const string OtherVendorPath = @"\\?\hid#vid_046d&pid_c52b&mi_00#mouse";
     private const string BluetoothPath = @"\\?\hid#{00001124-0000-1000-8000-00805f9b34fb}_vid&0002046d_pid&b01a#headset";
     private static readonly IReadOnlyList<int> Vendors = new[] { 0x0CF2, 0x0416 };
-    private static readonly IReadOnlyList<int> Products = new[] { 0xA102, 0x7372 };
+    private static readonly IReadOnlyList<int> Products = new[] { 0xA102, 0x7372, 0x7395 };
 
     private readonly FakeHidApi _hid = new FakeHidApi();
     private readonly FakeConfigurationManagerApi _configurationManager = new FakeConfigurationManagerApi();
@@ -206,6 +207,28 @@ public class HidDeviceLocatorTests {
         _hid.Capabilities[KeyboardPath] = new HidCapabilities(0x0001, 9, 2, 0);
 
         Assert.Equal(CommandPath, Assert.Single(Locator().Locate(Vendors, Products, CancellationToken.None)).DevicePath);
+    }
+
+    // The Galahad II Vision LCD has one collection, on usage page 0xFF1A, and no 0xFF1B interface.
+    [Fact]
+    public void Locate_KeepsTheSingleCollectionOfAGalahadIIVisionLcd() {
+        List(VisionPath);
+        Present(VisionPath, 0x0416, 0x7395);
+        _hid.Capabilities[VisionPath] = new HidCapabilities(0xFF1A, 512, 1024, 0);
+
+        LocatedDevice located = Assert.Single(Locator().Locate(Vendors, Products, CancellationToken.None));
+
+        Assert.Equal((0x0416, 0x7395, VisionPath), (located.VendorId, located.ProductId, located.DevicePath));
+        Assert.Equal(1024, located.MaxOutputReportLength);
+    }
+
+    [Fact]
+    public void Locate_DropsAUsagePage0xFF1AInterfaceOfAnyOther0416Device() {
+        List(CommandPath);
+        Present(CommandPath, 0x0416, 0x7372);
+        _hid.Capabilities[CommandPath] = new HidCapabilities(0xFF1A, 512, 1024, 0);
+
+        Assert.Empty(Locator().Locate(Vendors, Products, CancellationToken.None));
     }
 
     [Fact]

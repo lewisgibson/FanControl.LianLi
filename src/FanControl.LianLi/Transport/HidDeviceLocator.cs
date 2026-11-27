@@ -166,9 +166,10 @@ internal sealed class HidDeviceLocator {
             }
         }
 
-        // Only the 0x0416 family is filtered on its usage page; the Uni family is always kept.
+        // Only the 0x0416 family is filtered on its usage page, which for the Galahad II Vision LCD
+        // depends on the product; the Uni family is always kept.
         int? usagePage = CommandInterfaceFilter.RequiresUsageFilter(vendorId) ? capabilities?.UsagePage : null;
-        if (!CommandInterfaceFilter.Keep(vendorId, usagePage)) {
+        if (!CommandInterfaceFilter.Keep(vendorId, productId, usagePage)) {
             return null;
         }
 

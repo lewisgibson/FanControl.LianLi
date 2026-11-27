@@ -32,7 +32,8 @@ internal sealed class DeviceCatalog {
     // the SAME 64-byte command packet as the Galahad II Trinity: handshake 0x81, SetPump 0x8A, SetFan
     // 0x8B, fan+pump RPM at the same handshake-reply offsets (verified against the decompile). Under
     // host (manual) control their fan/pump write payload is byte-identical to Trinity's, so they reuse
-    // Galahad2Protocol/Galahad2Controller unchanged - only the LCD screen (out of scope) differs.
+    // Galahad2Protocol/Galahad2Controller unchanged - only the LCD screen (out of scope) differs, and
+    // the Vision's handshake reply also carries the coolant temperature (Galahad2Protocol.ReportsCoolant).
     private static readonly int[] Galahad2ProductIds =
     {
         Galahad2PerformanceProductId, Galahad2RegularProductId,

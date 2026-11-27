@@ -11,12 +11,33 @@ namespace FanControl.LianLi.Tests.Devices;
 public class Galahad2ControllerTests {
     private const int FanChannel = 0;
     private const int PumpChannel = 1;
+    private const int TrinityProductId = 0x7371;
+    private const int VisionProductId = 0x7391;
 
     private static (Galahad2Controller controller, FakeDeviceTransport transport, FakeClock clock) NewController() {
         var transport = new FakeDeviceTransport();
         var clock = new FakeClock();
-        var controller = new Galahad2Controller(0, transport, clock, new FakeLogger());
+        var controller = new Galahad2Controller(0, transport, TrinityProductId, clock, new FakeLogger());
         return (controller, transport, clock);
+    }
+
+    private static (Galahad2Controller controller, FakeDeviceTransport transport) NewCooler(int productId = VisionProductId) {
+        var transport = new FakeDeviceTransport();
+        var controller = new Galahad2Controller(0, transport, productId, new FakeClock(), new FakeLogger());
+        return (controller, transport);
+    }
+
+    // A Vision LCD's handshake reply: the RPM pairs, then the coolant valid flag, whole degrees and tenths.
+    private static byte[] VisionHandshakeReply(int fanRpm, int pumpRpm, byte valid, byte whole, byte tenths) {
+        return CommandPacket.Build(
+            0x81,
+            (byte)((fanRpm >> 8) & 0xFF),
+            (byte)(fanRpm & 0xFF),
+            (byte)((pumpRpm >> 8) & 0xFF),
+            (byte)(pumpRpm & 0xFF),
+            valid,
+            whole,
+            tenths);
     }
 
     // The handshake reply frame: fan rpm at payload 0-1, pump rpm at payload 2-3, big-endian.
@@ -170,7 +191,7 @@ public class Galahad2ControllerTests {
     public void ApplyPending_LogsTheFirstSpeed_ButNotALaterChangeOrTheKeepaliveResend() {
         var clock = new FakeClock();
         var logger = new FakeLogger();
-        var controller = new Galahad2Controller(0, new FakeDeviceTransport(), clock, logger);
+        var controller = new Galahad2Controller(0, new FakeDeviceTransport(), TrinityProductId, clock, logger);
         controller.SetTarget(FanChannel, 50);
         controller.ApplyPending();
         Assert.Contains("Set G0:fan = 50%", logger.Messages);
@@ -267,7 +288,7 @@ public class Galahad2ControllerTests {
     public void PollRpm_WithNoHandshakeReply_IsLoggedOnce_AndOnceWhenOneComesAgain() {
         var transport = new FakeDeviceTransport();
         var logger = new FakeLogger();
-        var controller = new Galahad2Controller(0, transport, new FakeClock(), logger);
+        var controller = new Galahad2Controller(0, transport, TrinityProductId, new FakeClock(), logger);
         transport.ReadReplies.Enqueue(HandshakeReply(1200, 2700));
         controller.PollRpm();
         transport.ReplyFor = _ => CommandPacket.Build(0x8B, 0x00, 0x32);
@@ -293,7 +314,7 @@ public class Galahad2ControllerTests {
     public void PollRpm_TheFirstAnswerAfterAMiss_IsLoggedAsTheFirst() {
         var transport = new FakeDeviceTransport();
         var logger = new FakeLogger();
-        var controller = new Galahad2Controller(0, transport, new FakeClock(), logger);
+        var controller = new Galahad2Controller(0, transport, TrinityProductId, new FakeClock(), logger);
 
         controller.PollRpm();
         Assert.Null(controller.GetRpm(FanChannel)); // a cooler that never answered has no reading, not 0
@@ -316,7 +337,7 @@ public class Galahad2ControllerTests {
         var transport = new FakeDeviceTransport();
         var clock = new FakeClock();
         var logger = new FakeLogger();
-        var controller = new Galahad2Controller(0, transport, clock, logger);
+        var controller = new Galahad2Controller(0, transport, TrinityProductId, clock, logger);
         transport.ReplyFor = _ => {
             clock.Advance(TimeSpan.FromMilliseconds(200));
             return CommandPacket.Build(0x8A, 0x00, 0x50);
@@ -336,7 +357,7 @@ public class Galahad2ControllerTests {
     public void PollRpm_AnImplausibleFirstReading_LeavesNoReading() {
         var transport = new FakeDeviceTransport();
         var logger = new FakeLogger();
-        var controller = new Galahad2Controller(0, transport, new FakeClock(), logger);
+        var controller = new Galahad2Controller(0, transport, TrinityProductId, new FakeClock(), logger);
         transport.ReadReplies.Enqueue(HandshakeReply(50000, 2800));
 
         controller.PollRpm();
@@ -384,7 +405,7 @@ public class Galahad2ControllerTests {
     public void PollRpm_LogsImplausibleOnsetOnce_ThenRecovery() {
         var transport = new FakeDeviceTransport();
         var logger = new FakeLogger();
-        var controller = new Galahad2Controller(0, transport, new FakeClock(), logger);
+        var controller = new Galahad2Controller(0, transport, TrinityProductId, new FakeClock(), logger);
         transport.ReadReplies.Enqueue(HandshakeReply(1500, 2800));
         transport.ReadReplies.Enqueue(HandshakeReply(1500, 50000));
         transport.ReadReplies.Enqueue(HandshakeReply(1500, 50000));
@@ -401,11 +422,11 @@ public class Galahad2ControllerTests {
 
     [Fact]
     public void Constructor_RejectsMissingDependencies() {
-        Assert.Throws<ArgumentNullException>(() => new Galahad2Controller(0, null!, new FakeClock(), new FakeLogger()));
-        Assert.Throws<ArgumentNullException>(() => new Galahad2Controller(0, new FakeDeviceTransport(), null!, new FakeLogger()));
-        Assert.Throws<ArgumentNullException>(() => new Galahad2Controller(0, new FakeDeviceTransport(), new FakeClock(), null!));
+        Assert.Throws<ArgumentNullException>(() => new Galahad2Controller(0, null!, TrinityProductId, new FakeClock(), new FakeLogger()));
+        Assert.Throws<ArgumentNullException>(() => new Galahad2Controller(0, new FakeDeviceTransport(), TrinityProductId, null!, new FakeLogger()));
+        Assert.Throws<ArgumentNullException>(() => new Galahad2Controller(0, new FakeDeviceTransport(), TrinityProductId, new FakeClock(), null!));
         Assert.Throws<ArgumentNullException>(
-            () => new Galahad2Controller(0, new FakeDeviceTransport(), new FakeClock(), new FakeLogger()).ReplayOnReconnect(null!));
+            () => new Galahad2Controller(0, new FakeDeviceTransport(), TrinityProductId, new FakeClock(), new FakeLogger()).ReplayOnReconnect(null!));
     }
 
     [Fact]
@@ -426,7 +447,7 @@ public class Galahad2ControllerTests {
     public void PollRpm_BothChannelsChangingStateInOnePoll_AreBothLogged() {
         var transport = new FakeDeviceTransport();
         var logger = new FakeLogger();
-        var controller = new Galahad2Controller(0, transport, new FakeClock(), logger);
+        var controller = new Galahad2Controller(0, transport, TrinityProductId, new FakeClock(), logger);
         transport.ReadReplies.Enqueue(HandshakeReply(50000, 50000));
         transport.ReadReplies.Enqueue(HandshakeReply(1500, 2800));
 
@@ -435,5 +456,72 @@ public class Galahad2ControllerTests {
 
         Assert.Equal(2, logger.Messages.Count(m => m.Contains("implausible rpm")));
         Assert.Equal(2, logger.Messages.Count(m => m.Contains("rpm recovered")));
+    }
+
+    [Theory]
+    [InlineData(0x7391)]
+    [InlineData(0x7395)]
+    public void AVisionLcd_ReportsTheCoolantTemperature_UnderItsOwnId(int productId) {
+        var (controller, transport) = NewCooler(productId);
+        transport.ReadReplies.Enqueue(VisionHandshakeReply(1440, 2670, 0x01, 37, 8));
+
+        Assert.Null(controller.GetTemperature(0)); // not measured until the cooler answers
+        controller.PollRpm();
+
+        Assert.Equal(1, controller.TemperatureCount);
+        TemperatureDescriptor coolant = controller.DescribeTemperature(0);
+        Assert.Equal("LianLi/0/coolant/temp", coolant.Id);
+        Assert.Equal("Lian Li Galahad #1 Coolant", coolant.Name);
+        Assert.Equal(37.8f, controller.GetTemperature(0));
+        Assert.Equal(1440f, controller.GetRpm(FanChannel));
+        Assert.Equal(2670f, controller.GetRpm(PumpChannel));
+    }
+
+    // A reply whose valid flag is clear has no coolant reading: the last one is not kept, so a curve
+    // on it does not follow a stale value.
+    [Fact]
+    public void AVisionLcd_AReplyWithTheValidFlagClear_LeavesTheCoolantNotMeasured() {
+        var (controller, transport) = NewCooler();
+        transport.ReadReplies.Enqueue(VisionHandshakeReply(1440, 2670, 0x01, 37, 8));
+        controller.PollRpm();
+
+        transport.ReadReplies.Enqueue(VisionHandshakeReply(1440, 2670, 0x00, 37, 8));
+        controller.PollRpm();
+
+        Assert.Null(controller.GetTemperature(0));
+        Assert.Equal(1440f, controller.GetRpm(FanChannel));
+    }
+
+    // A handshake that goes unanswered leaves the coolant as it was, as it does the RPM; forgetting
+    // the readings forgets it too.
+    [Fact]
+    public void AVisionLcd_KeepsTheCoolantThroughAMissedHandshake_AndForgetsItWithTheReadings() {
+        var (controller, transport) = NewCooler();
+        transport.ReadReplies.Enqueue(VisionHandshakeReply(1440, 2670, 0x01, 37, 8));
+        controller.PollRpm();
+
+        controller.PollRpm(); // nothing answers
+        Assert.Equal(37.8f, controller.GetTemperature(0));
+
+        controller.ForgetReadings();
+        Assert.Null(controller.GetTemperature(0));
+    }
+
+    // The Trinity's reply has bytes where the Vision keeps the coolant, but they are not a
+    // temperature: it gets no temperature sensor, and its reply is never read as one.
+    [Theory]
+    [InlineData(0x7371)]
+    [InlineData(0x7373)]
+    [InlineData(0x7398)]
+    public void ACoolerOtherThanTheVision_ReportsNoTemperature(int productId) {
+        var (controller, transport) = NewCooler(productId);
+        transport.ReadReplies.Enqueue(VisionHandshakeReply(1440, 2670, 0x01, 0x01, 0x01));
+
+        controller.PollRpm();
+
+        Assert.Equal(0, controller.TemperatureCount);
+        Assert.Null(controller.GetTemperature(0));
+        Assert.Equal(1440f, controller.GetRpm(FanChannel));
+        Assert.Equal(2670f, controller.GetRpm(PumpChannel));
     }
 }

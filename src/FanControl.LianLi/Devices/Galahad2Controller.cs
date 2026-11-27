@@ -13,12 +13,15 @@ namespace FanControl.LianLi.Devices;
 /// in-memory state and every USB transfer happens on the worker-thread methods, but the 0x0416
 /// family writes a command packet and reads its reply instead of pulling an input report: a
 /// keepalive write per channel, and an RPM poll that writes a handshake and reads to the answer. The
-/// pump duty is floored in <see cref="Galahad2Protocol"/> so a curve can never stop the pump.
+/// pump duty is floored in <see cref="Galahad2Protocol"/> so a curve can never stop the pump. On a
+/// Galahad II Vision LCD the same answer carries the coolant temperature, published as an
+/// <see cref="ITemperatureSource"/>; every other cooler of the family reports no temperature.
 /// </summary>
-internal sealed class Galahad2Controller : IFanDevice {
+internal sealed class Galahad2Controller : IFanDevice, ITemperatureSource {
     private const int FanChannel = 0;
     private const int PumpChannel = 1;
     private const int Channels = 2;
+    private const int CoolantTemperatures = 1;
 
     // The 0x0416 handshake reply is one 64-byte command-packet frame.
     private const int HandshakeReplyLength = 64;
@@ -38,6 +41,7 @@ internal sealed class Galahad2Controller : IFanDevice {
 
     private readonly int _index;
     private readonly IDeviceTransport _transport;
+    private readonly bool _reportsCoolant;     // a Vision LCD, whose handshake reply carries the coolant
     private readonly IClock _clock;
     private readonly ILog _log;
 
@@ -47,6 +51,7 @@ internal sealed class Galahad2Controller : IFanDevice {
     private readonly DateTime[] _lastWriteUtc = { DateTime.MinValue, DateTime.MinValue };
     private readonly float?[] _rpm = new float?[2];       // last measured RPM, null until one is read
     private readonly bool[] _rpmImplausible = { false, false }; // last read rejected as garbage
+    private float? _coolant;                              // last coolant temperature, null when not measured
 
     // The transport generation this cooler was last set up under. A newer one means the transport
     // lost its handle to the device after that; the cooler needs no setup writes of its own, but a
@@ -61,9 +66,10 @@ internal sealed class Galahad2Controller : IFanDevice {
     private bool _handshakeMissing;
     private bool _handshakeAnswered;
 
-    public Galahad2Controller(int index, IDeviceTransport transport, IClock clock, ILog log) {
+    public Galahad2Controller(int index, IDeviceTransport transport, int productId, IClock clock, ILog log) {
         _index = index;
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
+        _reportsCoolant = Galahad2Protocol.ReportsCoolant(productId);
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _setUpGeneration = _transport.Generation;
@@ -92,6 +98,22 @@ internal sealed class Galahad2Controller : IFanDevice {
             $"Lian Li Galahad #{_index + 1} {role} RPM");
     }
 
+    /// <summary>
+    /// A Galahad II Vision LCD reports one temperature, the coolant's; the Trinity and the HydroShift
+    /// LCD report none, so no temperature sensor is registered for them.
+    /// </summary>
+    public int TemperatureCount => _reportsCoolant ? CoolantTemperatures : 0;
+
+    /// <summary>
+    /// The sensor identity for the coolant temperature, keyed on the controller's index like the
+    /// fan and pump and named as the HydroShift II OLED Curve names its own.
+    /// </summary>
+    public TemperatureDescriptor DescribeTemperature(int index) {
+        return new TemperatureDescriptor(
+            $"LianLi/{_index}/coolant/temp",
+            $"Lian Li Galahad #{_index + 1} Coolant");
+    }
+
     /// <inheritdoc />
     public void ReplayOnReconnect(Func<bool> replay) => _reconnectReplay.Register(replay);
 
@@ -115,6 +137,13 @@ internal sealed class Galahad2Controller : IFanDevice {
     public float? GetRpm(int channel) {
         lock (_lock) {
             return _rpm[channel];
+        }
+    }
+
+    /// <inheritdoc />
+    public float? GetTemperature(int index) {
+        lock (_lock) {
+            return _coolant;
         }
     }
 
@@ -167,10 +196,16 @@ internal sealed class Galahad2Controller : IFanDevice {
             for (int ch = 0; ch < Channels; ch++) {
                 _rpm[ch] = null;
             }
+
+            _coolant = null;
         }
     }
 
-    /// <summary>Write a handshake and decode the reply into the fan and pump RPM cache.</summary>
+    /// <summary>
+    /// Write a handshake and decode the reply into the fan and pump RPM cache and, on a Vision LCD,
+    /// the coolant temperature. A reply that answers without a coolant reading (its valid flag clear)
+    /// leaves the coolant not measured rather than at its last value.
+    /// </summary>
     public void PollRpm() {
         // Without an answer both readings stay as they were, as L-Connect leaves them.
         if (Handshake() is not byte[] reply) {
@@ -183,6 +218,9 @@ internal sealed class Galahad2Controller : IFanDevice {
         lock (_lock) {
             UpdateRpm(FanChannel, reading.FanRpm, ref transitions);
             UpdateRpm(PumpChannel, reading.PumpRpm, ref transitions);
+            if (_reportsCoolant) {
+                _coolant = reading.CoolantTemperature;
+            }
         }
 
         if (transitions != null) {
